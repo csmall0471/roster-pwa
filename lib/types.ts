@@ -55,6 +55,7 @@ export interface PlayerPhoto {
   id: string;
   user_id: string;
   player_id: string;
+  team_id: string | null;
   storage_path: string;
   public_url: string;
   team_name: string | null;

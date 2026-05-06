@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { Team } from "@/lib/types";
 import RosterTable from "../_components/RosterTable";
+import TeamCards from "./_components/TeamCards";
 
 function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
@@ -19,12 +20,38 @@ function formatDateRange(start: string | null, end: string | null) {
   return null;
 }
 
+function TabLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`px-4 py-2 text-sm -mb-px ${
+        active
+          ? "border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 font-medium"
+          : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export default async function TeamDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
+  const tab = (await searchParams).tab ?? "roster";
   const supabase = await createClient();
 
   const [{ data: team }, { data: roster }] = await Promise.all([
@@ -34,7 +61,7 @@ export default async function TeamDetailPage({
       .select(
         `id, jersey_number, status,
          players(
-           id, first_name, last_name, grade,
+           id, first_name, last_name, date_of_birth,
            player_parents(parents(id, first_name, last_name, phone, email))
          )`
       )
@@ -49,8 +76,8 @@ export default async function TeamDetailPage({
     .map((r) => (r.players as unknown as { id: string } | null)?.id)
     .filter(Boolean) as string[];
 
-  // Fetch primary photos + past seasons in parallel
-  const [{ data: photoRows }, { data: pastSeasons }] = await Promise.all([
+  // Fetch primary photos + past seasons + team cards in parallel
+  const [{ data: photoRows }, { data: pastSeasons }, { data: teamPhotos }] = await Promise.all([
     playerIds.length
       ? supabase
           .from("player_photos")
@@ -64,6 +91,11 @@ export default async function TeamDetailPage({
       .eq("name", t.name)
       .neq("id", id)
       .order("season_start", { ascending: false }),
+    supabase
+      .from("player_photos")
+      .select("*, players(id, first_name, last_name)")
+      .eq("team_id", id)
+      .order("created_at", { ascending: false }),
   ]);
 
   const primaryPhotos: Record<string, string> = {};
@@ -112,52 +144,83 @@ export default async function TeamDetailPage({
         </div>
       </div>
 
-      {/* Roster */}
-      {sorted.length === 0 ? (
-        <div className="text-center py-16 text-gray-500 dark:text-gray-400">
-          <p className="text-lg font-medium mb-1">No players on this team yet</p>
-          <Link href={`/teams/${id}/add-player`} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
-            Add players →
-          </Link>
-        </div>
-      ) : (
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        <RosterTable roster={sorted as any} teamId={id} primaryPhotos={primaryPhotos} />
+      {/* Tab nav */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-6">
+        <TabLink href={`/teams/${id}`} active={tab === "roster"}>
+          Roster
+        </TabLink>
+        <TabLink href={`/teams/${id}?tab=cards`} active={tab === "cards"}>
+          Cards {teamPhotos?.length ? `(${teamPhotos.length})` : ""}
+        </TabLink>
+      </div>
+
+      {tab === "roster" && (
+        <>
+          {sorted.length === 0 ? (
+            <div className="text-center py-16 text-gray-500 dark:text-gray-400">
+              <p className="text-lg font-medium mb-1">No players on this team yet</p>
+              <Link href={`/teams/${id}/add-player`} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+                Add players →
+              </Link>
+            </div>
+          ) : (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            <RosterTable roster={sorted as any} teamId={id} primaryPhotos={primaryPhotos} />
+          )}
+
+          {/* Past seasons of this team */}
+          {pastSeasons && pastSeasons.length > 0 && (
+            <section className="mt-10">
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+                Other {t.name} seasons
+              </h2>
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
+                {pastSeasons.map((s) => {
+                  const sDateRange = formatDateRange(s.season_start, s.season_end);
+                  const sMeta = [s.organization, s.age_group, s.season].filter(Boolean).join(" · ");
+                  return (
+                    <Link
+                      key={s.id}
+                      href={`/teams/${s.id}`}
+                      className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    >
+                      <div>
+                        {sMeta && (
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">{sMeta}</p>
+                        )}
+                        {sDateRange && (
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{sDateRange}</p>
+                        )}
+                        {!sMeta && !sDateRange && (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">Season</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-400 dark:text-gray-500">→</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </>
       )}
 
-      {/* Past seasons of this team */}
-      {pastSeasons && pastSeasons.length > 0 && (
-        <section className="mt-10">
-          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-            Other {t.name} seasons
-          </h2>
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
-            {pastSeasons.map((s) => {
-              const sDateRange = formatDateRange(s.season_start, s.season_end);
-              const sMeta = [s.organization, s.age_group, s.season].filter(Boolean).join(" · ");
-              return (
-                <Link
-                  key={s.id}
-                  href={`/teams/${s.id}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                >
-                  <div>
-                    {sMeta && (
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{sMeta}</p>
-                    )}
-                    {sDateRange && (
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{sDateRange}</p>
-                    )}
-                    {!sMeta && !sDateRange && (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Season</p>
-                    )}
-                  </div>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">→</span>
-                </Link>
-              );
-            })}
+      {tab === "cards" && (
+        <>
+          <TeamCards
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            photos={(teamPhotos ?? []) as any}
+            teamId={id}
+          />
+          <div className="mt-4">
+            <Link
+              href={`/players/upload?team=${id}`}
+              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Upload cards →
+            </Link>
           </div>
-        </section>
+        </>
       )}
     </div>
   );

@@ -74,15 +74,8 @@ export default function PlayerForm({ player, action }: Props) {
               className="input"
             />
           </div>
-          <div>
-            <label htmlFor="grade" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Grade
-            </label>
-            <select id="grade" name="grade" defaultValue={player?.grade ?? ""} className="input bg-white dark:bg-gray-900">
-              <option value="">—</option>
-              {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
-            </select>
-          </div>
+          {/* grade kept as hidden so existing data is preserved on update */}
+          <input type="hidden" name="grade" value={player?.grade ?? ""} />
           <div>
             <label htmlFor="shirt_size" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               T-shirt size

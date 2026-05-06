@@ -110,12 +110,14 @@ export async function savePlayerPhoto({
   publicUrl,
   teamName,
   season,
+  teamId,
 }: {
   playerId: string;
   storagePath: string;
   publicUrl: string;
   teamName?: string;
   season?: string;
+  teamId?: string;
 }): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -138,12 +140,38 @@ export async function savePlayerPhoto({
     team_name: teamName ?? null,
     season: season ?? null,
     is_primary: true,
+    team_id: teamId ?? null,
   });
 
   if (error) return { error: error.message };
   revalidatePath(`/players/${playerId}`);
   revalidatePath("/players");
   return {};
+}
+
+// ── Assign a photo to a team ─────────────────────────────────
+
+export async function assignPhotoToTeam(
+  photoId: string,
+  teamId: string | null,
+  playerId: string
+): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  await supabase
+    .from("player_photos")
+    .update({ team_id: teamId })
+    .eq("id", photoId)
+    .eq("user_id", user.id);
+
+  revalidatePath(`/players/${playerId}`);
+  if (teamId) {
+    revalidatePath(`/teams/${teamId}`);
+  }
 }
 
 // ── Set an existing photo as primary ─────────────────────────

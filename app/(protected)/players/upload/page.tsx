@@ -43,6 +43,7 @@ export default function UploadCardsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const presetPlayerId = searchParams.get("player"); // set when coming from a player detail page
+  const presetTeamId = searchParams.get("team");
 
   const [cards, setCards] = useState<CardState[]>([]);
   const [allPlayers, setAllPlayers] = useState<{ id: string; first_name: string; last_name: string }[]>([]);
@@ -175,6 +176,7 @@ export default function UploadCardsPage() {
       publicUrl: card.publicUrl,
       teamName: card.extraction?.team_name,
       season: card.extraction?.season,
+      teamId: presetTeamId ?? undefined,
     });
 
     if (result.error) {
@@ -202,14 +204,22 @@ export default function UploadCardsPage() {
     <div className="max-w-3xl">
       <div className="mb-6">
         <Link
-          href={presetPlayerId ? `/players/${presetPlayerId}` : "/players"}
+          href={
+            presetTeamId
+              ? `/teams/${presetTeamId}`
+              : presetPlayerId
+              ? `/players/${presetPlayerId}`
+              : "/players"
+          }
           className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
         >
           ← Back
         </Link>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mt-3">Upload season cards</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {presetPlayerId
+          {presetTeamId
+            ? "Adding cards to this team's season."
+            : presetPlayerId
             ? "Adding a card to this player."
             : "Pick multiple cards — Claude will read each name and match it to a player."}
         </p>
@@ -258,7 +268,9 @@ export default function UploadCardsPage() {
             {savedCount > 0 && (
               <button
                 onClick={() =>
-                  presetPlayerId
+                  presetTeamId
+                    ? router.push(`/teams/${presetTeamId}`)
+                    : presetPlayerId
                     ? router.push(`/players/${presetPlayerId}`)
                     : router.push("/players")
                 }

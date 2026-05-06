@@ -20,9 +20,18 @@ type RosterPlayer = {
   id: string;
   first_name: string;
   last_name: string;
-  grade: string | null;
+  date_of_birth: string | null;
   player_parents: Array<{ parents: RosterParent }>;
 };
+
+function calcAge(dob: string): number {
+  const birth = new Date(dob + "T00:00:00");
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
 
 type RosterEntry = {
   id: string;
@@ -221,8 +230,10 @@ function RosterRow({
             >
               {entry.players.first_name} {entry.players.last_name}
             </Link>
-            {entry.players.grade && (
-              <span className="text-xs text-gray-400 dark:text-gray-500">{entry.players.grade}</span>
+            {entry.players.date_of_birth && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                Age {calcAge(entry.players.date_of_birth)}
+              </span>
             )}
           </div>
 

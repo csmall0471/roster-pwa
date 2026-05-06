@@ -5,6 +5,15 @@ import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
 import PhotoGallery from "./_components/PhotoGallery";
 
+function calcAge(dob: string): number {
+  const birth = new Date(dob + "T00:00:00");
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
 export default async function PlayerDetailPage({
   params,
 }: {
@@ -87,7 +96,7 @@ export default async function PlayerDetailPage({
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {[
-              player.grade,
+              player.date_of_birth ? `Age ${calcAge(player.date_of_birth)}` : null,
               player.shirt_size ? `Size ${player.shirt_size}` : null,
               player.date_of_birth
                 ? `b. ${new Date(player.date_of_birth + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
@@ -204,7 +213,15 @@ export default async function PlayerDetailPage({
           Season cards ({photos?.length ?? 0})
         </h2>
         {photos && photos.length > 0 ? (
-          <PhotoGallery photos={photos as PlayerPhoto[]} playerId={id} />
+          <PhotoGallery
+            photos={photos as PlayerPhoto[]}
+            playerId={id}
+            playerTeams={(seasons ?? []).map((r: any) => ({
+              id: r.teams.id,
+              name: r.teams.name,
+              season: r.teams.season,
+            }))}
+          />
         ) : (
           <div className="text-center py-10 text-gray-400 dark:text-gray-500">
             <p className="text-sm">No cards yet.</p>

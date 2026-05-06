@@ -43,6 +43,15 @@ function sortValue(player: PlayerWithParents, key: SortKey): string {
   }
 }
 
+function calcAge(dob: string): number {
+  const birth = new Date(dob + "T00:00:00");
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
 // ── Component ─────────────────────────────────────────────────
 
 export default function PlayerDirectory({
@@ -58,7 +67,6 @@ export default function PlayerDirectory({
   const [query,       setQuery]       = useState("");
   const [sortIndex,   setSortIndex]   = useState(0);
   const [filterTeam,  setFilterTeam]  = useState("");
-  const [filterGrade, setFilterGrade] = useState("");
   const [filterSize,  setFilterSize]  = useState("");
   const [photoOnly,   setPhotoOnly]   = useState(false);
 
@@ -81,12 +89,6 @@ export default function PlayerDirectory({
     return [...names].sort();
   }, [players]);
 
-  const grades = useMemo(() => {
-    const vals = new Set<string>();
-    players.forEach((p) => { if (p.grade) vals.add(p.grade); });
-    return [...vals].sort();
-  }, [players]);
-
   const sizes = useMemo(() => {
     const vals = new Set<string>();
     players.forEach((p) => { if (p.shirt_size) vals.add(p.shirt_size); });
@@ -96,8 +98,7 @@ export default function PlayerDirectory({
   const sort = SORT_OPTIONS[sortIndex];
 
   const activeFilters =
-    (filterTeam ? 1 : 0) + (filterGrade ? 1 : 0) +
-    (filterSize ? 1 : 0) + (photoOnly ? 1 : 0);
+    (filterTeam ? 1 : 0) + (filterSize ? 1 : 0) + (photoOnly ? 1 : 0);
 
   // ── Filtered + sorted list ───────────────────────────────────
 
@@ -119,9 +120,8 @@ export default function PlayerDirectory({
       });
     }
 
-    if (filterTeam)  list = list.filter((p) => p.roster?.some((r) => r.teams.name === filterTeam));
-    if (filterGrade) list = list.filter((p) => p.grade === filterGrade);
-    if (filterSize)  list = list.filter((p) => p.shirt_size === filterSize);
+    if (filterTeam) list = list.filter((p) => p.roster?.some((r) => r.teams.name === filterTeam));
+    if (filterSize) list = list.filter((p) => p.shirt_size === filterSize);
     if (photoOnly)   list = list.filter((p) => !!primaryPhotos[p.id]);
 
     list.sort((a, b) => {
@@ -132,7 +132,7 @@ export default function PlayerDirectory({
     });
 
     return list;
-  }, [players, query, filterTeam, filterGrade, filterSize, photoOnly, sort, primaryPhotos]);
+  }, [players, query, filterTeam, filterSize, photoOnly, sort, primaryPhotos]);
 
   // ── Selection helpers ────────────────────────────────────────
 
@@ -259,20 +259,7 @@ export default function PlayerDirectory({
           </select>
         )}
 
-        {grades.length > 0 && (
-          <select
-            value={filterGrade}
-            onChange={(e) => setFilterGrade(e.target.value)}
-            className={`rounded-lg border px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 focus:border-blue-500 focus:outline-none ${
-              filterGrade ? "border-blue-500 text-blue-700 dark:text-blue-300 font-medium" : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
-            }`}
-          >
-            <option value="">All grades</option>
-            {grades.map((g) => <option key={g} value={g}>{g}</option>)}
-          </select>
-        )}
-
-        {sizes.length > 0 && (
+{sizes.length > 0 && (
           <select
             value={filterSize}
             onChange={(e) => setFilterSize(e.target.value)}
@@ -298,7 +285,7 @@ export default function PlayerDirectory({
 
         {activeFilters > 0 && (
           <button
-            onClick={() => { setFilterTeam(""); setFilterGrade(""); setFilterSize(""); setPhotoOnly(false); }}
+            onClick={() => { setFilterTeam(""); setFilterSize(""); setPhotoOnly(false); }}
             className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline"
           >
             Clear {activeFilters} filter{activeFilters !== 1 ? "s" : ""}
@@ -380,8 +367,10 @@ export default function PlayerDirectory({
                       >
                         {player.first_name} {player.last_name}
                       </Link>
-                      {player.grade && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">{player.grade}</span>
+                      {player.date_of_birth && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          Age {calcAge(player.date_of_birth)}
+                        </span>
                       )}
                       {player.shirt_size && (
                         <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded px-1.5 py-0.5 font-mono">
