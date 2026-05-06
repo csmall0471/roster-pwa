@@ -33,7 +33,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Unauthenticated → /login (allow the auth callback through)
-  if (!user && pathname !== "/login" && !pathname.startsWith("/auth")) {
+  if (!user && pathname !== "/login" && !pathname.startsWith("/auth") && pathname !== "/privacy" && pathname !== "/sms-terms") {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
