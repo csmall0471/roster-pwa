@@ -17,7 +17,7 @@ export default async function ParentLayout({ children }: { children: React.React
 
   if (!parentLink) redirect("/login");
 
-  const parent = parentLink.parents as { first_name: string; last_name: string } | null;
+  const parent = parentLink.parents as unknown as { first_name: string; last_name: string } | null;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
