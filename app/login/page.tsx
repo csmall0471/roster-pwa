@@ -9,6 +9,8 @@ export default function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   void searchParams;
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +29,23 @@ export default function LoginPage({
       setError(authError.message);
       setLoading(false);
     }
-    // on success the browser redirects — no need to setLoading(false)
+  }
+
+  async function handleEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const supabase = createClient();
+    const { error: authError } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    });
+    setLoading(false);
+    if (authError) {
+      setError(authError.message);
+    } else {
+      setSent(true);
+    }
   }
 
   return (
@@ -39,18 +57,68 @@ export default function LoginPage({
         </div>
 
         <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm dark:shadow-none border border-gray-200 dark:border-gray-700 p-8">
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-4">{error}</p>
-          )}
+          {sent ? (
+            <div className="text-center">
+              <div className="text-4xl mb-4">📬</div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Check your email</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                We sent a magic link to <strong>{email}</strong>. Click it to sign in.
+              </p>
+              <button
+                onClick={() => { setSent(false); setEmail(""); }}
+                className="mt-6 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Use a different email
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {error && (
+                <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950 dark:text-red-400 rounded-lg px-3 py-2">{error}</p>
+              )}
 
-          <button
-            onClick={handleGoogle}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            <GoogleIcon />
-            {loading ? "Redirecting…" : "Sign in with Google"}
-          </button>
+              {/* Google */}
+              <button
+                onClick={handleGoogle}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                <GoogleIcon />
+                {loading ? "Redirecting…" : "Sign in with Google"}
+              </button>
+
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                <span className="text-xs text-gray-400 dark:text-gray-500">or</span>
+                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+              </div>
+
+              {/* Email magic link */}
+              <form onSubmit={handleEmail} className="space-y-3">
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email address"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? "Sending…" : "Send magic link"}
+                </button>
+              </form>
+
+              <p className="text-center text-xs text-gray-400 dark:text-gray-500">
+                Google sign-in includes Gmail draft access
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
