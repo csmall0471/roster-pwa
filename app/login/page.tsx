@@ -3,16 +3,29 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
+type Method = "google" | "email" | "phone";
+
 export default function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
   void searchParams;
+  const [method, setMethod] = useState<Method>("google");
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  function reset() {
+    setError(null);
+    setOtpSent(false);
+    setEmailSent(false);
+    setOtp("");
+  }
 
   async function handleGoogle() {
     setError(null);
@@ -41,11 +54,37 @@ export default function LoginPage({
       options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
     setLoading(false);
-    if (authError) {
-      setError(authError.message);
-    } else {
-      setSent(true);
-    }
+    if (authError) setError(authError.message);
+    else setEmailSent(true);
+  }
+
+  async function handlePhoneSend(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const supabase = createClient();
+    // Normalize: strip non-digits then prepend + if missing
+    const normalized = phone.trim().startsWith("+") ? phone.trim() : `+1${phone.replace(/\D/g, "")}`;
+    const { error: authError } = await supabase.auth.signInWithOtp({ phone: normalized });
+    setLoading(false);
+    if (authError) setError(authError.message);
+    else setOtpSent(true);
+  }
+
+  async function handleOtpVerify(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const supabase = createClient();
+    const normalized = phone.trim().startsWith("+") ? phone.trim() : `+1${phone.replace(/\D/g, "")}`;
+    const { error: authError } = await supabase.auth.verifyOtp({
+      phone: normalized,
+      token: otp.trim(),
+      type: "sms",
+    });
+    setLoading(false);
+    if (authError) setError(authError.message);
+    // on success Supabase updates the session and the middleware redirects
   }
 
   return (
@@ -57,27 +96,31 @@ export default function LoginPage({
         </div>
 
         <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm dark:shadow-none border border-gray-200 dark:border-gray-700 p-8">
-          {sent ? (
-            <div className="text-center">
-              <div className="text-4xl mb-4">📬</div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Check your email</h2>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                We sent a magic link to <strong>{email}</strong>. Click it to sign in.
-              </p>
-              <button
-                onClick={() => { setSent(false); setEmail(""); }}
-                className="mt-6 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                Use a different email
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {error && (
-                <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950 dark:text-red-400 rounded-lg px-3 py-2">{error}</p>
-              )}
 
-              {/* Google */}
+          {/* Method tabs */}
+          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-sm mb-6">
+            {(["google", "email", "phone"] as Method[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMethod(m); reset(); }}
+                className={`flex-1 py-2 capitalize transition-colors ${
+                  method === m
+                    ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-medium"
+                    : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+              >
+                {m === "google" ? "Google" : m === "email" ? "Email" : "Phone"}
+              </button>
+            ))}
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950 dark:text-red-400 rounded-lg px-3 py-2 mb-4">{error}</p>
+          )}
+
+          {/* Google */}
+          {method === "google" && (
+            <div className="space-y-3">
               <button
                 onClick={handleGoogle}
                 disabled={loading}
@@ -86,15 +129,26 @@ export default function LoginPage({
                 <GoogleIcon />
                 {loading ? "Redirecting…" : "Sign in with Google"}
               </button>
+              <p className="text-center text-xs text-gray-400 dark:text-gray-500">
+                Includes Gmail draft access
+              </p>
+            </div>
+          )}
 
-              {/* Divider */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-                <span className="text-xs text-gray-400 dark:text-gray-500">or</span>
-                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+          {/* Email */}
+          {method === "email" && (
+            emailSent ? (
+              <div className="text-center">
+                <div className="text-4xl mb-3">📬</div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">Check your email</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Magic link sent to <strong>{email}</strong>
+                </p>
+                <button onClick={reset} className="mt-4 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+                  Try again
+                </button>
               </div>
-
-              {/* Email magic link */}
+            ) : (
               <form onSubmit={handleEmail} className="space-y-3">
                 <input
                   type="email"
@@ -102,23 +156,75 @@ export default function LoginPage({
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email address"
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="you@example.com"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                  className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {loading ? "Sending…" : "Send magic link"}
                 </button>
               </form>
-
-              <p className="text-center text-xs text-gray-400 dark:text-gray-500">
-                Google sign-in includes Gmail draft access
-              </p>
-            </div>
+            )
           )}
+
+          {/* Phone */}
+          {method === "phone" && (
+            otpSent ? (
+              <form onSubmit={handleOtpVerify} className="space-y-3">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Code sent to <strong>{phone}</strong>
+                </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  required
+                  autoComplete="one-time-code"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  placeholder="6-digit code"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 tracking-widest text-center text-lg font-mono"
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? "Verifying…" : "Verify code"}
+                </button>
+                <button type="button" onClick={reset} className="w-full text-sm text-gray-500 dark:text-gray-400 hover:underline">
+                  Use a different number
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handlePhoneSend} className="space-y-3">
+                <input
+                  type="tel"
+                  required
+                  autoComplete="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+1 (555) 000-0000"
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? "Sending…" : "Send code"}
+                </button>
+                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+                  US numbers auto-prefixed with +1
+                </p>
+              </form>
+            )
+          )}
+
         </div>
       </div>
     </div>
