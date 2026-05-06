@@ -2,23 +2,29 @@
 
 import { useState, useTransition, useRef, useEffect } from "react";
 import { draftMessage } from "../message-actions";
+import { createGmailDraft } from "../gmail-actions";
 
 type Recipient = { name: string; email: string | null; phone: string | null };
+type TeamContext = { name: string; organization?: string | null; season?: string | null };
 
 export default function MessageComposer({
   recipients,
   channel,
   onClose,
+  teamContext,
 }: {
   recipients: Recipient[];
   channel: "email" | "text";
   onClose: () => void;
+  teamContext?: TeamContext;
 }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [aiPrompt, setAiPrompt] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [gmailError, setGmailError] = useState<string | null>(null);
   const [drafting, startDraft] = useTransition();
+  const [sending, startSend] = useTransition();
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const emails = recipients.flatMap((r) => (r.email ? [r.email] : []));
@@ -54,11 +60,25 @@ export default function MessageComposer({
     });
   }
 
-  const gmailHref =
-    `https://mail.google.com/mail/?view=cm` +
-    `&bcc=${encodeURIComponent(emails.join(","))}` +
-    `&su=${encodeURIComponent(subject)}` +
-    `&body=${encodeURIComponent(body)}`;
+  function handleGmailDraft() {
+    setGmailError(null);
+    startSend(async () => {
+      const result = await createGmailDraft({
+        bcc: emails,
+        subject,
+        body,
+        teamName: teamContext?.name,
+        organization: teamContext?.organization,
+        season: teamContext?.season,
+      });
+      if ("error" in result) {
+        setGmailError(result.error);
+      } else {
+        window.open(result.draftUrl, "_blank", "noopener,noreferrer");
+        onClose();
+      }
+    });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40">
@@ -199,34 +219,40 @@ export default function MessageComposer({
         </div>
 
         {/* Footer actions */}
-        <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
-          <button
-            onClick={onClose}
-            className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-          >
-            Cancel
-          </button>
+        <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-800 space-y-3">
+          {gmailError && (
+            <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-lg px-3 py-2">
+              {gmailError}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <button
+              onClick={onClose}
+              className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            >
+              Cancel
+            </button>
 
-          <div className="flex gap-2">
-            {channel === "text" && (
-              <button
-                onClick={() => copy(body, "message")}
-                disabled={!body}
-                className="rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 transition-colors"
-              >
-                {copied === "message" ? "Copied!" : "Copy message"}
-              </button>
-            )}
-            {channel === "email" && emails.length > 0 && (
-              <a
-                href={gmailHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
-              >
-                Open in Gmail →
-              </a>
-            )}
+            <div className="flex gap-2">
+              {channel === "text" && (
+                <button
+                  onClick={() => copy(body, "message")}
+                  disabled={!body}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 transition-colors"
+                >
+                  {copied === "message" ? "Copied!" : "Copy message"}
+                </button>
+              )}
+              {channel === "email" && emails.length > 0 && (
+                <button
+                  onClick={handleGmailDraft}
+                  disabled={sending || !subject || !body}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {sending ? "Creating draft…" : "Create Gmail draft →"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

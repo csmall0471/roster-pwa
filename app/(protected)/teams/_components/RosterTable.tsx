@@ -46,10 +46,12 @@ export default function RosterTable({
   roster,
   teamId,
   primaryPhotos = {},
+  team,
 }: {
   roster: RosterEntry[];
   teamId: string;
   primaryPhotos?: Record<string, string>;
+  team?: { name: string; organization?: string | null; season?: string | null };
 }) {
   const [messageChannel, setMessageChannel] = useState<"email" | "text" | null>(null);
 
@@ -136,6 +138,7 @@ export default function RosterTable({
           recipients={allRecipients}
           channel={messageChannel}
           onClose={() => setMessageChannel(null)}
+          teamContext={team}
         />
       )}
     </div>

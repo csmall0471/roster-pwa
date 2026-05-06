@@ -165,7 +165,7 @@ export default async function TeamDetailPage({
             </div>
           ) : (
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            <RosterTable roster={sorted as any} teamId={id} primaryPhotos={primaryPhotos} />
+            <RosterTable roster={sorted as any} teamId={id} primaryPhotos={primaryPhotos} team={{ name: t.name, organization: t.organization, season: t.season }} />
           )}
 
           {/* Past seasons of this team */}
