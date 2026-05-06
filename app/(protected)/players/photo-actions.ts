@@ -174,6 +174,44 @@ export async function assignPhotoToTeam(
   }
 }
 
+// ── Bulk assign photos to a team ────────────────────────────
+
+export async function bulkAssignPhotosToTeam(
+  photoIds: string[],
+  teamId: string | null
+): Promise<{ error?: string }> {
+  if (!photoIds.length) return {};
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  let teamName: string | null = null;
+  let season: string | null = null;
+
+  if (teamId) {
+    const { data: team } = await supabase
+      .from("teams")
+      .select("name, season")
+      .eq("id", teamId)
+      .single();
+    teamName = team?.name ?? null;
+    season = team?.season ?? null;
+  }
+
+  const { error } = await supabase
+    .from("player_photos")
+    .update({ team_id: teamId, team_name: teamName, season })
+    .in("id", photoIds)
+    .eq("user_id", user.id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/players/cards");
+  revalidatePath("/players");
+  if (teamId) revalidatePath(`/teams/${teamId}`);
+  return {};
+}
+
 // ── Set an existing photo as primary ─────────────────────────
 
 export async function setPrimaryPhoto(photoId: string, playerId: string): Promise<void> {

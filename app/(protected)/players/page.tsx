@@ -34,6 +34,12 @@ export default async function PlayersPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Players</h1>
         <div className="flex gap-2">
           <Link
+            href="/players/cards"
+            className="rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            Manage cards
+          </Link>
+          <Link
             href="/players/upload"
             className="rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
           >
