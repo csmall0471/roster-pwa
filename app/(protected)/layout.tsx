@@ -9,11 +9,54 @@ export default async function ProtectedLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
+
+  // Check if this user is the coach (owns at least one team)
+  const { count: teamCount } = await supabase
+    .from("teams")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  const isCoach = (teamCount ?? 0) > 0;
+
+  if (!isCoach) {
+    // Check if already linked to a parent record
+    const { data: parentLink } = await supabase
+      .from("parent_auth")
+      .select("parent_id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+
+    if (parentLink) {
+      redirect("/parent");
+    }
+
+    // First sign-in: try to auto-link by matching email or phone
+    const filters: string[] = [];
+    if (user.email) filters.push(`email.eq.${user.email}`);
+    if (user.phone) filters.push(`phone.eq.${user.phone}`);
+
+    if (filters.length > 0) {
+      const { data: matched } = await supabase
+        .from("parents")
+        .select("id")
+        .or(filters.join(","))
+        .maybeSingle();
+
+      if (matched) {
+        await supabase.from("parent_auth").insert({
+          auth_user_id: user.id,
+          parent_id: matched.id,
+        });
+        redirect("/parent");
+      }
+    }
+
+    // No matching parent record found
+    redirect("/no-access");
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
@@ -28,7 +71,7 @@ export default async function ProtectedLayout({
             </Link>
           </nav>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{user.email}</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{user.email ?? user.phone}</span>
             <SignOutButton />
           </div>
         </div>

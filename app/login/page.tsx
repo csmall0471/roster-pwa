@@ -83,8 +83,11 @@ export default function LoginPage({
       type: "sms",
     });
     setLoading(false);
-    if (authError) setError(authError.message);
-    // on success Supabase updates the session and the middleware redirects
+    if (authError) {
+      setError(authError.message);
+    } else {
+      window.location.href = "/";
+    }
   }
 
   return (
