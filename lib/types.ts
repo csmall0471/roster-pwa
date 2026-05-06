@@ -8,6 +8,8 @@ export interface Team {
   organization: string | null;
   season_start: string | null;
   season_end: string | null;
+  mojo_code: string | null;
+  snack_signup_url: string | null;
   created_at: string;
 }
 

@@ -123,6 +123,40 @@ export default function TeamForm({ team, action }: Props) {
         </div>
       </div>
 
+      {/* Mojo code */}
+      <div>
+        <label htmlFor="mojo_code" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Mojo team code
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            id="mojo_code"
+            name="mojo_code"
+            defaultValue={team?.mojo_code ?? ""}
+            placeholder="e.g. W1N73R7"
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono uppercase"
+          />
+        </div>
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+          The invite code from your Mojo team link (get.mojo.sport/team-invite?code=…)
+        </p>
+      </div>
+
+      {/* Snack signup */}
+      <div>
+        <label htmlFor="snack_signup_url" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Snack signup link
+        </label>
+        <input
+          id="snack_signup_url"
+          name="snack_signup_url"
+          type="url"
+          defaultValue={team?.snack_signup_url ?? ""}
+          placeholder="https://www.signupgenius.com/…"
+          className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+
       {state?.error && (
         <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950 dark:text-red-400 rounded-lg px-3 py-2">
           {state.error}

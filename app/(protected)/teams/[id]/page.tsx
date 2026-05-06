@@ -128,7 +128,27 @@ export default async function TeamDetailPage({
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{dateRange}</p>
           )}
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+          {t.snack_signup_url && (
+            <a
+              href={t.snack_signup_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-green-300 dark:border-green-700 px-3 py-2 text-sm font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 transition-colors"
+            >
+              Snack signup →
+            </a>
+          )}
+          {t.mojo_code && (
+            <a
+              href={`https://get.mojo.sport/team-invite?code=${t.mojo_code}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-orange-300 dark:border-orange-700 px-3 py-2 text-sm font-medium text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950 transition-colors"
+            >
+              Join on Mojo →
+            </a>
+          )}
           <Link
             href={`/teams/${id}/edit`}
             className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
