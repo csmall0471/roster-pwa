@@ -54,9 +54,10 @@ export default function MessageComposer({
     });
   }
 
-  const mailtoHref =
-    `mailto:?bcc=${encodeURIComponent(emails.join(","))}` +
-    `&subject=${encodeURIComponent(subject)}` +
+  const gmailHref =
+    `https://mail.google.com/mail/?view=cm` +
+    `&bcc=${encodeURIComponent(emails.join(","))}` +
+    `&su=${encodeURIComponent(subject)}` +
     `&body=${encodeURIComponent(body)}`;
 
   return (
@@ -218,10 +219,12 @@ export default function MessageComposer({
             )}
             {channel === "email" && emails.length > 0 && (
               <a
-                href={mailtoHref}
+                href={gmailHref}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
               >
-                Open in Mail →
+                Open in Gmail →
               </a>
             )}
           </div>
