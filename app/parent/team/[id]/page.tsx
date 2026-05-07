@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 
 function formatDateRange(start: string | null, end: string | null) {
@@ -11,6 +12,68 @@ function formatDateRange(start: string | null, end: string | null) {
   if (start) return `From ${fmt(start)}`;
   if (end) return `Until ${fmt(end)}`;
   return null;
+}
+
+type RosterEntry = {
+  player_id: string;
+  first_name: string;
+  last_name: string;
+  jersey_number: number | null;
+  status: string;
+  photo_url: string | null;
+};
+
+function PlayerCard({
+  entry,
+  isMyKid,
+}: {
+  entry: RosterEntry;
+  isMyKid: boolean;
+}) {
+  const name = `${entry.first_name} ${entry.last_name}`;
+  const inner = (
+    <div className={`relative rounded-xl overflow-hidden border ${isMyKid ? "border-blue-400 dark:border-blue-500" : "border-gray-200 dark:border-gray-700"}`}>
+      <div className="relative aspect-[5/7] bg-gray-100 dark:bg-gray-800">
+        {entry.photo_url ? (
+          <Image
+            src={entry.photo_url}
+            alt={name}
+            width={200}
+            height={280}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600 text-4xl">
+            👤
+          </div>
+        )}
+        {isMyKid && (
+          <span className="absolute top-2 left-2 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+            MY KID
+          </span>
+        )}
+        {entry.jersey_number != null && (
+          <span className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full">
+            #{entry.jersey_number}
+          </span>
+        )}
+      </div>
+      <div className="px-2 py-1.5">
+        <p className={`text-xs font-medium truncate ${isMyKid ? "text-blue-600 dark:text-blue-400" : "text-gray-900 dark:text-white"}`}>
+          {name}
+        </p>
+      </div>
+    </div>
+  );
+
+  if (isMyKid) {
+    return (
+      <Link href={`/parent/player/${entry.player_id}`} className="block hover:opacity-90 transition-opacity">
+        {inner}
+      </Link>
+    );
+  }
+  return inner;
 }
 
 export default async function ParentTeamPage({
@@ -30,14 +93,12 @@ export default async function ParentTeamPage({
     .maybeSingle();
   if (!parentLink) redirect("/login");
 
-  // Get this parent's kid IDs so we can highlight them in the roster
   const { data: ppRows } = await supabase
     .from("player_parents")
     .select("player_id")
     .eq("parent_id", parentLink.parent_id);
   const myKidIds = new Set((ppRows ?? []).map((r) => r.player_id));
 
-  // Fetch team info (existing parents_read_teams policy allows this)
   const { data: team } = await supabase
     .from("teams")
     .select("*")
@@ -45,15 +106,13 @@ export default async function ParentTeamPage({
     .single();
   if (!team) notFound();
 
-  // Fetch full roster via SECURITY DEFINER function (verifies parent has kid on team)
   const { data: roster } = await supabase.rpc("get_team_roster_for_parent", {
     p_team_id: id,
   });
-  if (!roster) notFound(); // returns null if parent has no kid on this team
+  if (!roster) notFound();
 
-  type RosterEntry = { player_id: string; first_name: string; last_name: string; jersey_number: number | null; status: string };
-  const active = (roster ?? []).filter((r: RosterEntry) => r.status === "active");
-  const inactive = (roster ?? []).filter((r: RosterEntry) => r.status === "inactive");
+  const active = (roster as RosterEntry[]).filter((r) => r.status === "active");
+  const inactive = (roster as RosterEntry[]).filter((r) => r.status === "inactive");
 
   const meta = [team.organization, team.sport, team.age_group, team.season]
     .filter(Boolean).join(" · ");
@@ -65,13 +124,11 @@ export default async function ParentTeamPage({
         ← My Kids
       </Link>
 
-      {/* Header */}
       <div className="mt-3 mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{team.name}</h1>
         {meta && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{meta}</p>}
         {dateRange && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{dateRange}</p>}
 
-        {/* External links */}
         {(team.mojo_code || team.snack_signup_url) && (
           <div className="flex gap-2 mt-3 flex-wrap">
             {team.snack_signup_url && (
@@ -98,63 +155,25 @@ export default async function ParentTeamPage({
         )}
       </div>
 
-      {/* Active roster */}
       <section>
-        <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+        <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
           Roster ({active.length})
         </h2>
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
-          {active.map((entry: RosterEntry) => {
-            const isMyKid = myKidIds.has(entry.player_id);
-            const name = `${entry.first_name} ${entry.last_name}`;
-            return (
-              <div key={entry.player_id} className="flex items-center justify-between px-4 py-3 gap-4">
-                <div className="flex items-center gap-3">
-                  {entry.jersey_number != null && (
-                    <span className="text-sm font-mono text-gray-400 dark:text-gray-500 w-6 text-right shrink-0">
-                      #{entry.jersey_number}
-                    </span>
-                  )}
-                  {isMyKid ? (
-                    <Link
-                      href={`/parent/player/${entry.player_id}`}
-                      className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      {name}
-                    </Link>
-                  ) : (
-                    <span className="text-sm text-gray-900 dark:text-white">{name}</span>
-                  )}
-                  {isMyKid && (
-                    <span className="text-xs bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full font-medium">
-                      My kid
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+          {active.map((entry) => (
+            <PlayerCard key={entry.player_id} entry={entry} isMyKid={myKidIds.has(entry.player_id)} />
+          ))}
         </div>
       </section>
 
-      {/* Inactive */}
       {inactive.length > 0 && (
-        <section className="mt-6">
-          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+        <section className="mt-8">
+          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
             Inactive
           </h2>
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800 opacity-60">
-            {inactive.map((entry: RosterEntry) => (
-              <div key={entry.player_id} className="flex items-center gap-3 px-4 py-3">
-                {entry.jersey_number != null && (
-                  <span className="text-sm font-mono text-gray-400 dark:text-gray-500 w-6 text-right shrink-0">
-                    #{entry.jersey_number}
-                  </span>
-                )}
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {entry.first_name} {entry.last_name}
-                </span>
-              </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 opacity-50">
+            {inactive.map((entry) => (
+              <PlayerCard key={entry.player_id} entry={entry} isMyKid={myKidIds.has(entry.player_id)} />
             ))}
           </div>
         </section>
