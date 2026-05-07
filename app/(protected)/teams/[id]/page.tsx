@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import type { Team } from "@/lib/types";
 import RosterTable from "../_components/RosterTable";
@@ -117,9 +118,24 @@ export default async function TeamDetailPage({
 
   const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
   const dateRange = formatDateRange(t.season_start, t.season_end);
+  const teamPhotoUrl = (teamMedia ?? []).find((m) => m.is_team_photo)?.public_url ?? null;
 
   return (
     <div>
+      {/* Team photo banner */}
+      {teamPhotoUrl && (
+        <div className="relative w-full aspect-[3/1] rounded-2xl overflow-hidden mb-5 bg-gray-100 dark:bg-gray-800">
+          <Image
+            src={teamPhotoUrl}
+            alt={`${t.name} team photo`}
+            fill
+            className="object-cover"
+            priority
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
