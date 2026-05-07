@@ -93,11 +93,8 @@ export default async function ParentTeamPage({
     .maybeSingle();
   if (!parentLink) redirect("/login");
 
-  const { data: ppRows } = await supabase
-    .from("player_parents")
-    .select("player_id")
-    .eq("parent_id", parentLink.parent_id);
-  const myKidIds = new Set((ppRows ?? []).map((r) => r.player_id));
+  const { data: ppRows } = await supabase.rpc("get_my_player_ids");
+  const myKidIds = new Set((ppRows ?? []).map((r: { player_id: string }) => r.player_id));
 
   const { data: team } = await supabase
     .from("teams")

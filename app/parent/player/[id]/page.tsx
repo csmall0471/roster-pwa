@@ -32,12 +32,9 @@ export default async function ParentPlayerPage({
 
   if (!parentLink) redirect("/login");
 
-  const { data: ownership } = await supabase
-    .from("player_parents")
-    .select("player_id")
-    .eq("parent_id", parentLink.parent_id)
-    .eq("player_id", id)
-    .maybeSingle();
+  const { data: myKidRows } = await supabase.rpc("get_my_player_ids");
+  const myKidIds = new Set((myKidRows ?? []).map((r: { player_id: string }) => r.player_id));
+  const ownership = myKidIds.has(id) ? { player_id: id } : null;
 
   if (!ownership) notFound();
 

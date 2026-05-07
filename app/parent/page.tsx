@@ -25,13 +25,9 @@ export default async function ParentHomePage() {
 
   if (!parentLink) redirect("/login");
 
-  // Step 1: get player IDs for this parent
-  const { data: ppRows } = await supabase
-    .from("player_parents")
-    .select("player_id")
-    .eq("parent_id", parentLink.parent_id);
-
-  const playerIds = (ppRows ?? []).map((r) => r.player_id);
+  // Step 1: get player IDs for this parent (includes duplicate parent records sharing same phone/email)
+  const { data: ppRows } = await supabase.rpc("get_my_player_ids");
+  const playerIds = (ppRows ?? []).map((r: { player_id: string }) => r.player_id);
 
   if (playerIds.length === 0) {
     return (
