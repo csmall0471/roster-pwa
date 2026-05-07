@@ -3,6 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
+import SeasonHistory from "../_components/SeasonHistory";
 
 function calcAge(dob: string) {
   const birth = new Date(dob + "T00:00:00");
@@ -108,32 +109,8 @@ export default async function ParentPlayerPage({
           <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
             Season history
           </h2>
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
-            {(seasons as any[]).map((row, i) => {
-              const t = row.teams;
-              const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
-              return (
-                <div key={i} className="px-4 py-3 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white text-sm">{t.name}</p>
-                    {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    {row.jersey_number != null && (
-                      <span className="text-xs font-mono text-gray-500 dark:text-gray-400">#{row.jersey_number}</span>
-                    )}
-                    <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${
-                      row.status === "active"
-                        ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300"
-                        : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
-                    }`}>
-                      {row.status}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          <SeasonHistory seasons={seasons as any} />
         </section>
       )}
 
