@@ -109,12 +109,13 @@ export default function PlayerDirectory({
       const q = normalize(query);
       list = list.filter((p) => {
         if (normalize(`${p.first_name} ${p.last_name}`).includes(q)) return true;
+        const qDigits = q.replace(/\D/g, "");
         return p.player_parents.some((pp) => {
           const par = pp.parents;
           return (
             normalize(`${par.first_name} ${par.last_name}`).includes(q) ||
             (par.email ?? "").toLowerCase().includes(q) ||
-            (par.phone ?? "").replace(/\D/g, "").includes(q.replace(/\D/g, ""))
+            (qDigits.length > 0 && (par.phone ?? "").replace(/\D/g, "").includes(qDigits))
           );
         });
       });
