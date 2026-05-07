@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { Team } from "@/lib/types";
 import DeleteTeamButton from "./_components/DeleteTeamButton";
+import DuplicateTeamButton from "./_components/DuplicateTeamButton";
 
 function formatDateRange(start: string | null, end: string | null): string {
   const fmt = (d: string) =>
@@ -55,6 +56,8 @@ function TeamList({ teams }: { teams: Team[] }) {
               <Link href={`/teams/${team.id}/edit`} className="text-blue-600 hover:underline">
                 Edit
               </Link>
+              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <DuplicateTeamButton id={team.id} />
               <span className="text-gray-300 dark:text-gray-600">|</span>
               <DeleteTeamButton id={team.id} name={team.name} />
             </div>

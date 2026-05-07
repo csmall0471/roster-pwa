@@ -65,6 +65,32 @@ export async function updateTeam(
   redirect(`/teams/${id}`);
 }
 
+export async function duplicateTeam(id: string): Promise<{ error?: string; newId?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: source } = await supabase
+    .from("teams")
+    .select("name, sport, season, age_group, organization, mojo_code, snack_signup_url")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!source) return { error: "Team not found" };
+
+  const { data: created, error } = await supabase
+    .from("teams")
+    .insert({ user_id: user.id, ...source, season_start: null, season_end: null })
+    .select("id")
+    .single();
+
+  if (error || !created) return { error: error?.message ?? "Failed to duplicate" };
+
+  revalidatePath("/teams");
+  return { newId: created.id };
+}
+
 export async function deleteTeam(id: string): Promise<void> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
