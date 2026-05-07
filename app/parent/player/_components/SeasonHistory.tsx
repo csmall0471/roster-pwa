@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 type SeasonRow = {
   jersey_number: number | null;
@@ -29,7 +30,7 @@ export default function SeasonHistory({ seasons }: { seasons: SeasonRow[] }) {
         const t = row.teams;
         const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
         return (
-          <div key={i} className="px-4 py-3 flex items-center justify-between gap-4">
+          <Link key={i} href={`/parent/team/${t.id}`} className="px-4 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
             <div>
               <p className="font-medium text-gray-900 dark:text-white text-sm">{t.name}</p>
               {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
@@ -45,8 +46,9 @@ export default function SeasonHistory({ seasons }: { seasons: SeasonRow[] }) {
               }`}>
                 {row.status}
               </span>
+              <span className="text-gray-400 dark:text-gray-500">→</span>
             </div>
-          </div>
+          </Link>
         );
       })}
 
