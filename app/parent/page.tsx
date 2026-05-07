@@ -119,16 +119,19 @@ export default async function ParentHomePage() {
                     const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
                     const dateRange = formatDateRange(t.season_start, t.season_end);
                     return (
-                      <div key={i} className="px-5 py-3 flex items-center justify-between gap-4">
+                      <Link key={i} href={`/parent/team/${t.id}`} className="px-5 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                         <div>
                           <p className="text-sm font-medium text-gray-900 dark:text-white">{t.name}</p>
                           {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
                           {dateRange && <p className="text-xs text-gray-400 dark:text-gray-500">{dateRange}</p>}
                         </div>
-                        {entry.jersey_number != null && (
-                          <span className="text-sm font-mono text-gray-500 dark:text-gray-400 shrink-0">#{entry.jersey_number}</span>
-                        )}
-                      </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {entry.jersey_number != null && (
+                            <span className="text-sm font-mono text-gray-500 dark:text-gray-400">#{entry.jersey_number}</span>
+                          )}
+                          <span className="text-gray-400 dark:text-gray-500">→</span>
+                        </div>
+                      </Link>
                     );
                   })}
                 </div>
