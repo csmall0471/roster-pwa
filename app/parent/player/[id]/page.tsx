@@ -4,6 +4,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
 import SeasonHistory from "../_components/SeasonHistory";
+import PhotoCardGallery from "../_components/PhotoCardGallery";
 
 function calcAge(dob: string) {
   const birth = new Date(dob + "T00:00:00");
@@ -47,9 +48,8 @@ export default async function ParentPlayerPage({
       .single(),
     supabase
       .from("player_photos")
-      .select("*")
-      .eq("player_id", id)
-      .order("created_at", { ascending: false }),
+      .select("*, teams(season_start)")
+      .eq("player_id", id),
     supabase
       .from("roster")
       .select(`jersey_number, status, teams(id, name, sport, season, age_group, organization, season_start, season_end)`)
@@ -59,7 +59,13 @@ export default async function ParentPlayerPage({
 
   if (!player) notFound();
 
-  const primary = (photos ?? []).find((p: PlayerPhoto) => p.is_primary);
+  const sortedPhotos = [...(photos ?? [])].sort((a, b) => {
+    if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
+    const da = (a.teams as unknown as { season_start: string | null } | null)?.season_start ?? a.created_at;
+    const db = (b.teams as unknown as { season_start: string | null } | null)?.season_start ?? b.created_at;
+    return db.localeCompare(da);
+  });
+  const primary = sortedPhotos.find((p: PlayerPhoto) => p.is_primary);
 
   return (
     <div className="max-w-2xl">
@@ -115,36 +121,12 @@ export default async function ParentPlayerPage({
       )}
 
       {/* Season cards */}
-      {photos && photos.length > 0 && (
+      {sortedPhotos.length > 0 && (
         <section>
           <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-            Season cards ({photos.length})
+            Season cards ({sortedPhotos.length})
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {(photos as PlayerPhoto[]).map((photo) => (
-              <div key={photo.id} className="relative rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
-                <Image
-                  src={photo.public_url}
-                  alt={`${photo.team_name ?? ""} ${photo.season ?? ""}`.trim() || "Season card"}
-                  width={200}
-                  height={280}
-                  className="w-full object-cover aspect-[5/7]"
-                />
-                {photo.is_primary && (
-                  <span className="absolute top-2 left-2 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                    CURRENT
-                  </span>
-                )}
-                {(photo.team_name || photo.season) && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-2">
-                    <p className="text-white text-xs font-medium leading-tight">
-                      {photo.team_name}{photo.team_name && photo.season ? " · " : ""}{photo.season}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          <PhotoCardGallery photos={sortedPhotos} />
         </section>
       )}
     </div>
