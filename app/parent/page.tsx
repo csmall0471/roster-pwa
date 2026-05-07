@@ -50,7 +50,7 @@ export default async function ParentHomePage() {
       .from("roster")
       .select("player_id, jersey_number, status, teams(id, name, sport, season, age_group, organization, season_start, season_end)")
       .in("player_id", playerIds)
-      .eq("status", "active"),
+      .order("created_at", { ascending: false }),
     supabase
       .from("player_photos")
       .select("player_id, public_url")
@@ -68,6 +68,15 @@ export default async function ParentHomePage() {
     if (!rosterByPlayer[row.player_id]) rosterByPlayer[row.player_id] = [];
     rosterByPlayer[row.player_id].push(row);
   }
+  // Sort each player's teams: active first, then by season_start descending
+  for (const pid of Object.keys(rosterByPlayer)) {
+    rosterByPlayer[pid].sort((a, b) => {
+      if (a.status !== b.status) return a.status === "active" ? -1 : 1;
+      const da = a.teams?.season_start ?? "";
+      const db = b.teams?.season_start ?? "";
+      return db.localeCompare(da);
+    });
+  }
 
   return (
     <div>
@@ -76,7 +85,7 @@ export default async function ParentHomePage() {
       <div className="space-y-6">
         {(players ?? []).map((player) => {
           const photo = primaryPhotos[player.id];
-          const activeTeams = rosterByPlayer[player.id] ?? [];
+          const teamEntries = rosterByPlayer[player.id] ?? [];
 
           return (
             <div key={player.id} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -107,15 +116,16 @@ export default async function ParentHomePage() {
                 <span className="ml-auto text-gray-400 dark:text-gray-500">→</span>
               </Link>
 
-              {activeTeams.length > 0 && (
+              {teamEntries.length > 0 && (
                 <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
-                  {activeTeams.map((entry: any, i: number) => {
+                  {teamEntries.map((entry: any, i: number) => {
                     const t = entry.teams;
                     if (!t) return null;
+                    const inactive = entry.status !== "active";
                     const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
                     const dateRange = formatDateRange(t.season_start, t.season_end);
                     return (
-                      <Link key={i} href={`/parent/team/${t.id}`} className="px-5 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                      <Link key={i} href={`/parent/team/${t.id}`} className={`px-5 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${inactive ? "opacity-50" : ""}`}>
                         <div>
                           <p className="text-sm font-medium text-gray-900 dark:text-white">{t.name}</p>
                           {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
