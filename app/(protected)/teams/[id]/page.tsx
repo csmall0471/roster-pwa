@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import type { Team } from "@/lib/types";
 import RosterTable from "../_components/RosterTable";
 import TeamCards from "./_components/TeamCards";
 import TeamMedia from "./_components/TeamMedia";
+import TeamPhotoBanner from "./_components/TeamPhotoBanner";
 
 function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
@@ -124,16 +124,7 @@ export default async function TeamDetailPage({
     <div>
       {/* Team photo banner */}
       {teamPhotoUrl && (
-        <div className="relative w-full aspect-[3/1] rounded-2xl overflow-hidden mb-5 bg-gray-100 dark:bg-gray-800">
-          <Image
-            src={teamPhotoUrl}
-            alt={`${t.name} team photo`}
-            fill
-            className="object-cover"
-            priority
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
-        </div>
+        <TeamPhotoBanner src={teamPhotoUrl} alt={`${t.name} team photo`} />
       )}
 
       {/* Header */}
