@@ -34,24 +34,30 @@ export default async function ProtectedLayout({
     }
 
     // First sign-in: try to auto-link by matching email or phone
-    const filters: string[] = [];
-    if (user.email) filters.push(`email.eq.${user.email}`);
-    if (user.phone) filters.push(`phone.eq.${user.phone}`);
+    let matchedId: string | null = null;
 
-    if (filters.length > 0) {
-      const { data: matched } = await supabase
+    if (user.email) {
+      const { data } = await supabase
         .from("parents")
         .select("id")
-        .or(filters.join(","))
+        .eq("email", user.email)
         .maybeSingle();
+      matchedId = data?.id ?? null;
+    }
 
-      if (matched) {
-        await supabase.from("parent_auth").insert({
-          auth_user_id: user.id,
-          parent_id: matched.id,
-        });
-        redirect("/parent");
-      }
+    if (!matchedId && user.phone) {
+      const { data } = await supabase.rpc("match_parent_by_phone", {
+        input_phone: user.phone,
+      });
+      matchedId = data ?? null;
+    }
+
+    if (matchedId) {
+      await supabase.from("parent_auth").insert({
+        auth_user_id: user.id,
+        parent_id: matchedId,
+      });
+      redirect("/parent");
     }
 
     // No matching parent record found
