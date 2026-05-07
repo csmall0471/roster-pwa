@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Team } from "@/lib/types";
 import RosterTable from "../_components/RosterTable";
 import TeamCards from "./_components/TeamCards";
+import TeamMedia from "./_components/TeamMedia";
 
 function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
@@ -76,8 +77,8 @@ export default async function TeamDetailPage({
     .map((r) => (r.players as unknown as { id: string } | null)?.id)
     .filter(Boolean) as string[];
 
-  // Fetch primary photos + past seasons + team cards in parallel
-  const [{ data: photoRows }, { data: pastSeasons }, { data: teamPhotos }] = await Promise.all([
+  // Fetch primary photos + past seasons + team cards + team media in parallel
+  const [{ data: photoRows }, { data: pastSeasons }, { data: teamPhotos }, { data: teamMedia }] = await Promise.all([
     playerIds.length
       ? supabase
           .from("player_photos")
@@ -94,6 +95,11 @@ export default async function TeamDetailPage({
     supabase
       .from("player_photos")
       .select("*, players(id, first_name, last_name)")
+      .eq("team_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("team_media")
+      .select("id, public_url, storage_path, media_type, is_team_photo, caption")
       .eq("team_id", id)
       .order("created_at", { ascending: false }),
   ]);
@@ -172,6 +178,9 @@ export default async function TeamDetailPage({
         <TabLink href={`/teams/${id}?tab=cards`} active={tab === "cards"}>
           Cards {teamPhotos?.length ? `(${teamPhotos.length})` : ""}
         </TabLink>
+        <TabLink href={`/teams/${id}?tab=media`} active={tab === "media"}>
+          Media {teamMedia?.length ? `(${teamMedia.length})` : ""}
+        </TabLink>
       </div>
 
       {tab === "roster" && (
@@ -241,6 +250,14 @@ export default async function TeamDetailPage({
             </Link>
           </div>
         </>
+      )}
+
+      {tab === "media" && (
+        <TeamMedia
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          initialMedia={(teamMedia ?? []) as any}
+          teamId={id}
+        />
       )}
     </div>
   );
