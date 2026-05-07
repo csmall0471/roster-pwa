@@ -128,16 +128,30 @@ export default async function TeamsPage() {
             </section>
           )}
 
-          {previous.length > 0 && (
-            <section>
-              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-                Previous
-              </h2>
-              <div className="opacity-70">
-                <TeamList teams={previous} />
-              </div>
-            </section>
-          )}
+          {previous.length > 0 && (() => {
+            const byYear = new Map<string, Team[]>();
+            for (const t of previous) {
+              const year = t.season_end?.slice(0, 4) ?? t.season_start?.slice(0, 4) ?? "Unknown";
+              if (!byYear.has(year)) byYear.set(year, []);
+              byYear.get(year)!.push(t);
+            }
+            const years = [...byYear.keys()].sort((a, b) => b.localeCompare(a));
+            return (
+              <section>
+                <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+                  Previous
+                </h2>
+                <div className="opacity-70 space-y-5">
+                  {years.map((year) => (
+                    <div key={year}>
+                      <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 mb-2 pl-1">{year}</p>
+                      <TeamList teams={byYear.get(year)!} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            );
+          })()}
         </div>
       )}
     </div>
