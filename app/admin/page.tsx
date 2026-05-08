@@ -25,10 +25,11 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-orange-50 to-white dark:from-gray-950 dark:to-gray-900 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Roster Manager</h1>
+          <div className="text-5xl mb-3 select-none">🏀🏀🏀</div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Coach Connor's<br />Player Manager</h1>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Coach sign-in</p>
         </div>
 
