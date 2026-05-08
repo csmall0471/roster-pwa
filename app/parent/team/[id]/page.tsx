@@ -103,10 +103,38 @@ export default async function ParentTeamPage({
     .maybeSingle();
   if (!team) notFound();
 
-  const { data: roster } = await supabase.rpc("get_team_roster_for_parent", {
-    p_team_id: id,
+  // Query roster directly — RLS policy (parents_read_roster) allows this
+  // for all entries on teams where the parent has a kid.
+  const { data: rosterRows } = await supabase
+    .from("roster")
+    .select("player_id, jersey_number, status, players(first_name, last_name)")
+    .eq("team_id", id)
+    .order("status", { ascending: false });
+
+  // Fetch primary photos for all players on the roster
+  const allPlayerIds = (rosterRows ?? []).map((r) => r.player_id as string);
+  const { data: photoRows } = allPlayerIds.length > 0
+    ? await supabase
+        .from("player_photos")
+        .select("player_id, public_url")
+        .in("player_id", allPlayerIds)
+        .eq("is_primary", true)
+    : { data: null };
+  const photoMap = new Map(
+    (photoRows ?? []).map((p) => [p.player_id as string, p.public_url as string])
+  );
+
+  const rosterList: RosterEntry[] = (rosterRows ?? []).map((row) => {
+    const player = row.players as unknown as { first_name: string; last_name: string } | null;
+    return {
+      player_id: row.player_id as string,
+      first_name: player?.first_name ?? "",
+      last_name: player?.last_name ?? "",
+      jersey_number: (row.jersey_number as number | null) ?? null,
+      status: row.status as string,
+      photo_url: photoMap.get(row.player_id as string) ?? null,
+    };
   });
-  const rosterList = (roster ?? []) as RosterEntry[];
 
   const active = rosterList.filter((r) => r.status === "active");
   const inactive = rosterList.filter((r) => r.status === "inactive");
