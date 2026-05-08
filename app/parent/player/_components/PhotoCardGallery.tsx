@@ -11,14 +11,28 @@ type PhotoCard = {
   is_primary: boolean;
 };
 
-async function downloadPhoto(photo: PhotoCard) {
+function photoFileName(photo: PhotoCard) {
+  const label = [photo.team_name, photo.season].filter(Boolean).join("-") || "card";
+  return `${label.replace(/\s+/g, "-")}.jpg`;
+}
+
+async function fetchPhotoFile(photo: PhotoCard): Promise<File> {
   const res = await fetch(photo.public_url);
   const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+  return new File([blob], photoFileName(photo), { type: blob.type || "image/jpeg" });
+}
+
+async function savePhoto(photo: PhotoCard) {
+  const file = await fetchPhotoFile(photo);
+  if (navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ files: [file] });
+    return;
+  }
+  // Desktop fallback: browser download
+  const url = URL.createObjectURL(file);
   const a = document.createElement("a");
   a.href = url;
-  const label = [photo.team_name, photo.season].filter(Boolean).join("-") || "card";
-  a.download = `${label.replace(/\s+/g, "-")}.jpg`;
+  a.download = file.name;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -47,9 +61,18 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
 
   async function handleDownloadAll() {
     setDownloading(true);
+    try {
+      const files = await Promise.all(photos.map(fetchPhotoFile));
+      if (navigator.canShare?.({ files })) {
+        await navigator.share({ files });
+        setDownloading(false);
+        return;
+      }
+    } catch { /* cancelled or unsupported — fall through */ }
+    // Desktop fallback: download one by one
     for (const photo of photos) {
       try {
-        await downloadPhoto(photo);
+        await savePhoto(photo);
         await new Promise(r => setTimeout(r, 200));
       } catch { /* skip */ }
     }
@@ -79,7 +102,7 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
             disabled={downloading}
             className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
           >
-            {downloading ? "Downloading…" : `↓ Download all ${photos.length} card${photos.length !== 1 ? "s" : ""}`}
+            {downloading ? "Saving…" : `↓ Save all ${photos.length} card${photos.length !== 1 ? "s" : ""}`}
           </button>
         </div>
       )}
@@ -135,7 +158,7 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
               <button
                 onClick={async e => {
                   e.stopPropagation();
-                  try { await downloadPhoto(active); } catch { /* ignore */ }
+                  try { await savePhoto(active); } catch { /* ignore */ }
                 }}
                 className="text-white/70 hover:text-white text-sm px-3 py-1 rounded-lg border border-white/20 hover:border-white/40 transition-colors"
               >
