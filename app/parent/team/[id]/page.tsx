@@ -100,16 +100,16 @@ export default async function ParentTeamPage({
     .from("teams")
     .select("*")
     .eq("id", id)
-    .single();
+    .maybeSingle();
   if (!team) notFound();
 
   const { data: roster } = await supabase.rpc("get_team_roster_for_parent", {
     p_team_id: id,
   });
-  if (!roster) notFound();
+  const rosterList = (roster ?? []) as RosterEntry[];
 
-  const active = (roster as RosterEntry[]).filter((r) => r.status === "active");
-  const inactive = (roster as RosterEntry[]).filter((r) => r.status === "inactive");
+  const active = rosterList.filter((r) => r.status === "active");
+  const inactive = rosterList.filter((r) => r.status === "inactive");
 
   const meta = [team.organization, team.sport, team.age_group, team.season]
     .filter(Boolean).join(" · ");
