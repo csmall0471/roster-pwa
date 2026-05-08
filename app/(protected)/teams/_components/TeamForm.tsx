@@ -11,7 +11,7 @@ interface Props {
 }
 
 const SPORTS = ["Basketball", "Soccer", "Baseball", "Softball", "Volleyball", "Flag Football", "Lacrosse", "Other"];
-const ORGS   = ["CCV", "Jr. Suns", "Wholistic"];
+const ORGS   = ["CCV", "I9", "Jr. Suns", "Wholistic"];
 
 export default function TeamForm({ team, action }: Props) {
   const [state, formAction, pending] = useActionState(action, null);
