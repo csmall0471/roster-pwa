@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
+import TeamPhotoBanner from "./_components/TeamPhotoBanner";
 
 function formatDateRange(start: string | null, end: string | null) {
   const fmt = (d: string) =>
@@ -96,12 +97,13 @@ export default async function ParentTeamPage({
   const { data: ppRows } = await supabase.rpc("get_my_player_ids");
   const myKidIds = new Set((ppRows ?? []).map((r: { player_id: string }) => r.player_id));
 
-  const { data: team } = await supabase
-    .from("teams")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
+  const [{ data: team }, { data: teamMedia }] = await Promise.all([
+    supabase.from("teams").select("*").eq("id", id).maybeSingle(),
+    supabase.from("team_media").select("public_url, is_team_photo").eq("team_id", id),
+  ]);
   if (!team) notFound();
+
+  const teamPhotoUrl = (teamMedia ?? []).find((m) => m.is_team_photo)?.public_url ?? null;
 
   // Query roster directly — RLS policy (parents_read_roster) allows this
   // for all entries on teams where the parent has a kid.
@@ -148,6 +150,10 @@ export default async function ParentTeamPage({
       <Link href="/parent" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
         ← My Kids
       </Link>
+
+      {teamPhotoUrl && (
+        <TeamPhotoBanner src={teamPhotoUrl} alt={`${team.name} team photo`} />
+      )}
 
       <div className="mt-3 mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{team.name}</h1>
