@@ -113,18 +113,33 @@ export default async function ParentTeamPage({
     .eq("team_id", id)
     .order("status", { ascending: false });
 
-  // Fetch primary photos for all players on the roster
+  // Fetch each player's card for this specific team/season
   const allPlayerIds = (rosterRows ?? []).map((r) => r.player_id as string);
   const { data: photoRows } = allPlayerIds.length > 0
     ? await supabase
         .from("player_photos")
         .select("player_id, public_url")
         .in("player_id", allPlayerIds)
+        .eq("team_id", id)
+    : { data: null };
+  // Fall back to primary photo for any player without a season-specific card
+  const { data: primaryPhotoRows } = allPlayerIds.length > 0
+    ? await supabase
+        .from("player_photos")
+        .select("player_id, public_url")
+        .in("player_id", allPlayerIds)
         .eq("is_primary", true)
     : { data: null };
+  const primaryMap = new Map(
+    (primaryPhotoRows ?? []).map((p) => [p.player_id as string, p.public_url as string])
+  );
   const photoMap = new Map(
     (photoRows ?? []).map((p) => [p.player_id as string, p.public_url as string])
   );
+  // Merge: season-specific card takes priority, fall back to primary
+  for (const [pid, url] of primaryMap) {
+    if (!photoMap.has(pid)) photoMap.set(pid, url);
+  }
 
   const rosterList: RosterEntry[] = (rosterRows ?? []).map((row) => {
     const player = row.players as unknown as { first_name: string; last_name: string } | null;
