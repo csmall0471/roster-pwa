@@ -33,14 +33,14 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Unauthenticated → /login (allow the auth callback through)
-  if (!user && pathname !== "/login" && !pathname.startsWith("/auth") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/no-access" && pathname !== "/house") {
+  if (!user && pathname !== "/login" && pathname !== "/admin" && !pathname.startsWith("/auth") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/no-access" && pathname !== "/house") {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // Already authenticated → skip login page
-  if (user && pathname === "/login") {
+  // Already authenticated → skip login/admin pages
+  if (user && (pathname === "/login" || pathname === "/admin")) {
     const url = request.nextUrl.clone();
     url.pathname = "/teams";
     return NextResponse.redirect(url);
