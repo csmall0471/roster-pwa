@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 
 type PhotoCard = {
@@ -11,16 +11,85 @@ type PhotoCard = {
   is_primary: boolean;
 };
 
+async function downloadPhoto(photo: PhotoCard) {
+  const res = await fetch(photo.public_url);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const label = [photo.team_name, photo.season].filter(Boolean).join("-") || "card";
+  a.download = `${label.replace(/\s+/g, "-")}.jpg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
-  const [active, setActive] = useState<PhotoCard | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const touchStartX = useRef<number | null>(null);
+
+  const close = useCallback(() => setActiveIndex(null), []);
+  const prev = useCallback(() => setActiveIndex(i => i !== null ? (i - 1 + photos.length) % photos.length : null), [photos.length]);
+  const next = useCallback(() => setActiveIndex(i => i !== null ? (i + 1) % photos.length : null), [photos.length]);
+
+  useEffect(() => {
+    if (activeIndex === null) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "ArrowLeft")  prev();
+      if (e.key === "ArrowRight") next();
+      if (e.key === "Escape")     close();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeIndex, prev, next, close]);
+
+  async function handleDownloadAll() {
+    setDownloading(true);
+    for (const photo of photos) {
+      try {
+        await downloadPhoto(photo);
+        await new Promise(r => setTimeout(r, 200));
+      } catch { /* skip */ }
+    }
+    setDownloading(false);
+  }
+
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0].clientX;
+  }
+
+  function onTouchEnd(e: React.TouchEvent) {
+    if (touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) > 50) dx < 0 ? next() : prev();
+    touchStartX.current = null;
+  }
+
+  const active = activeIndex !== null ? photos[activeIndex] : null;
 
   return (
     <>
+      {/* Download all */}
+      {photos.length > 0 && (
+        <div className="mb-3">
+          <button
+            onClick={handleDownloadAll}
+            disabled={downloading}
+            className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+          >
+            {downloading ? "Downloading…" : `↓ Download all ${photos.length} card${photos.length !== 1 ? "s" : ""}`}
+          </button>
+        </div>
+      )}
+
+      {/* Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {photos.map((photo) => (
+        {photos.map((photo, i) => (
           <button
             key={photo.id}
-            onClick={() => setActive(photo)}
+            onClick={() => setActiveIndex(i)}
             className="relative rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 cursor-zoom-in hover:opacity-90 transition-opacity text-left"
           >
             <Image
@@ -46,35 +115,98 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
         ))}
       </div>
 
-      {active && (
+      {/* Fullscreen carousel */}
+      {active !== null && activeIndex !== null && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
-          onClick={() => setActive(null)}
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+          onClick={close}
         >
-          <button
-            className="absolute top-4 right-4 text-white/70 hover:text-white text-3xl leading-none"
-            onClick={() => setActive(null)}
-            aria-label="Close"
-          >
-            ×
-          </button>
+          {/* Header bar */}
           <div
-            className="relative max-h-[90vh] flex flex-col items-center gap-3"
-            onClick={(e) => e.stopPropagation()}
+            className="flex items-center justify-between px-4 py-3 shrink-0"
+            onClick={e => e.stopPropagation()}
+          >
+            <span className="text-white/50 text-sm tabular-nums">
+              {activeIndex + 1} / {photos.length}
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={async e => {
+                  e.stopPropagation();
+                  try { await downloadPhoto(active); } catch { /* ignore */ }
+                }}
+                className="text-white/70 hover:text-white text-sm px-3 py-1 rounded-lg border border-white/20 hover:border-white/40 transition-colors"
+              >
+                ↓ Save
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); close(); }}
+                className="text-white/70 hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          {/* Image */}
+          <div
+            className="flex-1 flex items-center justify-center px-14 min-h-0"
+            onClick={e => e.stopPropagation()}
           >
             <Image
               src={active.public_url}
               alt={`${active.team_name ?? ""} ${active.season ?? ""}`.trim() || "Season card"}
               width={600}
               height={840}
-              className="max-h-[80vh] w-auto object-contain rounded-xl"
+              className="w-auto object-contain rounded-xl"
+              style={{ maxHeight: "calc(100vh - 140px)" }}
             />
-            {(active.team_name || active.season) && (
-              <p className="text-white/80 text-sm">
+          </div>
+
+          {/* Caption */}
+          {(active.team_name || active.season) && (
+            <div className="text-center py-2 shrink-0" onClick={e => e.stopPropagation()}>
+              <p className="text-white/60 text-sm">
                 {active.team_name}{active.team_name && active.season ? " · " : ""}{active.season}
               </p>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Dot indicators */}
+          {photos.length > 1 && (
+            <div className="flex justify-center gap-1.5 pb-4 shrink-0" onClick={e => e.stopPropagation()}>
+              {photos.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setActiveIndex(i)}
+                  className={`rounded-full transition-all ${i === activeIndex ? "w-4 h-1.5 bg-white" : "w-1.5 h-1.5 bg-white/30"}`}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Prev / Next arrows */}
+          {photos.length > 1 && (
+            <>
+              <button
+                onClick={e => { e.stopPropagation(); prev(); }}
+                className="absolute left-1 top-1/2 -translate-y-1/2 text-white/60 hover:text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                aria-label="Previous"
+              >
+                ‹
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); next(); }}
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-white/60 hover:text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                aria-label="Next"
+              >
+                ›
+              </button>
+            </>
+          )}
         </div>
       )}
     </>
