@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import InstallBanner from "./_components/InstallBanner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,12 +15,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Roster Manager",
+  title: "Coach Connor's Player Manager",
   description: "Youth sports team roster management",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Roster",
+    title: "Player Manager",
+  },
+  icons: {
+    apple: "/apple-touch-icon.png",
   },
 };
 
@@ -35,6 +39,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         {children}
+        <InstallBanner />
         <Analytics />
       </body>
     </html>

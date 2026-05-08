@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Roster Manager",
-    short_name: "Roster",
+    name: "Coach Connor's Player Manager",
+    short_name: "Player Manager",
     description: "Youth sports team roster management",
     start_url: "/",
     display: "standalone",
