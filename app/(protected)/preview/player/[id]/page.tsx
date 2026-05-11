@@ -55,10 +55,8 @@ export default async function PreviewPlayerPage({
   });
   const primary = sortedPhotos.find((p: PlayerPhoto) => p.is_primary);
 
-  const makeTeamHref = (teamId: string) =>
-    rawPhone
-      ? `/preview/team/${teamId}?phone=${encodeURIComponent(rawPhone)}`
-      : `/preview/team/${teamId}`;
+  const teamBasePath   = "/preview/team";
+  const teamLinkSuffix = rawPhone ? `?phone=${encodeURIComponent(rawPhone)}` : "";
 
   return (
     <div className="max-w-2xl">
@@ -109,7 +107,7 @@ export default async function PreviewPlayerPage({
             Season history
           </h2>
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          <SeasonHistory seasons={seasons as any} makeTeamHref={makeTeamHref} />
+          <SeasonHistory seasons={seasons as any} teamBasePath={teamBasePath} teamLinkSuffix={teamLinkSuffix} />
         </section>
       )}
 
