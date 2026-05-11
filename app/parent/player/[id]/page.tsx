@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
 import SeasonHistory from "../_components/SeasonHistory";
 import PhotoCardGallery from "../_components/PhotoCardGallery";
+import EligibilityBar from "../../_components/EligibilityBar";
 
 function calcAge(dob: string) {
   const birth = new Date(dob + "T00:00:00");
@@ -59,6 +60,12 @@ export default async function ParentPlayerPage({
 
   if (!player) notFound();
 
+  const hasCcvFootball = (seasons ?? []).some(
+    (s: any) =>
+      s.teams?.organization === "CCV" &&
+      s.teams?.sport?.toLowerCase().includes("football")
+  );
+
   const sortedPhotos = [...(photos ?? [])].sort((a, b) => {
     if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
     const da = (a.teams as unknown as { season_start: string | null } | null)?.season_start ?? a.created_at;
@@ -108,6 +115,16 @@ export default async function ParentPlayerPage({
           )}
         </div>
       </div>
+
+      {hasCcvFootball && (
+        <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <EligibilityBar
+            playerId={player.id}
+            dob={player.date_of_birth ?? null}
+            playerName={`${player.first_name} ${player.last_name}`}
+          />
+        </div>
+      )}
 
       {/* Season history */}
       {seasons && seasons.length > 0 && (

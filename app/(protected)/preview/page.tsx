@@ -4,6 +4,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import PhoneForm from "./_components/PhoneForm";
 import PreviewBanner from "./_components/PreviewBanner";
+import EligibilityBar from "@/app/parent/_components/EligibilityBar";
 
 function playerHref(id: string, phone: string) {
   return `/preview/player/${id}?phone=${encodeURIComponent(phone)}`;
@@ -141,6 +142,11 @@ export default async function PreviewPage({
         {(players ?? []).map((player) => {
           const photo = primaryPhotos[player.id];
           const teamEntries = rosterByPlayer[player.id] ?? [];
+          const hasCcvFootball = teamEntries.some(
+            (e: any) =>
+              e.teams?.organization === "CCV" &&
+              e.teams?.sport?.toLowerCase().includes("football")
+          );
           return (
             <div key={player.id} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
               <Link href={playerHref(player.id, rawPhone)} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
@@ -168,6 +174,14 @@ export default async function PreviewPage({
                 </div>
                 <span className="ml-auto text-gray-400 dark:text-gray-500">→</span>
               </Link>
+
+              {hasCcvFootball && (
+                <EligibilityBar
+                  playerId={player.id}
+                  dob={player.date_of_birth ?? null}
+                  playerName={`${player.first_name} ${player.last_name}`}
+                />
+              )}
 
               {teamEntries.length > 0 && (
                 <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">

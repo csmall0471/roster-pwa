@@ -88,6 +88,12 @@ export default async function ParentHomePage() {
           const photo = primaryPhotos[player.id];
           const teamEntries = rosterByPlayer[player.id] ?? [];
 
+          const hasCcvFootball = (rosterByPlayer[player.id] ?? []).some(
+            (e: any) =>
+              e.teams?.organization === "CCV" &&
+              e.teams?.sport?.toLowerCase().includes("football")
+          );
+
           return (
             <div key={player.id} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
               <Link href={`/parent/player/${player.id}`} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
@@ -117,7 +123,13 @@ export default async function ParentHomePage() {
                 <span className="ml-auto text-gray-400 dark:text-gray-500">→</span>
               </Link>
 
-              <EligibilityBar playerId={player.id} dob={player.date_of_birth ?? null} />
+              {hasCcvFootball && (
+                <EligibilityBar
+                  playerId={player.id}
+                  dob={player.date_of_birth ?? null}
+                  playerName={`${player.first_name} ${player.last_name}`}
+                />
+              )}
 
               {teamEntries.length > 0 && (
                 <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
