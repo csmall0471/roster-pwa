@@ -65,6 +65,11 @@ export default function EligibilityBar({
               eligible for the{" "}
               <strong className="text-green-700 dark:text-green-400">{div} division</strong>.
             </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 pt-1 border-t border-green-100 dark:border-green-900/30">
+              <strong className="text-gray-700 dark:text-gray-300">Playing up:</strong> Players may
+              choose to play up one division (e.g., {div} → {`${Math.ceil(age / 2) * 2 + 2}U`}) if
+              they prefer a greater challenge. Playing down to a younger division is not permitted.
+            </p>
           </div>
         )}
       </div>
