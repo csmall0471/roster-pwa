@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
+import EligibilityBar from "./_components/EligibilityBar";
 
 function formatDateRange(start: string | null, end: string | null) {
   const fmt = (d: string) =>
@@ -115,6 +116,8 @@ export default async function ParentHomePage() {
                 </div>
                 <span className="ml-auto text-gray-400 dark:text-gray-500">→</span>
               </Link>
+
+              <EligibilityBar playerId={player.id} dob={player.date_of_birth ?? null} />
 
               {teamEntries.length > 0 && (
                 <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
