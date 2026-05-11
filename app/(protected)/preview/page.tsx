@@ -3,6 +3,14 @@ import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import PhoneForm from "./_components/PhoneForm";
+import PreviewBanner from "./_components/PreviewBanner";
+
+function playerHref(id: string, phone: string) {
+  return `/preview/player/${id}?phone=${encodeURIComponent(phone)}`;
+}
+function teamHref(id: string, phone: string) {
+  return `/preview/team/${id}?phone=${encodeURIComponent(phone)}`;
+}
 
 function formatDateRange(start: string | null, end: string | null) {
   const fmt = (d: string) =>
@@ -81,7 +89,7 @@ export default async function PreviewPage({
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">View as Parent</h1>
         <PhoneForm defaultPhone={rawPhone} />
-        <PreviewBanner phone={rawPhone} name={parentNames} />
+        <div className="mt-4"><PreviewBanner phone={rawPhone} name={parentNames} /></div>
         <p className="mt-4 text-sm text-gray-500">No players linked to this parent.</p>
       </div>
     );
@@ -126,7 +134,7 @@ export default async function PreviewPage({
     <div>
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">View as Parent</h1>
       <PhoneForm defaultPhone={rawPhone} />
-      <PreviewBanner phone={rawPhone} name={parentNames} />
+      <div className="mt-4"><PreviewBanner phone={rawPhone} name={parentNames} /></div>
 
       {/* ── Same UI as parent home page ── */}
       <div className="space-y-6 mt-6">
@@ -135,7 +143,7 @@ export default async function PreviewPage({
           const teamEntries = rosterByPlayer[player.id] ?? [];
           return (
             <div key={player.id} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <div className="flex items-center gap-4 px-5 py-4">
+              <Link href={playerHref(player.id, rawPhone)} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                 {photo ? (
                   <Image
                     src={photo}
@@ -158,7 +166,8 @@ export default async function PreviewPage({
                     </p>
                   )}
                 </div>
-              </div>
+                <span className="ml-auto text-gray-400 dark:text-gray-500">→</span>
+              </Link>
 
               {teamEntries.length > 0 && (
                 <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
@@ -169,18 +178,19 @@ export default async function PreviewPage({
                     const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
                     const dateRange = formatDateRange(t.season_start, t.season_end);
                     return (
-                      <div key={i} className={`px-5 py-3 flex items-center justify-between gap-4 ${inactive ? "opacity-50" : ""}`}>
+                      <Link key={i} href={teamHref(t.id, rawPhone)} className={`px-5 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${inactive ? "opacity-50" : ""}`}>
                         <div>
                           <p className="text-sm font-medium text-gray-900 dark:text-white">{t.name}</p>
                           {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
                           {dateRange && <p className="text-xs text-gray-400 dark:text-gray-500">{dateRange}</p>}
                         </div>
-                        {entry.jersey_number != null && (
-                          <span className="text-sm font-mono text-gray-500 dark:text-gray-400 shrink-0">
-                            #{entry.jersey_number}
-                          </span>
-                        )}
-                      </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {entry.jersey_number != null && (
+                            <span className="text-sm font-mono text-gray-500 dark:text-gray-400">#{entry.jersey_number}</span>
+                          )}
+                          <span className="text-gray-400 dark:text-gray-500">→</span>
+                        </div>
+                      </Link>
                     );
                   })}
                 </div>
@@ -193,16 +203,3 @@ export default async function PreviewPage({
   );
 }
 
-function PreviewBanner({ phone, name }: { phone: string; name: string }) {
-  return (
-    <div className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-4 py-3">
-      <span className="text-amber-500 text-lg leading-none mt-0.5">👁</span>
-      <div className="text-sm">
-        <span className="font-semibold text-amber-800 dark:text-amber-300">Preview mode — </span>
-        <span className="text-amber-700 dark:text-amber-400">
-          Viewing as <strong>{name}</strong> ({phone})
-        </span>
-      </div>
-    </div>
-  );
-}

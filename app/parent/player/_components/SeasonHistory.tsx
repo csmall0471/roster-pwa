@@ -18,7 +18,13 @@ type SeasonRow = {
 
 const INITIAL_LIMIT = 3;
 
-export default function SeasonHistory({ seasons }: { seasons: SeasonRow[] }) {
+export default function SeasonHistory({
+  seasons,
+  makeTeamHref = (id: string) => `/parent/team/${id}`,
+}: {
+  seasons: SeasonRow[];
+  makeTeamHref?: (id: string) => string;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   const visible = expanded ? seasons : seasons.slice(0, INITIAL_LIMIT);
@@ -30,7 +36,7 @@ export default function SeasonHistory({ seasons }: { seasons: SeasonRow[] }) {
         const t = row.teams;
         const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
         return (
-          <Link key={i} href={`/parent/team/${t.id}`} className="px-4 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+          <Link key={i} href={makeTeamHref(t.id)} className="px-4 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
             <div>
               <p className="font-medium text-gray-900 dark:text-white text-sm">{t.name}</p>
               {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
