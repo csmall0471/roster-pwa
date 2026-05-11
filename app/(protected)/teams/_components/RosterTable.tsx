@@ -33,6 +33,20 @@ function calcAge(dob: string): number {
   return age;
 }
 
+const ELIGIBILITY_CUTOFF = new Date("2026-08-01T00:00:00");
+
+function ageOnCutoff(dob: string): number {
+  const birth = new Date(dob + "T00:00:00");
+  let age = ELIGIBILITY_CUTOFF.getFullYear() - birth.getFullYear();
+  const m = ELIGIBILITY_CUTOFF.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && ELIGIBILITY_CUTOFF.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+function division(age: number): string {
+  return `${Math.ceil(age / 2) * 2}U`;
+}
+
 type RosterEntry = {
   id: string;
   jersey_number: number | null;
@@ -51,9 +65,13 @@ export default function RosterTable({
   roster: RosterEntry[];
   teamId: string;
   primaryPhotos?: Record<string, string>;
-  team?: { name: string; organization?: string | null; season?: string | null };
+  team?: { name: string; organization?: string | null; season?: string | null; sport?: string | null };
 }) {
   const [messageChannel, setMessageChannel] = useState<"email" | "text" | null>(null);
+
+  const isCcvFootball =
+    team?.organization === "CCV" &&
+    (team?.sport?.toLowerCase().includes("football") ?? false);
 
   const active   = roster.filter((r) => r.status === "active");
   const inactive = roster.filter((r) => r.status === "inactive");
@@ -109,6 +127,7 @@ export default function RosterTable({
             entry={entry}
             teamId={teamId}
             photoUrl={primaryPhotos[entry.players.id]}
+            showEligibility={isCcvFootball}
           />
         ))}
       </div>
@@ -126,6 +145,7 @@ export default function RosterTable({
                 entry={entry}
                 teamId={teamId}
                 photoUrl={primaryPhotos[entry.players.id]}
+                showEligibility={isCcvFootball}
               />
             ))}
           </div>
@@ -151,10 +171,12 @@ function RosterRow({
   entry,
   teamId,
   photoUrl,
+  showEligibility = false,
 }: {
   entry: RosterEntry;
   teamId: string;
   photoUrl?: string;
+  showEligibility?: boolean;
 }) {
   const [jersey, setJersey] = useState(entry.jersey_number?.toString() ?? "");
   const [status, setStatus] = useState<"active" | "inactive">(
@@ -237,6 +259,17 @@ function RosterRow({
               <span className="text-xs text-gray-400 dark:text-gray-500">
                 Age {calcAge(entry.players.date_of_birth)}
               </span>
+            )}
+            {showEligibility && (
+              entry.players.date_of_birth ? (
+                <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300">
+                  {division(ageOnCutoff(entry.players.date_of_birth))} eligible
+                </span>
+              ) : (
+                <span className="text-xs font-medium rounded-full px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300">
+                  No DOB
+                </span>
+              )
             )}
           </div>
 
