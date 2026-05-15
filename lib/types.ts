@@ -10,6 +10,8 @@ export interface Team {
   season_end: string | null;
   mojo_code: string | null;
   snack_signup_url: string | null;
+  snack_signup_enabled: boolean;
+  snack_slots_per_game: number;
   created_at: string;
 }
 

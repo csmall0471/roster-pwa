@@ -6,6 +6,7 @@ import RosterTable from "../_components/RosterTable";
 import TeamCards from "./_components/TeamCards";
 import TeamMedia from "./_components/TeamMedia";
 import TeamPhotoBanner from "./_components/TeamPhotoBanner";
+import ScheduleTab, { type GameRow } from "./_components/ScheduleTab";
 
 function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
@@ -78,8 +79,8 @@ export default async function TeamDetailPage({
     .map((r) => (r.players as unknown as { id: string } | null)?.id)
     .filter(Boolean) as string[];
 
-  // Fetch primary photos + past seasons + team cards + team media in parallel
-  const [{ data: photoRows }, { data: pastSeasons }, { data: teamPhotos }, { data: teamMedia }] = await Promise.all([
+  // Fetch primary photos + past seasons + team cards + team media + games in parallel
+  const [{ data: photoRows }, { data: pastSeasons }, { data: teamPhotos }, { data: teamMedia }, { data: gamesRaw }] = await Promise.all([
     playerIds.length
       ? supabase
           .from("player_photos")
@@ -103,6 +104,12 @@ export default async function TeamDetailPage({
       .select("id, public_url, storage_path, media_type, is_team_photo, caption")
       .eq("team_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("games")
+      .select(`id, game_date, game_time, opponent, location, is_home, notes,
+               snack_signups(id, parent_id, slot_number, parents(first_name, last_name))`)
+      .eq("team_id", id)
+      .order("game_date", { ascending: true }),
   ]);
 
   const primaryPhotos: Record<string, string> = {};
@@ -182,6 +189,9 @@ export default async function TeamDetailPage({
         <TabLink href={`/teams/${id}`} active={tab === "roster"}>
           Roster
         </TabLink>
+        <TabLink href={`/teams/${id}?tab=schedule`} active={tab === "schedule"}>
+          Schedule {gamesRaw?.length ? `(${gamesRaw.length})` : ""}
+        </TabLink>
         <TabLink href={`/teams/${id}?tab=cards`} active={tab === "cards"}>
           Cards {teamPhotos?.length ? `(${teamPhotos.length})` : ""}
         </TabLink>
@@ -239,6 +249,16 @@ export default async function TeamDetailPage({
             </section>
           )}
         </>
+      )}
+
+      {tab === "schedule" && (
+        <ScheduleTab
+          teamId={id}
+          initialGames={(gamesRaw ?? []) as unknown as GameRow[]}
+          snackEnabled={t.snack_signup_enabled ?? false}
+          slotsPerGame={t.snack_slots_per_game ?? 1}
+          rosterCount={sorted.length}
+        />
       )}
 
       {tab === "cards" && (

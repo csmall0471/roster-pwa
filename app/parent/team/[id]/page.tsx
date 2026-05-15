@@ -3,6 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import TeamPhotoBanner from "./_components/TeamPhotoBanner";
+import SnackSchedule, { type SnackGameRow } from "./_components/SnackSchedule";
 
 function formatDateRange(start: string | null, end: string | null) {
   const fmt = (d: string) =>
@@ -93,13 +94,21 @@ export default async function ParentTeamPage({
     .eq("auth_user_id", user.id)
     .maybeSingle();
   if (!parentLink) redirect("/login");
+  const parentId = parentLink.parent_id;
 
   const { data: ppRows } = await supabase.rpc("get_my_player_ids");
   const myKidIds = new Set((ppRows ?? []).map((r: { player_id: string }) => r.player_id));
 
-  const [{ data: team }, { data: teamMedia }] = await Promise.all([
+  const [{ data: team }, { data: teamMedia }, { data: gamesRaw }] = await Promise.all([
     supabase.from("teams").select("*").eq("id", id).maybeSingle(),
     supabase.from("team_media").select("public_url, is_team_photo").eq("team_id", id),
+    supabase
+      .from("games")
+      .select(`id, game_date, game_time, opponent, location, is_home, notes,
+               snack_signups(id, parent_id, slot_number, reminder_email, reminder_sms,
+                             parents(first_name, last_name))`)
+      .eq("team_id", id)
+      .order("game_date", { ascending: true }),
   ]);
   if (!team) notFound();
 
@@ -223,6 +232,15 @@ export default async function ParentTeamPage({
             ))}
           </div>
         </section>
+      )}
+
+      {team.snack_signup_enabled && (gamesRaw?.length ?? 0) > 0 && (
+        <SnackSchedule
+          initialGames={(gamesRaw ?? []) as unknown as SnackGameRow[]}
+          slotsPerGame={team.snack_slots_per_game ?? 1}
+          parentId={parentId}
+          teamName={team.name}
+        />
       )}
     </div>
   );
