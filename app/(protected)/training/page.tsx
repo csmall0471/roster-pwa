@@ -1,12 +1,12 @@
 import { createClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
-import SessionList, { type TrainingSession } from "./_components/SessionList"
+import SessionList, { type TrainingSession, type PlayerOption } from "./_components/SessionList"
 import type { TeamOption } from "./_components/RuleBuilder"
 
 export default async function TrainingPage() {
   const supabase = await createClient()
 
-  const [{ data: sessionsRaw }, { data: teamsRaw }] = await Promise.all([
+  const [{ data: sessionsRaw }, { data: teamsRaw }, { data: playersRaw }] = await Promise.all([
     supabase
       .from("training_sessions")
       .select(`
@@ -14,7 +14,7 @@ export default async function TrainingPage() {
         session_end_time, max_players, payment_amount, payment_methods,
         eligibility_rules, notes,
         training_signups(
-          id, payment_method,
+          id, player_id, payment_method,
           players(first_name, last_name),
           parents(first_name, last_name)
         )
@@ -24,6 +24,10 @@ export default async function TrainingPage() {
       .from("teams")
       .select("id, name")
       .order("name", { ascending: true }),
+    supabase
+      .from("players")
+      .select("id, first_name, last_name")
+      .order("last_name", { ascending: true }),
   ])
 
   const sessions: TrainingSession[] = (sessionsRaw ?? []).map((s: any) => ({
@@ -47,6 +51,12 @@ export default async function TrainingPage() {
     name: t.name,
   }))
 
+  const players: PlayerOption[] = (playersRaw ?? []).map((p: any) => ({
+    id:         p.id,
+    first_name: p.first_name,
+    last_name:  p.last_name,
+  }))
+
   return (
     <div>
       <div className="mb-6">
@@ -55,7 +65,7 @@ export default async function TrainingPage() {
           Create sessions, set eligibility rules, and track signups.
         </p>
       </div>
-      <SessionList initialSessions={sessions} teams={teams} />
+      <SessionList initialSessions={sessions} teams={teams} players={players} />
     </div>
   )
 }

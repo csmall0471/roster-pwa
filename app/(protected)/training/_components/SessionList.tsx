@@ -1,13 +1,15 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { createTrainingSession, updateTrainingSession, deleteTrainingSession } from "../actions"
+import { createTrainingSession, updateTrainingSession, deleteTrainingSession, adminAddTrainingSignup, adminRemoveTrainingSignup } from "../actions"
 import type { SessionData, PaymentMethod } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
 import RuleBuilder, { type TeamOption } from "./RuleBuilder"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+export type PlayerOption = { id: string; first_name: string; last_name: string }
 
 export type TrainingSession = {
   id:                string
@@ -24,6 +26,7 @@ export type TrainingSession = {
   notes:             string | null
   signups: Array<{
     id:             string
+    player_id:      string
     payment_method: string | null
     players: { first_name: string; last_name: string } | null
     parents: { first_name: string; last_name: string } | null
@@ -80,10 +83,11 @@ function isPast(dateStr: string) {
 // ── SessionList ───────────────────────────────────────────────────────────────
 
 export default function SessionList({
-  initialSessions, teams,
+  initialSessions, teams, players,
 }: {
   initialSessions: TrainingSession[]
-  teams: TeamOption[]
+  teams:           TeamOption[]
+  players:         PlayerOption[]
 }) {
   const [sessions, setSessions] = useState(initialSessions)
   const [adding, setAdding]     = useState(false)
@@ -445,11 +449,14 @@ export default function SessionList({
             <SessionCard
               key={s.id}
               session={s}
+              players={players}
               expanded={expandedId === s.id}
               onToggleExpand={() => setExpandedId((v) => v === s.id ? null : s.id)}
               onEdit={() => openEdit(s)}
               onDuplicate={() => openDuplicate(s)}
               onDelete={() => handleDelete(s.id)}
+              onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
+              onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
               dimmed={false}
             />
           ))}
@@ -467,11 +474,14 @@ export default function SessionList({
               <SessionCard
                 key={s.id}
                 session={s}
+                players={players}
                 expanded={expandedId === s.id}
                 onToggleExpand={() => setExpandedId((v) => v === s.id ? null : s.id)}
                 onEdit={() => openEdit(s)}
                 onDuplicate={() => openDuplicate(s)}
                 onDelete={() => handleDelete(s.id)}
+                onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
+                onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
                 dimmed
               />
             ))}
@@ -495,15 +505,19 @@ export default function SessionList({
 // ── SessionCard ───────────────────────────────────────────────────────────────
 
 function SessionCard({
-  session, expanded, onToggleExpand, onEdit, onDuplicate, onDelete, dimmed,
+  session, players, expanded, onToggleExpand, onEdit, onDuplicate, onDelete,
+  onSignupAdded, onSignupRemoved, dimmed,
 }: {
-  session:        TrainingSession
-  expanded:       boolean
-  onToggleExpand: () => void
-  onEdit:         () => void
-  onDuplicate:    () => void
-  onDelete:       () => void
-  dimmed:         boolean
+  session:         TrainingSession
+  players:         PlayerOption[]
+  expanded:        boolean
+  onToggleExpand:  () => void
+  onEdit:          () => void
+  onDuplicate:     () => void
+  onDelete:        () => void
+  onSignupAdded:   (signup: TrainingSession["signups"][0]) => void
+  onSignupRemoved: (signupId: string) => void
+  dimmed:          boolean
 }) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
@@ -573,34 +587,126 @@ function SessionCard({
         </div>
       </div>
 
-      {/* Expanded: signups list */}
+      {/* Expanded: signups + add player */}
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-          {session.signups.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500">No signups yet.</p>
-          ) : (
-            <div className="space-y-1">
-              {session.signups.map((su) => {
-                const player = su.players
-                  ? `${su.players.first_name} ${su.players.last_name}`
-                  : "Unknown player"
-                const parent = su.parents
-                  ? ` (${su.parents.first_name} ${su.parents.last_name})`
-                  : ""
-                return (
-                  <p key={su.id} className="text-xs text-gray-700 dark:text-gray-300">
-                    {player}
-                    <span className="text-gray-400 dark:text-gray-500">{parent}</span>
-                    {su.payment_method && (
-                      <span className="ml-2 text-gray-400 dark:text-gray-500">· {su.payment_method}</span>
-                    )}
-                  </p>
-                )
-              })}
-            </div>
-          )}
+        <SignupsPanel
+          session={session}
+          players={players}
+          onSignupAdded={onSignupAdded}
+          onSignupRemoved={onSignupRemoved}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── SignupsPanel ──────────────────────────────────────────────────────────────
+
+function SignupsPanel({
+  session, players, onSignupAdded, onSignupRemoved,
+}: {
+  session:         TrainingSession
+  players:         PlayerOption[]
+  onSignupAdded:   (signup: TrainingSession["signups"][0]) => void
+  onSignupRemoved: (signupId: string) => void
+}) {
+  const [selectedPlayerId, setSelectedPlayerId] = useState("")
+  const [addError, setAddError]                 = useState<string | null>(null)
+  const [pending, start]                        = useTransition()
+
+  const signedUpPlayerIds = new Set(session.signups.map((su) => su.player_id))
+  const isFull        = session.signups.length >= session.max_players
+  const available     = players.filter((p) => !signedUpPlayerIds.has(p.id))
+
+  function handleAdd() {
+    if (!selectedPlayerId) return
+    setAddError(null)
+    start(async () => {
+      const result = await adminAddTrainingSignup(session.id, selectedPlayerId)
+      if (result.error) { setAddError(result.error); return }
+      const player = players.find((p) => p.id === selectedPlayerId)
+      onSignupAdded({
+        id:             result.signupId!,
+        player_id:      selectedPlayerId,
+        payment_method: null,
+        players:        player ? { first_name: player.first_name, last_name: player.last_name } : null,
+        parents:        null,
+      })
+      setSelectedPlayerId("")
+    })
+  }
+
+  function handleRemove(signupId: string) {
+    start(async () => {
+      const result = await adminRemoveTrainingSignup(signupId)
+      if (!result.error) onSignupRemoved(signupId)
+    })
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
+      {/* Signup list */}
+      {session.signups.length === 0 ? (
+        <p className="text-xs text-gray-400 dark:text-gray-500">No signups yet.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {session.signups.map((su) => {
+            const player = su.players
+              ? `${su.players.first_name} ${su.players.last_name}`
+              : "Unknown player"
+            const parent = su.parents
+              ? ` (${su.parents.first_name} ${su.parents.last_name})`
+              : ""
+            return (
+              <div key={su.id} className="flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-700 dark:text-gray-300">
+                  {player}
+                  <span className="text-gray-400 dark:text-gray-500">{parent}</span>
+                  {su.payment_method && (
+                    <span className="ml-2 text-gray-400 dark:text-gray-500">· {su.payment_method}</span>
+                  )}
+                </p>
+                <button
+                  onClick={() => handleRemove(su.id)}
+                  disabled={pending}
+                  className="text-xs text-red-400 hover:text-red-600 shrink-0 disabled:opacity-40"
+                >
+                  Remove
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
+
+      {/* Add player */}
+      {available.length > 0 && !isFull && (
+        <div className="flex items-center gap-2 pt-1">
+          <select
+            value={selectedPlayerId}
+            onChange={(e) => setSelectedPlayerId(e.target.value)}
+            className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="">Add a player…</option>
+            {available.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.first_name} {p.last_name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={handleAdd}
+            disabled={!selectedPlayerId || pending}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shrink-0"
+          >
+            {pending ? "Adding…" : "Add"}
+          </button>
+        </div>
+      )}
+      {isFull && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">Session is full ({session.max_players}/{session.max_players})</p>
+      )}
+      {addError && <p className="text-xs text-red-500">{addError}</p>}
     </div>
   )
 }

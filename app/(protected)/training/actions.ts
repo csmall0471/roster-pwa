@@ -102,6 +102,49 @@ export async function signUpForTraining(
   return { signupId: row.id as string, error: null }
 }
 
+export async function adminAddTrainingSignup(sessionId: string, playerId: string) {
+  const supabase = await createClient()
+
+  const { data: session } = await supabase
+    .from("training_sessions")
+    .select("max_players")
+    .eq("id", sessionId)
+    .single()
+  if (!session) return { signupId: null, error: "Session not found" }
+
+  const { count } = await supabase
+    .from("training_signups")
+    .select("*", { count: "exact", head: true })
+    .eq("session_id", sessionId)
+  if ((count ?? 0) >= session.max_players) return { signupId: null, error: "Session is full" }
+
+  // Attempt to link to the player's parent so parent-side cancellations still work
+  const { data: parentRow } = await supabase
+    .from("player_parents")
+    .select("parent_id")
+    .eq("player_id", playerId)
+    .limit(1)
+    .maybeSingle()
+
+  const { data: row, error } = await supabase
+    .from("training_signups")
+    .insert({ session_id: sessionId, player_id: playerId, parent_id: parentRow?.parent_id ?? null })
+    .select("id")
+    .single()
+  if (error) return { signupId: null, error: error.message }
+
+  revalidatePath("/training")
+  return { signupId: row.id as string, error: null }
+}
+
+export async function adminRemoveTrainingSignup(signupId: string) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("training_signups").delete().eq("id", signupId)
+  if (error) return { error: error.message }
+  revalidatePath("/training")
+  return { error: null }
+}
+
 export async function cancelTrainingSignup(signupId: string) {
   const supabase = await createClient()
   const { error } = await supabase.from("training_signups").delete().eq("id", signupId)
