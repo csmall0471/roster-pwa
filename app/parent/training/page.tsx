@@ -40,8 +40,9 @@ export default async function ParentTrainingPage() {
       .from("training_sessions")
       .select(`
         id, title, description, location, session_date, session_time,
-        max_players, payment_link, payment_amount, notes, eligibility_rules,
-        training_signups(id, player_id)
+        session_end_time, max_players, payment_amount, payment_methods,
+        notes, eligibility_rules,
+        training_signups(id, player_id, payment_method)
       `)
       .gte("session_date", today)
       .order("session_date", { ascending: true }),
@@ -62,7 +63,7 @@ export default async function ParentTrainingPage() {
   // Evaluate eligibility and build sessions for this parent
   const sessions: TrainingSessionForParent[] = (sessionsRaw ?? [])
     .map((s: any) => {
-      const signups: Array<{ id: string; player_id: string }> = s.training_signups ?? []
+      const signups: Array<{ id: string; player_id: string; payment_method: string | null }> = s.training_signups ?? []
 
       const eligiblePlayers = playerIds
         .map((pid: string) => {
@@ -78,10 +79,11 @@ export default async function ParentTrainingPage() {
           if (!eligible) return null
           const signup = signups.find((su) => su.player_id === pid)
           return {
-            player_id:  pid,
-            first_name: player?.first_name ?? "",
-            last_name:  player?.last_name  ?? "",
-            signup_id:  signup?.id ?? null,
+            player_id:      pid,
+            first_name:     player?.first_name ?? "",
+            last_name:      player?.last_name  ?? "",
+            signup_id:      signup?.id ?? null,
+            payment_method: signup?.payment_method ?? null,
           }
         })
         .filter(Boolean) as TrainingSessionForParent["players"]
@@ -94,10 +96,11 @@ export default async function ParentTrainingPage() {
         description:    s.description,
         location:       s.location,
         session_date:   s.session_date,
-        session_time:   s.session_time,
-        max_players:    s.max_players,
-        payment_link:   s.payment_link,
-        payment_amount: s.payment_amount,
+        session_time:    s.session_time,
+        session_end_time: s.session_end_time,
+        max_players:     s.max_players,
+        payment_amount:  s.payment_amount,
+        payment_methods: s.payment_methods ?? [],
         notes:          s.notes,
         total_signups:  signups.length,
         players:        eligiblePlayers,

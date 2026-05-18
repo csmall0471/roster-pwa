@@ -11,9 +11,10 @@ export default async function TrainingPage() {
       .from("training_sessions")
       .select(`
         id, title, description, location, session_date, session_time,
-        max_players, payment_link, payment_amount, eligibility_rules, notes,
+        session_end_time, max_players, payment_amount, payment_methods,
+        eligibility_rules, notes,
         training_signups(
-          id,
+          id, payment_method,
           players(first_name, last_name),
           parents(first_name, last_name)
         )
@@ -32,9 +33,10 @@ export default async function TrainingPage() {
     location:          s.location,
     session_date:      s.session_date,
     session_time:      s.session_time,
+    session_end_time:  s.session_end_time,
     max_players:       s.max_players,
-    payment_link:      s.payment_link,
     payment_amount:    s.payment_amount,
+    payment_methods:   s.payment_methods ?? [],
     eligibility_rules: s.eligibility_rules as EligibilityRules,
     notes:             s.notes,
     signups:           s.training_signups ?? [],

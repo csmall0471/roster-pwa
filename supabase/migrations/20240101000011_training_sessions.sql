@@ -6,9 +6,10 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   location          text,
   session_date      date        NOT NULL,
   session_time      time,
+  session_end_time  time,
   max_players       int         NOT NULL DEFAULT 10,
-  payment_link      text,
   payment_amount    text,
+  payment_methods   jsonb     NOT NULL DEFAULT '[]'::jsonb,
   eligibility_rules jsonb,
   notes             text,
   created_at        timestamptz NOT NULL DEFAULT now()
@@ -22,7 +23,8 @@ CREATE TABLE IF NOT EXISTS training_signups (
   session_id  uuid        NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
   player_id   uuid        NOT NULL REFERENCES players(id)           ON DELETE CASCADE,
   parent_id   uuid        NOT NULL REFERENCES parents(id)           ON DELETE CASCADE,
-  created_at  timestamptz NOT NULL DEFAULT now(),
+  payment_method  text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (session_id, player_id)
 );
 

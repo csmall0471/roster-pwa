@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { createTrainingSession, updateTrainingSession, deleteTrainingSession } from "../actions"
-import type { SessionData } from "../actions"
+import type { SessionData, PaymentMethod } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
 import RuleBuilder, { type TeamOption } from "./RuleBuilder"
@@ -16,38 +16,50 @@ export type TrainingSession = {
   location:          string | null
   session_date:      string
   session_time:      string | null
+  session_end_time:  string | null
   max_players:       number
-  payment_link:      string | null
   payment_amount:    string | null
+  payment_methods:   PaymentMethod[]
   eligibility_rules: EligibilityRules
   notes:             string | null
   signups: Array<{
-    id:      string
+    id:             string
+    payment_method: string | null
     players: { first_name: string; last_name: string } | null
     parents: { first_name: string; last_name: string } | null
   }>
 }
 
 type FormState = {
-  title:          string
-  description:    string
-  location:       string
-  session_date:   string
-  session_time:   string
-  max_players:    string
-  payment_amount: string
-  payment_link:   string
-  notes:          string
+  title:             string
+  description:       string
+  location:          string
+  session_date:      string
+  session_time:      string
+  session_end_time:  string
+  max_players:       string
+  payment_amount:    string
+  payment_methods:   PaymentMethod[]
+  notes:             string
   eligibility_rules: EligibilityRules
+  repeat_weekly:     boolean
+  repeat_weeks:      string
 }
 
 const EMPTY_FORM: FormState = {
-  title: "", description: "", location: "", session_date: "", session_time: "",
-  max_players: "10", payment_amount: "", payment_link: "", notes: "",
-  eligibility_rules: null,
+  title: "", description: "", location: "", session_date: "",
+  session_time: "", session_end_time: "", max_players: "10",
+  payment_amount: "", payment_methods: [], notes: "",
+  eligibility_rules: null, repeat_weekly: false, repeat_weeks: "4",
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function addWeeks(dateStr: string, weeks: number): string {
+  const d = new Date(dateStr + "T00:00:00")
+  d.setDate(d.getDate() + weeks * 7)
+  return d.toISOString().split("T")[0]
+}
 
 function fmtDate(iso: string) {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
@@ -91,21 +103,35 @@ export default function SessionList({
     setError(null)
   }
 
-  function openEdit(s: TrainingSession) {
-    setForm({
+  function sessionToForm(s: TrainingSession, clearDate = false): FormState {
+    return {
       title:             s.title,
-      description:       s.description ?? "",
-      location:          s.location    ?? "",
-      session_date:      s.session_date,
-      session_time:      s.session_time ?? "",
+      description:       s.description      ?? "",
+      location:          s.location         ?? "",
+      session_date:      clearDate ? "" : s.session_date,
+      session_time:      s.session_time     ?? "",
+      session_end_time:  s.session_end_time ?? "",
       max_players:       String(s.max_players),
-      payment_amount:    s.payment_amount ?? "",
-      payment_link:      s.payment_link   ?? "",
-      notes:             s.notes          ?? "",
+      payment_amount:    s.payment_amount   ?? "",
+      payment_methods:   s.payment_methods  ?? [],
+      notes:             s.notes            ?? "",
       eligibility_rules: s.eligibility_rules,
-    })
+      repeat_weekly:     false,
+      repeat_weeks:      "4",
+    }
+  }
+
+  function openEdit(s: TrainingSession) {
+    setForm(sessionToForm(s))
     setEditId(s.id)
     setAdding(false)
+    setError(null)
+  }
+
+  function openDuplicate(s: TrainingSession) {
+    setForm(sessionToForm(s, true))
+    setEditId(null)
+    setAdding(true)
     setError(null)
   }
 
@@ -118,15 +144,16 @@ export default function SessionList({
   function toData(): SessionData {
     return {
       title:             form.title,
-      description:       form.description    || null,
-      location:          form.location       || null,
+      description:       form.description       || null,
+      location:          form.location          || null,
       session_date:      form.session_date,
-      session_time:      form.session_time   || null,
+      session_time:      form.session_time      || null,
+      session_end_time:  form.session_end_time  || null,
       max_players:       Math.max(1, parseInt(form.max_players) || 10),
-      payment_amount:    form.payment_amount || null,
-      payment_link:      form.payment_link   || null,
+      payment_amount:    form.payment_amount    || null,
+      payment_methods:   form.payment_methods,
       eligibility_rules: form.eligibility_rules,
-      notes:             form.notes          || null,
+      notes:             form.notes             || null,
     }
   }
 
@@ -136,6 +163,8 @@ export default function SessionList({
     setError(null)
     const data = toData()
 
+    const repeatWeeks = form.repeat_weekly ? Math.max(1, parseInt(form.repeat_weeks) || 1) : 1
+
     start(async () => {
       if (editingId) {
         const result = await updateTrainingSession(editingId, data)
@@ -144,11 +173,16 @@ export default function SessionList({
           prev.map((s) => s.id === editingId ? { ...s, ...data } : s)
         )
       } else {
-        const result = await createTrainingSession(data)
+        const result = await createTrainingSession(data, repeatWeeks)
         if (result.error) { setError(result.error); return }
+        const newRows = Array.from({ length: repeatWeeks }, (_, i) => ({
+          id:           result.ids[i] ?? crypto.randomUUID(),
+          ...data,
+          session_date: i === 0 ? data.session_date : addWeeks(data.session_date, i),
+          signups:      [] as TrainingSession["signups"],
+        }))
         setSessions((prev) =>
-          [...prev, { id: result.id!, ...data, signups: [] }]
-            .sort((a, b) => a.session_date.localeCompare(b.session_date))
+          [...prev, ...newRows].sort((a, b) => a.session_date.localeCompare(b.session_date))
         )
       }
       closeForm()
@@ -216,7 +250,7 @@ export default function SessionList({
           </div>
 
           {/* Date + time + location */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Date *</label>
               <input
@@ -227,7 +261,7 @@ export default function SessionList({
               />
             </div>
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Time</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Start time</label>
               <input
                 type="time"
                 value={form.session_time}
@@ -235,7 +269,43 @@ export default function SessionList({
                 className={inputCls}
               />
             </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">End time</label>
+              <input
+                type="time"
+                value={form.session_end_time}
+                onChange={(e) => setForm((f) => ({ ...f, session_end_time: e.target.value }))}
+                className={inputCls}
+              />
+            </div>
           </div>
+
+          {/* Repeat weekly (only on create) */}
+          {!editingId && (
+            <div className="flex items-center gap-4 flex-wrap">
+              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={form.repeat_weekly}
+                  onChange={(e) => setForm((f) => ({ ...f, repeat_weekly: e.target.checked }))}
+                  className="accent-blue-600"
+                />
+                Repeat weekly
+              </label>
+              {form.repeat_weekly && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">for</span>
+                  <input
+                    type="number" min={2} max={52}
+                    value={form.repeat_weeks}
+                    onChange={(e) => setForm((f) => ({ ...f, repeat_weeks: e.target.value }))}
+                    className="w-16 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-gray-500 dark:text-gray-400">weeks</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Location</label>
@@ -247,8 +317,8 @@ export default function SessionList({
             />
           </div>
 
-          {/* Max players + payment */}
-          <div className="grid grid-cols-3 gap-3">
+          {/* Max players + price */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Max players</label>
               <input
@@ -267,14 +337,59 @@ export default function SessionList({
                 className={inputCls}
               />
             </div>
-            <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Payment link</label>
-              <input
-                type="url" placeholder="Venmo / Zelle / etc."
-                value={form.payment_link}
-                onChange={(e) => setForm((f) => ({ ...f, payment_link: e.target.value }))}
-                className={inputCls}
-              />
+          </div>
+
+          {/* Payment methods */}
+          <div>
+            <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Payment methods</label>
+            <div className="space-y-2">
+              {form.payment_methods.map((pm, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="text" placeholder="Label (e.g. Venmo)"
+                    value={pm.label}
+                    onChange={(e) => {
+                      const updated = [...form.payment_methods]
+                      updated[i] = { ...pm, label: e.target.value }
+                      setForm((f) => ({ ...f, payment_methods: updated }))
+                    }}
+                    className="w-32 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <input
+                    type="url" placeholder="Link (optional)"
+                    value={pm.link ?? ""}
+                    onChange={(e) => {
+                      const updated = [...form.payment_methods]
+                      updated[i] = { ...pm, link: e.target.value || null }
+                      setForm((f) => ({ ...f, payment_methods: updated }))
+                    }}
+                    className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, payment_methods: f.payment_methods.filter((_, idx) => idx !== i) }))}
+                    className="text-red-400 hover:text-red-600 text-base shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, payment_methods: [...f.payment_methods, { label: "", link: null }] }))}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  + Add method
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, payment_methods: [...f.payment_methods, { label: "Cash / Check", link: null }] }))}
+                  className="text-xs text-gray-500 dark:text-gray-400 hover:underline"
+                >
+                  + Cash / Check
+                </button>
+              </div>
             </div>
           </div>
 
@@ -307,7 +422,13 @@ export default function SessionList({
               disabled={pending || !form.title || !form.session_date}
               className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {pending ? "Saving…" : editingId ? "Save changes" : "Create session"}
+              {pending
+                ? "Saving…"
+                : editingId
+                  ? "Save changes"
+                  : form.repeat_weekly
+                    ? `Create ${form.repeat_weeks || 1} sessions`
+                    : "Create session"}
             </button>
             <button type="button" onClick={closeForm}
               className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
@@ -327,6 +448,7 @@ export default function SessionList({
               expanded={expandedId === s.id}
               onToggleExpand={() => setExpandedId((v) => v === s.id ? null : s.id)}
               onEdit={() => openEdit(s)}
+              onDuplicate={() => openDuplicate(s)}
               onDelete={() => handleDelete(s.id)}
               dimmed={false}
             />
@@ -348,6 +470,7 @@ export default function SessionList({
                 expanded={expandedId === s.id}
                 onToggleExpand={() => setExpandedId((v) => v === s.id ? null : s.id)}
                 onEdit={() => openEdit(s)}
+                onDuplicate={() => openDuplicate(s)}
                 onDelete={() => handleDelete(s.id)}
                 dimmed
               />
@@ -372,16 +495,18 @@ export default function SessionList({
 // ── SessionCard ───────────────────────────────────────────────────────────────
 
 function SessionCard({
-  session, expanded, onToggleExpand, onEdit, onDelete, dimmed,
+  session, expanded, onToggleExpand, onEdit, onDuplicate, onDelete, dimmed,
 }: {
   session:        TrainingSession
   expanded:       boolean
   onToggleExpand: () => void
   onEdit:         () => void
+  onDuplicate:    () => void
   onDelete:       () => void
   dimmed:         boolean
 }) {
   const time      = fmtTime(session.session_time)
+  const endTime   = fmtTime(session.session_end_time)
   const openSlots = session.max_players - session.signups.length
   const isFull    = openSlots <= 0
 
@@ -398,7 +523,11 @@ function SessionCard({
             <span className="font-semibold text-gray-900 dark:text-white text-sm">
               {fmtDate(session.session_date)}
             </span>
-            {time && <span className="text-xs text-gray-400 dark:text-gray-500">{time}</span>}
+            {time && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                {time}{endTime ? ` – ${endTime}` : ""}
+              </span>
+            )}
           </div>
 
           {/* Title */}
@@ -427,16 +556,21 @@ function SessionCard({
           )}
         </button>
 
-        {!dimmed && (
-          <div className="flex items-center gap-3 shrink-0 text-xs">
+        <div className="flex items-center gap-3 shrink-0 text-xs">
+          {!dimmed && (
             <button onClick={onEdit} className="text-blue-600 dark:text-blue-400 hover:underline">
               Edit
             </button>
+          )}
+          <button onClick={onDuplicate} className="text-gray-500 dark:text-gray-400 hover:underline">
+            Duplicate
+          </button>
+          {!dimmed && (
             <button onClick={onDelete} className="text-red-500 hover:underline">
               Delete
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Expanded: signups list */}
@@ -457,6 +591,9 @@ function SessionCard({
                   <p key={su.id} className="text-xs text-gray-700 dark:text-gray-300">
                     {player}
                     <span className="text-gray-400 dark:text-gray-500">{parent}</span>
+                    {su.payment_method && (
+                      <span className="ml-2 text-gray-400 dark:text-gray-500">· {su.payment_method}</span>
+                    )}
                   </p>
                 )
               })}

@@ -2,29 +2,32 @@
 
 import { useState, useTransition } from "react"
 import { signUpForTraining, cancelTrainingSignup } from "@/app/(protected)/training/actions"
+import type { PaymentMethod } from "@/app/(protected)/training/actions"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type EligiblePlayer = {
-  player_id:  string
-  first_name: string
-  last_name:  string
-  signup_id:  string | null
+  player_id:      string
+  first_name:     string
+  last_name:      string
+  signup_id:      string | null
+  payment_method: string | null
 }
 
 export type TrainingSessionForParent = {
-  id:             string
-  title:          string
-  description:    string | null
-  location:       string | null
-  session_date:   string
-  session_time:   string | null
-  max_players:    number
-  payment_link:   string | null
-  payment_amount: string | null
-  notes:          string | null
-  total_signups:  number
-  players:        EligiblePlayer[]
+  id:              string
+  title:           string
+  description:     string | null
+  location:        string | null
+  session_date:    string
+  session_time:    string | null
+  session_end_time: string | null
+  max_players:     number
+  payment_amount:  string | null
+  payment_methods: PaymentMethod[]
+  notes:           string | null
+  total_signups:   number
+  players:         EligiblePlayer[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -110,6 +113,7 @@ function SessionCard({
   onCancel: (playerId: string) => void
 }) {
   const time      = fmtTime(session.session_time)
+  const endTime   = fmtTime(session.session_end_time)
   const openSlots = session.max_players - session.total_signups
   const isFull    = openSlots <= 0
 
@@ -121,7 +125,11 @@ function SessionCard({
           <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
             {fmtDate(session.session_date)}
           </span>
-          {time && <span className="text-xs text-gray-400 dark:text-gray-500">{time}</span>}
+          {time && (
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              {time}{endTime ? ` – ${endTime}` : ""}
+            </span>
+          )}
         </div>
 
         <h2 className="text-base font-bold text-gray-900 dark:text-white">{session.title}</h2>
@@ -162,7 +170,7 @@ function SessionCard({
             player={player}
             sessionId={session.id}
             isFull={isFull}
-            paymentLink={session.payment_link}
+            paymentMethods={session.payment_methods}
             paymentAmount={session.payment_amount}
             onSignup={(signupId) => onSignup(player.player_id, signupId)}
             onCancel={() => onCancel(player.player_id)}
@@ -176,27 +184,31 @@ function SessionCard({
 // ── PlayerRow ─────────────────────────────────────────────────────────────────
 
 function PlayerRow({
-  player, sessionId, isFull, paymentLink, paymentAmount, onSignup, onCancel,
+  player, sessionId, isFull, paymentMethods, paymentAmount, onSignup, onCancel,
 }: {
-  player:        EligiblePlayer
-  sessionId:     string
-  isFull:        boolean
-  paymentLink:   string | null
-  paymentAmount: string | null
-  onSignup:      (signupId: string) => void
-  onCancel:      () => void
+  player:         EligiblePlayer
+  sessionId:      string
+  isFull:         boolean
+  paymentMethods: PaymentMethod[]
+  paymentAmount:  string | null
+  onSignup:       (signupId: string) => void
+  onCancel:       () => void
 }) {
-  const [error, setError]   = useState<string | null>(null)
-  const [pending, start]    = useTransition()
-  const isRegistered        = !!player.signup_id
-  const name                = `${player.first_name} ${player.last_name}`
+  const [showForm, setShowForm]       = useState(false)
+  const [selectedMethod, setMethod]   = useState<string | null>(null)
+  const [error, setError]             = useState<string | null>(null)
+  const [pending, start]              = useTransition()
+  const isRegistered                  = !!player.signup_id
+  const name                          = `${player.first_name} ${player.last_name}`
+  const needsPaymentChoice            = paymentMethods.length > 0
 
   function handleSignup() {
     setError(null)
     start(async () => {
-      const result = await signUpForTraining(sessionId, player.player_id)
+      const result = await signUpForTraining(sessionId, player.player_id, selectedMethod)
       if (result.error) { setError(result.error); return }
       onSignup(result.signupId!)
+      setShowForm(false)
     })
   }
 
@@ -211,6 +223,9 @@ function PlayerRow({
     })
   }
 
+  // Find the payment method object so we can show a link if registered
+  const chosenMethod = paymentMethods.find((m) => m.label === player.payment_method)
+
   return (
     <div className="px-5 py-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -220,11 +235,11 @@ function PlayerRow({
           {isRegistered ? (
             <>
               <span className="text-xs font-semibold text-green-700 dark:text-green-400">
-                ✓ Registered
+                ✓ Registered{player.payment_method ? ` · ${player.payment_method}` : ""}
               </span>
-              {paymentLink && paymentAmount && (
+              {chosenMethod?.link && paymentAmount && (
                 <a
-                  href={paymentLink}
+                  href={chosenMethod.link}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
@@ -242,18 +257,57 @@ function PlayerRow({
             </>
           ) : isFull ? (
             <span className="text-xs text-gray-400 dark:text-gray-500">Session full</span>
-          ) : (
+          ) : !showForm ? (
             <button
-              onClick={handleSignup}
+              onClick={() => needsPaymentChoice ? setShowForm(true) : handleSignup()}
               disabled={pending}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {pending ? "Signing up…" : "Sign up"}
             </button>
-          )}
+          ) : null}
         </div>
       </div>
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+
+      {/* Payment method selection */}
+      {showForm && !isRegistered && (
+        <div className="mt-2 space-y-2 pl-1">
+          <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+            How will you pay{paymentAmount ? ` (${paymentAmount})` : ""}?
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {paymentMethods.map((pm) => (
+              <label key={pm.label} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                <input
+                  type="radio"
+                  name={`pay-${player.player_id}`}
+                  checked={selectedMethod === pm.label}
+                  onChange={() => setMethod(pm.label)}
+                  className="accent-blue-600"
+                />
+                {pm.label}
+              </label>
+            ))}
+          </div>
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSignup}
+              disabled={pending || !selectedMethod}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {pending ? "Signing up…" : "Confirm"}
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setMethod(null) }}
+              className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {!showForm && error && <p className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
   )
 }

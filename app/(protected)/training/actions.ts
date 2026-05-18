@@ -4,29 +4,41 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 
+export type PaymentMethod = { label: string; link: string | null }
+
 export type SessionData = {
   title:             string
   description:       string | null
   location:          string | null
   session_date:      string
   session_time:      string | null
+  session_end_time:  string | null
   max_players:       number
-  payment_link:      string | null
   payment_amount:    string | null
+  payment_methods:   PaymentMethod[]
   eligibility_rules: EligibilityRules
   notes:             string | null
 }
 
-export async function createTrainingSession(data: SessionData) {
+function addWeeks(dateStr: string, weeks: number): string {
+  const d = new Date(dateStr + "T00:00:00")
+  d.setDate(d.getDate() + weeks * 7)
+  return d.toISOString().split("T")[0]
+}
+
+export async function createTrainingSession(data: SessionData, repeatWeeks = 1) {
   const supabase = await createClient()
-  const { data: row, error } = await supabase
+  const rows = Array.from({ length: repeatWeeks }, (_, i) => ({
+    ...data,
+    session_date: i === 0 ? data.session_date : addWeeks(data.session_date, i),
+  }))
+  const { data: inserted, error } = await supabase
     .from("training_sessions")
-    .insert(data)
-    .select("id")
-    .single()
-  if (error) return { id: null, error: error.message }
+    .insert(rows)
+    .select("id, session_date")
+  if (error) return { ids: [] as string[], error: error.message }
   revalidatePath("/training")
-  return { id: row.id as string, error: null }
+  return { ids: (inserted ?? []).map((r) => r.id as string), error: null }
 }
 
 export async function updateTrainingSession(id: string, data: SessionData) {
@@ -45,7 +57,11 @@ export async function deleteTrainingSession(id: string) {
   return { error: null }
 }
 
-export async function signUpForTraining(sessionId: string, playerId: string) {
+export async function signUpForTraining(
+  sessionId:     string,
+  playerId:      string,
+  paymentMethod: string | null,
+) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { signupId: null, error: "Not authenticated" }
@@ -72,7 +88,12 @@ export async function signUpForTraining(sessionId: string, playerId: string) {
 
   const { data: row, error } = await supabase
     .from("training_signups")
-    .insert({ session_id: sessionId, player_id: playerId, parent_id: parentLink.parent_id })
+    .insert({
+      session_id:     sessionId,
+      player_id:      playerId,
+      parent_id:      parentLink.parent_id,
+      payment_method: paymentMethod,
+    })
     .select("id")
     .single()
   if (error) return { signupId: null, error: error.message }
