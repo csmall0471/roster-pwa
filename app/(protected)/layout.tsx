@@ -78,6 +78,9 @@ export default async function ProtectedLayout({
             <Link href="/email" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
               Email
             </Link>
+            <Link href="/training" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+              Training
+            </Link>
             <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
               Preview
             </Link>
