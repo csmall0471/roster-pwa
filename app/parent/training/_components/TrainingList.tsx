@@ -62,6 +62,26 @@ function mapsLink(location: string) {
   return `https://maps.google.com/?q=${encodeURIComponent(location)}`
 }
 
+// ── Helpers (grouping) ────────────────────────────────────────────────────────
+
+function groupByDate(sessions: TrainingSessionForParent[]) {
+  const map = new Map<string, TrainingSessionForParent[]>()
+  for (const s of sessions) {
+    if (!map.has(s.session_date)) map.set(s.session_date, [])
+    map.get(s.session_date)!.push(s)
+  }
+  // Sort within each date by session_time (nulls last)
+  for (const group of map.values()) {
+    group.sort((a, b) => {
+      if (!a.session_time && !b.session_time) return 0
+      if (!a.session_time) return 1
+      if (!b.session_time) return -1
+      return a.session_time.localeCompare(b.session_time)
+    })
+  }
+  return map
+}
+
 // ── TrainingList ──────────────────────────────────────────────────────────────
 
 export default function TrainingList({
@@ -103,16 +123,67 @@ export default function TrainingList({
     )
   }
 
+  const grouped = groupByDate(sessions)
+
   return (
-    <div className="space-y-4">
-      {sessions.map((s) => (
-        <SessionCard
-          key={s.id}
-          session={s}
-          onSignup={(playerId, signupId) => onSignup(s.id, playerId, signupId)}
-          onCancel={(playerId) => onCancel(s.id, playerId)}
+    <div className="space-y-3">
+      {Array.from(grouped.entries()).map(([date, dateSessions]) => (
+        <DateGroup
+          key={date}
+          date={date}
+          sessions={dateSessions}
+          onSignup={(sessionId, playerId, signupId) => onSignup(sessionId, playerId, signupId)}
+          onCancel={(sessionId, playerId) => onCancel(sessionId, playerId)}
         />
       ))}
+    </div>
+  )
+}
+
+// ── DateGroup ─────────────────────────────────────────────────────────────────
+
+function DateGroup({
+  date, sessions, onSignup, onCancel,
+}: {
+  date:     string
+  sessions: TrainingSessionForParent[]
+  onSignup: (sessionId: string, playerId: string, signupId: string) => void
+  onCancel: (sessionId: string, playerId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const count = sessions.length
+
+  return (
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
+      >
+        <div>
+          <span className="text-sm font-semibold text-gray-900 dark:text-white">
+            {fmtDate(date)}
+          </span>
+          {!open && (
+            <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
+              {count} session{count !== 1 ? "s" : ""} available
+            </span>
+          )}
+        </div>
+        <span className="text-gray-400 dark:text-gray-500 text-sm">{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {sessions.map((s) => (
+            <SessionCard
+              key={s.id}
+              session={s}
+              onSignup={(playerId, signupId) => onSignup(s.id, playerId, signupId)}
+              onCancel={(playerId) => onCancel(s.id, playerId)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -132,19 +203,16 @@ function SessionCard({
   const isFull    = openSlots <= 0
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className="bg-white dark:bg-gray-900">
       {/* Session info */}
       <div className="px-5 py-4">
-        <div className="flex items-baseline gap-2 flex-wrap mb-0.5">
-          <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-            {fmtDate(session.session_date)}
-          </span>
-          {time && (
+        {time && (
+          <div className="mb-0.5">
             <span className="text-xs text-gray-400 dark:text-gray-500">
               {time}{endTime ? ` – ${endTime}` : ""}
             </span>
-          )}
-        </div>
+          </div>
+        )}
 
         <h2 className="text-base font-bold text-gray-900 dark:text-white">{session.title}</h2>
 
