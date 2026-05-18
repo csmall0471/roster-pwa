@@ -425,9 +425,12 @@ function PlayerRow({
     })
   }
 
-  function handleBulkSignup() {
+  function handleBulkSignup(includeCurrentSession = false) {
     setError(null)
-    const ids = unregisteredSiblings.map((s) => s.id)
+    const ids = [
+      ...(includeCurrentSession && !isRegistered ? [sessionId] : []),
+      ...unregisteredSiblings.map((s) => s.id),
+    ]
     start(async () => {
       const result = await bulkSignUpForTraining(ids, player.player_id, selectedMethod)
       if (result.error) { setError(result.error); return }
@@ -479,23 +482,34 @@ function PlayerRow({
           ) : isFull ? (
             <span className="text-xs text-gray-400 dark:text-gray-500">Session full</span>
           ) : !showForm ? (
-            <button
-              onClick={() => needsPaymentChoice ? setShowForm(true) : handleSignup()}
-              disabled={pending}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {pending ? "Signing up…" : "Sign up"}
-            </button>
+            <>
+              <button
+                onClick={() => needsPaymentChoice ? setShowForm(true) : handleSignup()}
+                disabled={pending}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {pending ? "Signing up…" : unregisteredSiblings.length > 0 ? "This session" : "Sign up"}
+              </button>
+              {unregisteredSiblings.length > 0 && (
+                <button
+                  onClick={() => needsPaymentChoice ? setShowForm(true) : handleBulkSignup(true)}
+                  disabled={pending}
+                  className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                >
+                  All {unregisteredSiblings.length + 1} sessions
+                </button>
+              )}
+            </>
           ) : null}
 
-          {/* After registering: offer to sign up for remaining series sessions */}
-          {isRegistered && unregisteredSiblings.length > 0 && (
+          {/* After registering for this session: offer remaining series sessions */}
+          {isRegistered && unregisteredSiblings.length > 0 && !showForm && (
             <button
-              onClick={() => needsPaymentChoice ? setShowForm(true) : handleBulkSignup()}
+              onClick={() => needsPaymentChoice ? setShowForm(true) : handleBulkSignup(false)}
               disabled={pending}
               className="text-xs text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
             >
-              {pending ? "…" : `+ Sign up for all ${unregisteredSiblings.length} remaining`}
+              {pending ? "…" : `+ ${unregisteredSiblings.length} more session${unregisteredSiblings.length !== 1 ? "s" : ""}`}
             </button>
           )}
         </div>
@@ -534,11 +548,15 @@ function PlayerRow({
             )}
             {unregisteredSiblings.length > 0 && (
               <button
-                onClick={handleBulkSignup}
+                onClick={() => handleBulkSignup(!isRegistered)}
                 disabled={pending || !selectedMethod}
                 className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
               >
-                {pending ? "Signing up…" : `All ${unregisteredSiblings.length + (isRegistered ? 0 : 1)} remaining sessions`}
+                {pending
+                  ? "Signing up…"
+                  : isRegistered
+                    ? `${unregisteredSiblings.length} remaining session${unregisteredSiblings.length !== 1 ? "s" : ""}`
+                    : `All ${unregisteredSiblings.length + 1} sessions`}
               </button>
             )}
             <button
