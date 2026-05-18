@@ -47,11 +47,13 @@ export default function SnackSchedule({
   slotsPerGame,
   parentId,
   teamName,
+  snackEnabled = true,
 }: {
   initialGames: SnackGameRow[];
   slotsPerGame: number;
   parentId: string;
   teamName: string;
+  snackEnabled?: boolean;
 }) {
   const [games, setGames] = useState(initialGames);
 
@@ -81,7 +83,7 @@ export default function SnackSchedule({
   return (
     <section className="mt-8">
       <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-        Schedule & Snacks
+        {snackEnabled ? "Schedule & Snacks" : "Schedule"}
       </h2>
       <div className="space-y-2">
         {upcoming.map((g) => (
@@ -90,6 +92,7 @@ export default function SnackSchedule({
             game={g}
             slotsPerGame={slotsPerGame}
             parentId={parentId}
+            snackEnabled={snackEnabled}
             onSignup={(s) => onSignup(g.id, s)}
             onCancel={(sid) => onCancel(g.id, sid)}
             dimmed={false}
@@ -109,6 +112,7 @@ export default function SnackSchedule({
                 game={g}
                 slotsPerGame={slotsPerGame}
                 parentId={parentId}
+                snackEnabled={snackEnabled}
                 onSignup={() => {}}
                 onCancel={() => {}}
                 dimmed
@@ -124,11 +128,12 @@ export default function SnackSchedule({
 // ── GameRow ───────────────────────────────────────────────────────────────────
 
 function GameRow({
-  game, slotsPerGame, parentId, onSignup, onCancel, dimmed,
+  game, slotsPerGame, parentId, snackEnabled, onSignup, onCancel, dimmed,
 }: {
   game: SnackGameRow;
   slotsPerGame: number;
   parentId: string;
+  snackEnabled: boolean;
   onSignup: (s: SnackGameRow["signups"][0]) => void;
   onCancel: (signupId: string) => void;
   dimmed: boolean;
@@ -207,7 +212,7 @@ function GameRow({
       </div>
 
       {/* Snack section */}
-      {!dimmed && (
+      {snackEnabled && !dimmed && (
         <div className="mt-2.5 pt-2.5 border-t border-gray-100 dark:border-gray-800">
           {/* Who's signed up */}
           {game.signups.length > 0 && (

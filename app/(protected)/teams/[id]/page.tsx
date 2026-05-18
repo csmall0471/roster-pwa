@@ -149,7 +149,7 @@ export default async function TeamDetailPage({
           )}
         </div>
         <div className="flex gap-2 shrink-0 flex-wrap justify-end">
-          {t.snack_signup_url && (
+          {t.snack_signup_url && !t.snack_signup_enabled && (
             <a
               href={t.snack_signup_url}
               target="_blank"

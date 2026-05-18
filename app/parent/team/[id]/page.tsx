@@ -184,9 +184,9 @@ export default async function ParentTeamPage({
         {meta && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{meta}</p>}
         {dateRange && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{dateRange}</p>}
 
-        {(team.mojo_code || team.snack_signup_url) && (
+        {(team.mojo_code || (team.snack_signup_url && !team.snack_signup_enabled)) && (
           <div className="flex gap-2 mt-3 flex-wrap">
-            {team.snack_signup_url && (
+            {team.snack_signup_url && !team.snack_signup_enabled && (
               <a
                 href={team.snack_signup_url}
                 target="_blank"
@@ -234,12 +234,13 @@ export default async function ParentTeamPage({
         </section>
       )}
 
-      {team.snack_signup_enabled && (gamesRaw?.length ?? 0) > 0 && (
+      {(gamesRaw?.length ?? 0) > 0 && (
         <SnackSchedule
           initialGames={(gamesRaw ?? []) as unknown as SnackGameRow[]}
           slotsPerGame={team.snack_slots_per_game ?? 1}
           parentId={parentId}
           teamName={team.name}
+          snackEnabled={team.snack_signup_enabled ?? false}
         />
       )}
     </div>
