@@ -403,6 +403,8 @@ function PlayerRow({
   const isRegistered                  = !!player.signup_id
   const name                          = `${player.first_name} ${player.last_name}`
   const needsPaymentChoice            = paymentMethods.length > 0
+  const isInSeries                    = unregisteredSiblings.length > 0
+  const needsPanel                    = needsPaymentChoice || isInSeries
 
   function handleSignup() {
     setError(null)
@@ -482,80 +484,73 @@ function PlayerRow({
           ) : isFull ? (
             <span className="text-xs text-gray-400 dark:text-gray-500">Session full</span>
           ) : !showForm ? (
-            <>
-              <button
-                onClick={() => needsPaymentChoice ? setShowForm(true) : handleSignup()}
-                disabled={pending}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                {pending ? "Signing up…" : unregisteredSiblings.length > 0 ? "This session" : "Sign up"}
-              </button>
-              {unregisteredSiblings.length > 0 && (
-                <button
-                  onClick={() => needsPaymentChoice ? setShowForm(true) : handleBulkSignup(true)}
-                  disabled={pending}
-                  className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
-                >
-                  All {unregisteredSiblings.length + 1} sessions
-                </button>
-              )}
-            </>
+            <button
+              onClick={() => needsPanel ? setShowForm(true) : handleSignup()}
+              disabled={pending}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {pending ? "Signing up…" : "Sign up"}
+            </button>
           ) : null}
 
-          {/* After registering for this session: offer remaining series sessions */}
-          {isRegistered && unregisteredSiblings.length > 0 && !showForm && (
+          {/* After registering: offer remaining series sessions */}
+          {isRegistered && isInSeries && !showForm && (
             <button
-              onClick={() => needsPaymentChoice ? setShowForm(true) : handleBulkSignup(false)}
+              onClick={() => setShowForm(true)}
               disabled={pending}
               className="text-xs text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
             >
-              {pending ? "…" : `+ ${unregisteredSiblings.length} more session${unregisteredSiblings.length !== 1 ? "s" : ""}`}
+              + {unregisteredSiblings.length} more
             </button>
           )}
         </div>
       </div>
 
-      {/* Payment method selection */}
+      {/* Sign-up panel: payment choice and/or series choice */}
       {showForm && (
-        <div className="mt-2 space-y-2 pl-1">
-          <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-            How will you pay{paymentAmount ? ` (${paymentAmount})` : ""}?
-          </p>
-          <div className="flex flex-wrap gap-3">
-            {paymentMethods.map((pm) => (
-              <label key={pm.label} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input
-                  type="radio"
-                  name={`pay-${player.player_id}`}
-                  checked={selectedMethod === pm.label}
-                  onChange={() => setMethod(pm.label)}
-                  className="accent-blue-600"
-                />
-                {pm.label}
-              </label>
-            ))}
-          </div>
+        <div className="mt-2 space-y-3 pl-1">
+          {needsPaymentChoice && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                How will you pay{paymentAmount ? ` (${paymentAmount})` : ""}?
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {paymentMethods.map((pm) => (
+                  <label key={pm.label} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name={`pay-${player.player_id}`}
+                      checked={selectedMethod === pm.label}
+                      onChange={() => setMethod(pm.label)}
+                      className="accent-blue-600"
+                    />
+                    {pm.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           {error && <p className="text-xs text-red-500">{error}</p>}
           <div className="flex items-center gap-3 flex-wrap">
             {!isRegistered && (
               <button
                 onClick={handleSignup}
-                disabled={pending || !selectedMethod}
+                disabled={pending || (needsPaymentChoice && !selectedMethod)}
                 className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
-                {pending ? "Signing up…" : "This session only"}
+                {pending ? "Signing up…" : isInSeries ? "This session only" : "Confirm"}
               </button>
             )}
-            {unregisteredSiblings.length > 0 && (
+            {isInSeries && (
               <button
                 onClick={() => handleBulkSignup(!isRegistered)}
-                disabled={pending || !selectedMethod}
+                disabled={pending || (needsPaymentChoice && !selectedMethod)}
                 className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
               >
                 {pending
                   ? "Signing up…"
                   : isRegistered
-                    ? `${unregisteredSiblings.length} remaining session${unregisteredSiblings.length !== 1 ? "s" : ""}`
+                    ? `All ${unregisteredSiblings.length} remaining`
                     : `All ${unregisteredSiblings.length + 1} sessions`}
               </button>
             )}
