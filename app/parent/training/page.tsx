@@ -42,7 +42,7 @@ export default async function ParentTrainingPage() {
         id, title, description, location, session_date, session_time,
         session_end_time, max_players, payment_amount, payment_methods,
         notes, eligibility_rules,
-        training_signups(id, player_id, payment_method)
+        training_signups(id, player_id, payment_method, paid)
       `)
       .gte("session_date", today)
       .order("session_date", { ascending: true }),
@@ -76,7 +76,7 @@ export default async function ParentTrainingPage() {
   // Evaluate eligibility and build sessions for this parent
   const sessions: TrainingSessionForParent[] = (sessionsRaw ?? [])
     .map((s: any) => {
-      const signups: Array<{ id: string; player_id: string; payment_method: string | null }> =
+      const signups: Array<{ id: string; player_id: string; payment_method: string | null; paid: boolean }> =
         s.training_signups ?? []
 
       const eligiblePlayers: TrainingSessionForParent["players"] = []
@@ -96,6 +96,7 @@ export default async function ParentTrainingPage() {
             last_name:      player?.last_name  ?? "",
             signup_id:      signup?.id ?? null,
             payment_method: signup?.payment_method ?? null,
+            paid:           signup?.paid ?? false,
           })
         } else {
           ineligiblePlayers.push({

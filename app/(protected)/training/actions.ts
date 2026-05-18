@@ -197,6 +197,14 @@ export async function adminRemoveTrainingSignup(signupId: string) {
   return { error: null }
 }
 
+export async function markTrainingSignupPaid(signupId: string, paid: boolean) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("training_signups").update({ paid }).eq("id", signupId)
+  if (error) return { error: error.message }
+  revalidatePath("/training")
+  return { error: null }
+}
+
 export async function cancelTrainingSignup(signupId: string) {
   const supabase = await createClient()
   const { error } = await supabase.from("training_signups").delete().eq("id", signupId)

@@ -14,7 +14,7 @@ export default async function TrainingPage() {
         session_end_time, max_players, payment_amount, payment_methods,
         eligibility_rules, notes,
         training_signups(
-          id, player_id, payment_method,
+          id, player_id, payment_method, paid,
           players(first_name, last_name),
           parents(first_name, last_name)
         )

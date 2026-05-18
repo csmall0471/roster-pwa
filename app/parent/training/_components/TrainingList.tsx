@@ -12,6 +12,7 @@ export type EligiblePlayer = {
   last_name:      string
   signup_id:      string | null
   payment_method: string | null
+  paid:           boolean
 }
 
 export type IneligiblePlayer = {
@@ -100,7 +101,7 @@ export default function TrainingList({
               ...s,
               total_signups: s.total_signups + 1,
               players: s.players.map((p) =>
-                p.player_id === playerId ? { ...p, signup_id: signupId } : p
+                p.player_id === playerId ? { ...p, signup_id: signupId, paid: false } : p
               ),
             }
           : s
@@ -133,7 +134,7 @@ export default function TrainingList({
           ...s,
           total_signups: s.total_signups + 1,
           players: s.players.map((p) =>
-            p.player_id === playerId ? { ...p, signup_id: result.signupId } : p
+            p.player_id === playerId ? { ...p, signup_id: result.signupId, paid: false } : p
           ),
         }
       })
@@ -152,8 +153,32 @@ export default function TrainingList({
 
   const grouped = groupByDate(sessions)
 
+  // Tally unpaid registrations that have a known payment amount
+  const unpaidTotal = useMemo(() => {
+    let total = 0
+    for (const s of sessions) {
+      if (!s.payment_amount) continue
+      const amount = parseFloat(s.payment_amount.replace(/[^0-9.]/g, ""))
+      if (isNaN(amount)) continue
+      for (const p of s.players) {
+        if (p.signup_id && !p.paid) total += amount
+      }
+    }
+    return total
+  }, [sessions])
+
   return (
     <div className="space-y-3">
+      {unpaidTotal > 0 && (
+        <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-4 py-3">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+            Outstanding balance: ${unpaidTotal.toFixed(2)}
+          </p>
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+            Payment due for registered training sessions
+          </p>
+        </div>
+      )}
       {Array.from(grouped.entries()).map(([date, dateSessions]) => (
         <DateGroup
           key={date}
@@ -428,9 +453,10 @@ function PlayerRow({
         <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
           {isRegistered ? (
             <>
-              <span className="text-xs font-semibold text-green-700 dark:text-green-400">
+              <span className={`text-xs font-semibold ${player.paid ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
                 ✓ Registered{player.payment_method ? ` · ${player.payment_method}` : ""}
                 {registeredCount !== null && ` (${registeredCount}/${seriesTotal})`}
+                {player.paid ? " · Paid" : " · Unpaid"}
               </span>
               {chosenMethod?.link && paymentAmount && (
                 <a

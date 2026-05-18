@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition, useMemo } from "react"
-import { createTrainingSession, updateTrainingSession, deleteTrainingSession, adminAddTrainingSignup, adminRemoveTrainingSignup } from "../actions"
+import { createTrainingSession, updateTrainingSession, deleteTrainingSession, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid } from "../actions"
 import type { SessionData, PaymentMethod } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
@@ -29,6 +29,7 @@ export type TrainingSession = {
     id:             string
     player_id:      string
     payment_method: string | null
+    paid:           boolean
     players: { first_name: string; last_name: string } | null
     parents: { first_name: string; last_name: string } | null
   }>
@@ -497,6 +498,7 @@ export default function SessionList({
               onDelete={() => handleDelete(s.id)}
               onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
               onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
+              onSignupPaidToggled={(signupId, paid) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.map((su) => su.id === signupId ? { ...su, paid } : su) } : p))}
               dimmed={false}
               seriesLabel={s.series_id ? (seriesOptions.find((o) => o.id === s.series_id)?.label ?? null) : null}
             />
@@ -523,6 +525,7 @@ export default function SessionList({
                 onDelete={() => handleDelete(s.id)}
                 onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
                 onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
+                onSignupPaidToggled={(signupId, paid) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.map((su) => su.id === signupId ? { ...su, paid } : su) } : p))}
                 dimmed
                 seriesLabel={s.series_id ? (seriesOptions.find((o) => o.id === s.series_id)?.label ?? null) : null}
               />
@@ -548,7 +551,7 @@ export default function SessionList({
 
 function SessionCard({
   session, players, expanded, onToggleExpand, onEdit, onDuplicate, onDelete,
-  onSignupAdded, onSignupRemoved, dimmed, seriesLabel,
+  onSignupAdded, onSignupRemoved, onSignupPaidToggled, dimmed, seriesLabel,
 }: {
   session:         TrainingSession
   players:         PlayerOption[]
@@ -557,10 +560,11 @@ function SessionCard({
   onEdit:          () => void
   onDuplicate:     () => void
   onDelete:        () => void
-  onSignupAdded:   (signup: TrainingSession["signups"][0]) => void
-  onSignupRemoved: (signupId: string) => void
-  dimmed:          boolean
-  seriesLabel:     string | null
+  onSignupAdded:       (signup: TrainingSession["signups"][0]) => void
+  onSignupRemoved:     (signupId: string) => void
+  onSignupPaidToggled: (signupId: string, paid: boolean) => void
+  dimmed:              boolean
+  seriesLabel:         string | null
 }) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
@@ -644,6 +648,7 @@ function SessionCard({
           players={players}
           onSignupAdded={onSignupAdded}
           onSignupRemoved={onSignupRemoved}
+          onSignupPaidToggled={onSignupPaidToggled}
         />
       )}
     </div>
@@ -653,12 +658,13 @@ function SessionCard({
 // ── SignupsPanel ──────────────────────────────────────────────────────────────
 
 function SignupsPanel({
-  session, players, onSignupAdded, onSignupRemoved,
+  session, players, onSignupAdded, onSignupRemoved, onSignupPaidToggled,
 }: {
-  session:         TrainingSession
-  players:         PlayerOption[]
-  onSignupAdded:   (signup: TrainingSession["signups"][0]) => void
-  onSignupRemoved: (signupId: string) => void
+  session:             TrainingSession
+  players:             PlayerOption[]
+  onSignupAdded:       (signup: TrainingSession["signups"][0]) => void
+  onSignupRemoved:     (signupId: string) => void
+  onSignupPaidToggled: (signupId: string, paid: boolean) => void
 }) {
   const [selectedPlayerId, setSelectedPlayerId] = useState("")
   const [addError, setAddError]                 = useState<string | null>(null)
@@ -667,6 +673,7 @@ function SignupsPanel({
   const signedUpPlayerIds = new Set(session.signups.map((su) => su.player_id))
   const isFull        = session.signups.length >= session.max_players
   const available     = players.filter((p) => !signedUpPlayerIds.has(p.id))
+  const unpaidCount   = session.signups.filter((su) => !su.paid).length
 
   function handleAdd() {
     if (!selectedPlayerId) return
@@ -679,6 +686,7 @@ function SignupsPanel({
         id:             result.signupId!,
         player_id:      selectedPlayerId,
         payment_method: null,
+        paid:           false,
         players:        player ? { first_name: player.first_name, last_name: player.last_name } : null,
         parents:        null,
       })
@@ -693,6 +701,13 @@ function SignupsPanel({
     })
   }
 
+  function handleTogglePaid(signupId: string, currentPaid: boolean) {
+    start(async () => {
+      const result = await markTrainingSignupPaid(signupId, !currentPaid)
+      if (!result.error) onSignupPaidToggled(signupId, !currentPaid)
+    })
+  }
+
   return (
     <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
       {/* Signup list */}
@@ -700,6 +715,11 @@ function SignupsPanel({
         <p className="text-xs text-gray-400 dark:text-gray-500">No signups yet.</p>
       ) : (
         <div className="space-y-1.5">
+          {session.payment_amount && unpaidCount > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              {unpaidCount} unpaid · {session.payment_amount} each
+            </p>
+          )}
           {session.signups.map((su) => {
             const player = su.players
               ? `${su.players.first_name} ${su.players.last_name}`
@@ -709,20 +729,33 @@ function SignupsPanel({
               : ""
             return (
               <div key={su.id} className="flex items-center justify-between gap-3">
-                <p className="text-xs text-gray-700 dark:text-gray-300">
+                <p className="text-xs text-gray-700 dark:text-gray-300 min-w-0">
                   {player}
                   <span className="text-gray-400 dark:text-gray-500">{parent}</span>
                   {su.payment_method && (
                     <span className="ml-2 text-gray-400 dark:text-gray-500">· {su.payment_method}</span>
                   )}
                 </p>
-                <button
-                  onClick={() => handleRemove(su.id)}
-                  disabled={pending}
-                  className="text-xs text-red-400 hover:text-red-600 shrink-0 disabled:opacity-40"
-                >
-                  Remove
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleTogglePaid(su.id, su.paid)}
+                    disabled={pending}
+                    className={`text-xs font-medium px-2 py-0.5 rounded-full transition-colors disabled:opacity-40 ${
+                      su.paid
+                        ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400"
+                        : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-amber-100 hover:text-amber-700 dark:hover:bg-amber-900/40 dark:hover:text-amber-400"
+                    }`}
+                  >
+                    {su.paid ? "Paid" : "Unpaid"}
+                  </button>
+                  <button
+                    onClick={() => handleRemove(su.id)}
+                    disabled={pending}
+                    className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             )
           })}
