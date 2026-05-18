@@ -12,7 +12,7 @@ export default async function TrainingPage() {
       .select(`
         id, title, description, location, session_date, session_time,
         session_end_time, max_players, payment_amount, payment_methods,
-        eligibility_rules, notes,
+        eligibility_rules, notes, series_id,
         training_signups(
           id, player_id, payment_method, paid,
           players(first_name, last_name),
