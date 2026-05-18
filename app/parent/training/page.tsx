@@ -124,6 +124,7 @@ export default async function ParentTrainingPage() {
         payment_amount:    s.payment_amount,
         payment_methods:   s.payment_methods ?? [],
         notes:             s.notes,
+        series_id:         s.series_id ?? null,
         total_signups:     signups.length,
         players:           eligiblePlayers,
         ineligiblePlayers,

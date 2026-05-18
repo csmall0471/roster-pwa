@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, useMemo } from "react"
 import { createTrainingSession, updateTrainingSession, deleteTrainingSession, adminAddTrainingSignup, adminRemoveTrainingSignup } from "../actions"
 import type { SessionData, PaymentMethod } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
@@ -24,6 +24,7 @@ export type TrainingSession = {
   payment_methods:   PaymentMethod[]
   eligibility_rules: EligibilityRules
   notes:             string | null
+  series_id:         string | null
   signups: Array<{
     id:             string
     player_id:      string
@@ -47,6 +48,7 @@ type FormState = {
   eligibility_rules: EligibilityRules
   repeat_weekly:     boolean
   repeat_weeks:      string
+  series_id:         string
 }
 
 const EMPTY_FORM: FormState = {
@@ -54,6 +56,7 @@ const EMPTY_FORM: FormState = {
   session_time: "", session_end_time: "", max_players: "10",
   payment_amount: "", payment_methods: [], notes: "",
   eligibility_rules: null, repeat_weekly: false, repeat_weeks: "4",
+  series_id: "",
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -100,6 +103,23 @@ export default function SessionList({
   const upcoming = sessions.filter((s) => !isPast(s.session_date))
   const past     = sessions.filter((s) =>  isPast(s.session_date))
 
+  const seriesOptions = useMemo(() => {
+    const map = new Map<string, TrainingSession[]>()
+    for (const s of sessions) {
+      if (!s.series_id) continue
+      if (!map.has(s.series_id)) map.set(s.series_id, [])
+      map.get(s.series_id)!.push(s)
+    }
+    return Array.from(map.entries()).map(([sid, sess]) => {
+      const sorted = [...sess].sort((a, b) => a.session_date.localeCompare(b.session_date))
+      const last   = sorted[sorted.length - 1]
+      return {
+        id:    sid,
+        label: `${sorted[0].title} · ${fmtDate(sorted[0].session_date)} – ${fmtDate(last.session_date)} (${sess.length})`,
+      }
+    })
+  }, [sessions])
+
   function openAdd() {
     setForm(EMPTY_FORM)
     setEditId(null)
@@ -122,6 +142,7 @@ export default function SessionList({
       eligibility_rules: s.eligibility_rules,
       repeat_weekly:     false,
       repeat_weeks:      "4",
+      series_id:         s.series_id        ?? "",
     }
   }
 
@@ -158,6 +179,7 @@ export default function SessionList({
       payment_methods:   form.payment_methods,
       eligibility_rules: form.eligibility_rules,
       notes:             form.notes             || null,
+      series_id:         form.series_id         || null,
     }
   }
 
@@ -182,6 +204,7 @@ export default function SessionList({
         const newRows = Array.from({ length: repeatWeeks }, (_, i) => ({
           id:           result.ids[i] ?? crypto.randomUUID(),
           ...data,
+          series_id:    result.seriesId,
           session_date: i === 0 ? data.session_date : addWeeks(data.session_date, i),
           signups:      [] as TrainingSession["signups"],
         }))
@@ -418,6 +441,23 @@ export default function SessionList({
             />
           </div>
 
+          {/* Series — only shown for single sessions (recurring auto-creates a series) */}
+          {!form.repeat_weekly && seriesOptions.length > 0 && (
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Series</label>
+              <select
+                value={form.series_id}
+                onChange={(e) => setForm((f) => ({ ...f, series_id: e.target.value }))}
+                className={inputCls}
+              >
+                <option value="">Standalone session</option>
+                {seriesOptions.map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {error && <p className="text-xs text-red-500">{error}</p>}
 
           <div className="flex items-center gap-3 pt-1">
@@ -458,6 +498,7 @@ export default function SessionList({
               onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
               onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
               dimmed={false}
+              seriesLabel={s.series_id ? (seriesOptions.find((o) => o.id === s.series_id)?.label ?? null) : null}
             />
           ))}
         </div>
@@ -483,6 +524,7 @@ export default function SessionList({
                 onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
                 onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
                 dimmed
+                seriesLabel={s.series_id ? (seriesOptions.find((o) => o.id === s.series_id)?.label ?? null) : null}
               />
             ))}
           </div>
@@ -506,7 +548,7 @@ export default function SessionList({
 
 function SessionCard({
   session, players, expanded, onToggleExpand, onEdit, onDuplicate, onDelete,
-  onSignupAdded, onSignupRemoved, dimmed,
+  onSignupAdded, onSignupRemoved, dimmed, seriesLabel,
 }: {
   session:         TrainingSession
   players:         PlayerOption[]
@@ -518,6 +560,7 @@ function SessionCard({
   onSignupAdded:   (signup: TrainingSession["signups"][0]) => void
   onSignupRemoved: (signupId: string) => void
   dimmed:          boolean
+  seriesLabel:     string | null
 }) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
@@ -566,6 +609,13 @@ function SessionCard({
           {session.eligibility_rules && (
             <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
               {describeRules(session.eligibility_rules)}
+            </p>
+          )}
+
+          {/* Series badge */}
+          {seriesLabel && (
+            <p className="text-xs text-purple-600 dark:text-purple-400 mt-0.5">
+              ⟳ {seriesLabel}
             </p>
           )}
         </button>

@@ -18,6 +18,7 @@ export type SessionData = {
   payment_methods:   PaymentMethod[]
   eligibility_rules: EligibilityRules
   notes:             string | null
+  series_id:         string | null
 }
 
 function addWeeks(dateStr: string, weeks: number): string {
@@ -28,17 +29,20 @@ function addWeeks(dateStr: string, weeks: number): string {
 
 export async function createTrainingSession(data: SessionData, repeatWeeks = 1) {
   const supabase = await createClient()
+  // Recurring batches always get a fresh series_id; single sessions use whatever was passed
+  const seriesId = repeatWeeks > 1 ? crypto.randomUUID() : data.series_id
   const rows = Array.from({ length: repeatWeeks }, (_, i) => ({
     ...data,
+    series_id:    seriesId,
     session_date: i === 0 ? data.session_date : addWeeks(data.session_date, i),
   }))
   const { data: inserted, error } = await supabase
     .from("training_sessions")
     .insert(rows)
     .select("id, session_date")
-  if (error) return { ids: [] as string[], error: error.message }
+  if (error) return { ids: [] as string[], seriesId: null, error: error.message }
   revalidatePath("/training")
-  return { ids: (inserted ?? []).map((r) => r.id as string), error: null }
+  return { ids: (inserted ?? []).map((r) => r.id as string), seriesId, error: null }
 }
 
 export async function updateTrainingSession(id: string, data: SessionData) {
@@ -102,6 +106,55 @@ export async function signUpForTraining(
   return { signupId: row.id as string, error: null }
 }
 
+export async function bulkSignUpForTraining(
+  sessionIds:    string[],
+  playerId:      string,
+  paymentMethod: string | null,
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { results: [], error: "Not authenticated" }
+
+  const { data: parentLink } = await supabase
+    .from("parent_auth")
+    .select("parent_id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle()
+  if (!parentLink) return { results: [], error: "Not a parent account" }
+
+  const results: Array<{ sessionId: string; signupId: string }> = []
+
+  for (const sessionId of sessionIds) {
+    const { data: session } = await supabase
+      .from("training_sessions")
+      .select("max_players")
+      .eq("id", sessionId)
+      .single()
+    if (!session) continue
+
+    const { count } = await supabase
+      .from("training_signups")
+      .select("*", { count: "exact", head: true })
+      .eq("session_id", sessionId)
+    if ((count ?? 0) >= session.max_players) continue
+
+    const { data: row, error } = await supabase
+      .from("training_signups")
+      .insert({
+        session_id:     sessionId,
+        player_id:      playerId,
+        parent_id:      parentLink.parent_id,
+        payment_method: paymentMethod,
+      })
+      .select("id")
+      .single()
+    if (!error && row) results.push({ sessionId, signupId: row.id as string })
+  }
+
+  revalidatePath("/parent/training")
+  return { results, error: null }
+}
+
 export async function adminAddTrainingSignup(sessionId: string, playerId: string) {
   const supabase = await createClient()
 
@@ -118,7 +171,6 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
     .eq("session_id", sessionId)
   if ((count ?? 0) >= session.max_players) return { signupId: null, error: "Session is full" }
 
-  // Attempt to link to the player's parent so parent-side cancellations still work
   const { data: parentRow } = await supabase
     .from("player_parents")
     .select("parent_id")

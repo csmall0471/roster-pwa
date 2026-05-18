@@ -43,6 +43,7 @@ export default async function TrainingPage() {
     payment_methods:   s.payment_methods ?? [],
     eligibility_rules: s.eligibility_rules as EligibilityRules,
     notes:             s.notes,
+    series_id:         s.series_id ?? null,
     signups:           s.training_signups ?? [],
   }))
 

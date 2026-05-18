@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useTransition } from "react"
-import { signUpForTraining, cancelTrainingSignup } from "@/app/(protected)/training/actions"
+import { useState, useTransition, useMemo } from "react"
+import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining } from "@/app/(protected)/training/actions"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -39,6 +39,7 @@ export type TrainingSessionForParent = {
   payment_methods:   PaymentMethod[]
   notes:             string | null
   total_signups:     number
+  series_id:         string | null
   players:           EligiblePlayer[]
   ineligiblePlayers: IneligiblePlayer[]
   signedUpPlayers:   SignedUpPlayer[]
@@ -123,6 +124,32 @@ export default function TrainingList({
     )
   }
 
+  function onBulkSignup(playerId: string, results: Array<{ sessionId: string; signupId: string }>) {
+    setSessions((prev) =>
+      prev.map((s) => {
+        const result = results.find((r) => r.sessionId === s.id)
+        if (!result) return s
+        return {
+          ...s,
+          total_signups: s.total_signups + 1,
+          players: s.players.map((p) =>
+            p.player_id === playerId ? { ...p, signup_id: result.signupId } : p
+          ),
+        }
+      })
+    )
+  }
+
+  const seriesMap = useMemo(() => {
+    const map = new Map<string, TrainingSessionForParent[]>()
+    for (const s of sessions) {
+      if (!s.series_id) continue
+      if (!map.has(s.series_id)) map.set(s.series_id, [])
+      map.get(s.series_id)!.push(s)
+    }
+    return map
+  }, [sessions])
+
   const grouped = groupByDate(sessions)
 
   return (
@@ -132,8 +159,10 @@ export default function TrainingList({
           key={date}
           date={date}
           sessions={dateSessions}
+          seriesMap={seriesMap}
           onSignup={(sessionId, playerId, signupId) => onSignup(sessionId, playerId, signupId)}
           onCancel={(sessionId, playerId) => onCancel(sessionId, playerId)}
+          onBulkSignup={(playerId, results) => onBulkSignup(playerId, results)}
         />
       ))}
     </div>
@@ -143,12 +172,14 @@ export default function TrainingList({
 // ── DateGroup ─────────────────────────────────────────────────────────────────
 
 function DateGroup({
-  date, sessions, onSignup, onCancel,
+  date, sessions, seriesMap, onSignup, onCancel, onBulkSignup,
 }: {
-  date:     string
-  sessions: TrainingSessionForParent[]
-  onSignup: (sessionId: string, playerId: string, signupId: string) => void
-  onCancel: (sessionId: string, playerId: string) => void
+  date:         string
+  sessions:     TrainingSessionForParent[]
+  seriesMap:    Map<string, TrainingSessionForParent[]>
+  onSignup:     (sessionId: string, playerId: string, signupId: string) => void
+  onCancel:     (sessionId: string, playerId: string) => void
+  onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
 }) {
   const [open, setOpen] = useState(false)
   const count = sessions.length
@@ -178,8 +209,10 @@ function DateGroup({
             <SessionCard
               key={s.id}
               session={s}
+              seriesMap={seriesMap}
               onSignup={(playerId, signupId) => onSignup(s.id, playerId, signupId)}
               onCancel={(playerId) => onCancel(s.id, playerId)}
+              onBulkSignup={onBulkSignup}
             />
           ))}
         </div>
@@ -191,16 +224,20 @@ function DateGroup({
 // ── SessionCard ───────────────────────────────────────────────────────────────
 
 function SessionCard({
-  session, onSignup, onCancel,
+  session, seriesMap, onSignup, onCancel, onBulkSignup,
 }: {
-  session:  TrainingSessionForParent
-  onSignup: (playerId: string, signupId: string) => void
-  onCancel: (playerId: string) => void
+  session:      TrainingSessionForParent
+  seriesMap:    Map<string, TrainingSessionForParent[]>
+  onSignup:     (playerId: string, signupId: string) => void
+  onCancel:     (playerId: string) => void
+  onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
 }) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
   const openSlots = session.max_players - session.total_signups
   const isFull    = openSlots <= 0
+
+  const siblings = session.series_id ? (seriesMap.get(session.series_id) ?? []) : []
 
   return (
     <div className="bg-white dark:bg-gray-900">
@@ -246,18 +283,28 @@ function SessionCard({
 
       {/* Per-player signup rows */}
       <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
-        {session.players.map((player) => (
-          <PlayerRow
-            key={player.player_id}
-            player={player}
-            sessionId={session.id}
-            isFull={isFull}
-            paymentMethods={session.payment_methods}
-            paymentAmount={session.payment_amount}
-            onSignup={(signupId) => onSignup(player.player_id, signupId)}
-            onCancel={() => onCancel(player.player_id)}
-          />
-        ))}
+        {session.players.map((player) => {
+          // Sibling sessions in this series where this player is eligible but not yet registered
+          const unregisteredSiblings = siblings.filter((sibling) =>
+            sibling.id !== session.id &&
+            sibling.players.some((p) => p.player_id === player.player_id && !p.signup_id)
+          )
+          return (
+            <PlayerRow
+              key={player.player_id}
+              player={player}
+              sessionId={session.id}
+              isFull={isFull}
+              paymentMethods={session.payment_methods}
+              paymentAmount={session.payment_amount}
+              unregisteredSiblings={unregisteredSiblings}
+              seriesTotal={siblings.length + 1}
+              onSignup={(signupId) => onSignup(player.player_id, signupId)}
+              onCancel={() => onCancel(player.player_id)}
+              onBulkSignup={(results) => onBulkSignup(player.player_id, results)}
+            />
+          )
+        })}
 
         {/* Signed-up players from other families */}
         {session.signedUpPlayers.length > 0 && (
@@ -310,15 +357,19 @@ function IneligibleDropdown({ players }: { players: IneligiblePlayer[] }) {
 // ── PlayerRow ─────────────────────────────────────────────────────────────────
 
 function PlayerRow({
-  player, sessionId, isFull, paymentMethods, paymentAmount, onSignup, onCancel,
+  player, sessionId, isFull, paymentMethods, paymentAmount,
+  unregisteredSiblings, seriesTotal, onSignup, onCancel, onBulkSignup,
 }: {
-  player:         EligiblePlayer
-  sessionId:      string
-  isFull:         boolean
-  paymentMethods: PaymentMethod[]
-  paymentAmount:  string | null
-  onSignup:       (signupId: string) => void
-  onCancel:       () => void
+  player:                EligiblePlayer
+  sessionId:             string
+  isFull:                boolean
+  paymentMethods:        PaymentMethod[]
+  paymentAmount:         string | null
+  unregisteredSiblings:  TrainingSessionForParent[]
+  seriesTotal:           number
+  onSignup:              (signupId: string) => void
+  onCancel:              () => void
+  onBulkSignup:          (results: Array<{ sessionId: string; signupId: string }>) => void
 }) {
   const [showForm, setShowForm]       = useState(false)
   const [selectedMethod, setMethod]   = useState<string | null>(null)
@@ -349,6 +400,23 @@ function PlayerRow({
     })
   }
 
+  function handleBulkSignup() {
+    setError(null)
+    const ids = unregisteredSiblings.map((s) => s.id)
+    start(async () => {
+      const result = await bulkSignUpForTraining(ids, player.player_id, selectedMethod)
+      if (result.error) { setError(result.error); return }
+      onBulkSignup(result.results)
+      setShowForm(false)
+    })
+  }
+
+  const registeredCount = seriesTotal > 1
+    ? (unregisteredSiblings.length === 0
+        ? seriesTotal  // all registered (this one + no remaining siblings)
+        : seriesTotal - unregisteredSiblings.length - (isRegistered ? 0 : 1))
+    : null
+
   // Find the payment method object so we can show a link if registered
   const chosenMethod = paymentMethods.find((m) => m.label === player.payment_method)
 
@@ -357,11 +425,12 @@ function PlayerRow({
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
           {isRegistered ? (
             <>
               <span className="text-xs font-semibold text-green-700 dark:text-green-400">
                 ✓ Registered{player.payment_method ? ` · ${player.payment_method}` : ""}
+                {registeredCount !== null && ` (${registeredCount}/${seriesTotal})`}
               </span>
               {chosenMethod?.link && paymentAmount && (
                 <a
@@ -392,11 +461,22 @@ function PlayerRow({
               {pending ? "Signing up…" : "Sign up"}
             </button>
           ) : null}
+
+          {/* After registering: offer to sign up for remaining series sessions */}
+          {isRegistered && unregisteredSiblings.length > 0 && (
+            <button
+              onClick={() => needsPaymentChoice ? setShowForm(true) : handleBulkSignup()}
+              disabled={pending}
+              className="text-xs text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
+            >
+              {pending ? "…" : `+ Sign up for all ${unregisteredSiblings.length} remaining`}
+            </button>
+          )}
         </div>
       </div>
 
       {/* Payment method selection */}
-      {showForm && !isRegistered && (
+      {showForm && (
         <div className="mt-2 space-y-2 pl-1">
           <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
             How will you pay{paymentAmount ? ` (${paymentAmount})` : ""}?
@@ -416,14 +496,25 @@ function PlayerRow({
             ))}
           </div>
           {error && <p className="text-xs text-red-500">{error}</p>}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSignup}
-              disabled={pending || !selectedMethod}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {pending ? "Signing up…" : "Confirm"}
-            </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            {!isRegistered && (
+              <button
+                onClick={handleSignup}
+                disabled={pending || !selectedMethod}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {pending ? "Signing up…" : "This session only"}
+              </button>
+            )}
+            {unregisteredSiblings.length > 0 && (
+              <button
+                onClick={handleBulkSignup}
+                disabled={pending || !selectedMethod}
+                className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+              >
+                {pending ? "Signing up…" : `All ${unregisteredSiblings.length + (isRegistered ? 0 : 1)} remaining sessions`}
+              </button>
+            )}
             <button
               onClick={() => { setShowForm(false); setMethod(null) }}
               className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
