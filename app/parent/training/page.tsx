@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
-import { isPlayerEligible, type EligibilityRules } from "@/lib/training-eligibility"
+import { isPlayerEligible, explainIneligibility, type EligibilityRules } from "@/lib/training-eligibility"
 import TrainingList, { type TrainingSessionForParent } from "./_components/TrainingList"
 
 export default async function ParentTrainingPage() {
@@ -42,7 +42,7 @@ export default async function ParentTrainingPage() {
         id, title, description, location, session_date, session_time,
         session_end_time, max_players, payment_amount, payment_methods,
         notes, eligibility_rules,
-        training_signups(id, player_id, payment_method)
+        training_signups(id, player_id, payment_method, players(first_name, last_name))
       `)
       .gte("session_date", today)
       .order("session_date", { ascending: true }),
@@ -63,47 +63,67 @@ export default async function ParentTrainingPage() {
   // Evaluate eligibility and build sessions for this parent
   const sessions: TrainingSessionForParent[] = (sessionsRaw ?? [])
     .map((s: any) => {
-      const signups: Array<{ id: string; player_id: string; payment_method: string | null }> = s.training_signups ?? []
+      const signups: Array<{
+        id: string
+        player_id: string
+        payment_method: string | null
+        players: { first_name: string; last_name: string } | null
+      }> = s.training_signups ?? []
 
-      const eligiblePlayers = playerIds
-        .map((pid: string) => {
-          const player = playerMap.get(pid) as any
-          const dob     = player?.date_of_birth ?? null
-          const teamIds = playerTeams.get(pid) ?? new Set<string>()
-          const eligible = isPlayerEligible(
-            s.eligibility_rules as EligibilityRules,
-            dob,
-            teamIds,
-            s.session_date,
-          )
-          if (!eligible) return null
+      const eligiblePlayers: TrainingSessionForParent["players"] = []
+      const ineligiblePlayers: TrainingSessionForParent["ineligiblePlayers"] = []
+
+      for (const pid of playerIds as string[]) {
+        const player  = playerMap.get(pid) as any
+        const dob     = player?.date_of_birth ?? null
+        const teamIds = playerTeams.get(pid) ?? new Set<string>()
+        const rules   = s.eligibility_rules as EligibilityRules
+
+        if (isPlayerEligible(rules, dob, teamIds, s.session_date)) {
           const signup = signups.find((su) => su.player_id === pid)
-          return {
+          eligiblePlayers.push({
             player_id:      pid,
             first_name:     player?.first_name ?? "",
             last_name:      player?.last_name  ?? "",
             signup_id:      signup?.id ?? null,
             payment_method: signup?.payment_method ?? null,
-          }
-        })
-        .filter(Boolean) as TrainingSessionForParent["players"]
+          })
+        } else {
+          ineligiblePlayers.push({
+            player_id:  pid,
+            first_name: player?.first_name ?? "",
+            last_name:  player?.last_name  ?? "",
+            reason:     explainIneligibility(rules, dob, teamIds, s.session_date),
+          })
+        }
+      }
 
-      if (eligiblePlayers.length === 0) return null
+      if (eligiblePlayers.length === 0 && ineligiblePlayers.length === 0) return null
+
+      // All players currently signed up (for showing to the parent)
+      const signedUpPlayers: TrainingSessionForParent["signedUpPlayers"] = signups
+        .filter((su) => su.players)
+        .map((su) => ({
+          first_name: su.players!.first_name,
+          last_name:  su.players!.last_name,
+        }))
 
       return {
-        id:             s.id,
-        title:          s.title,
-        description:    s.description,
-        location:       s.location,
-        session_date:   s.session_date,
-        session_time:    s.session_time,
-        session_end_time: s.session_end_time,
-        max_players:     s.max_players,
-        payment_amount:  s.payment_amount,
-        payment_methods: s.payment_methods ?? [],
-        notes:          s.notes,
-        total_signups:  signups.length,
-        players:        eligiblePlayers,
+        id:                s.id,
+        title:             s.title,
+        description:       s.description,
+        location:          s.location,
+        session_date:      s.session_date,
+        session_time:      s.session_time,
+        session_end_time:  s.session_end_time,
+        max_players:       s.max_players,
+        payment_amount:    s.payment_amount,
+        payment_methods:   s.payment_methods ?? [],
+        notes:             s.notes,
+        total_signups:     signups.length,
+        players:           eligiblePlayers,
+        ineligiblePlayers,
+        signedUpPlayers,
       }
     })
     .filter(Boolean) as TrainingSessionForParent[]

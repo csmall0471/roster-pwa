@@ -47,6 +47,55 @@ function evalNode(
   return true
 }
 
+function explainNode(
+  node: LeafRule | RuleGroup,
+  dob: string | null,
+  teamIds: Set<string>,
+  sessionDate: string,
+): string | null {
+  if (node.type === "group") {
+    if (node.conditions.length === 0) return null
+    if (node.op === "AND") {
+      for (const c of node.conditions) {
+        const reason = explainNode(c, dob, teamIds, sessionDate)
+        if (reason) return reason
+      }
+      return null
+    } else {
+      // OR — fail only if ALL branches fail; report the first failure reason
+      const reasons: string[] = []
+      for (const c of node.conditions) {
+        const reason = explainNode(c, dob, teamIds, sessionDate)
+        if (!reason) return null // at least one branch passed
+        reasons.push(reason)
+      }
+      return reasons[0] ?? null
+    }
+  }
+  if (node.type === "age") {
+    if (!dob) return "no date of birth on file"
+    const age = calcAge(dob, sessionDate)
+    if (node.min !== undefined && age < node.min) return `too young (age ${age}, min ${node.min})`
+    if (node.max !== undefined && age > node.max) return `too old (age ${age}, max ${node.max})`
+    return null
+  }
+  if (node.type === "team") {
+    if (!teamIds.has(node.team_id)) return `not on ${node.team_name}`
+    return null
+  }
+  return null
+}
+
+export function explainIneligibility(
+  rules: EligibilityRules,
+  dob: string | null,
+  teamIds: Set<string>,
+  sessionDate: string,
+): string {
+  if (!rules) return ""
+  return explainNode(rules, dob, teamIds, sessionDate) ?? ""
+}
+
 export function isPlayerEligible(
   rules: EligibilityRules,
   dob: string | null,

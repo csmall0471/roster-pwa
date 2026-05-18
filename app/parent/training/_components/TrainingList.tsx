@@ -14,20 +14,34 @@ export type EligiblePlayer = {
   payment_method: string | null
 }
 
+export type IneligiblePlayer = {
+  player_id:  string
+  first_name: string
+  last_name:  string
+  reason:     string
+}
+
+export type SignedUpPlayer = {
+  first_name: string
+  last_name:  string
+}
+
 export type TrainingSessionForParent = {
-  id:              string
-  title:           string
-  description:     string | null
-  location:        string | null
-  session_date:    string
-  session_time:    string | null
-  session_end_time: string | null
-  max_players:     number
-  payment_amount:  string | null
-  payment_methods: PaymentMethod[]
-  notes:           string | null
-  total_signups:   number
-  players:         EligiblePlayer[]
+  id:                string
+  title:             string
+  description:       string | null
+  location:          string | null
+  session_date:      string
+  session_time:      string | null
+  session_end_time:  string | null
+  max_players:       number
+  payment_amount:    string | null
+  payment_methods:   PaymentMethod[]
+  notes:             string | null
+  total_signups:     number
+  players:           EligiblePlayer[]
+  ineligiblePlayers: IneligiblePlayer[]
+  signedUpPlayers:   SignedUpPlayer[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,7 +190,51 @@ function SessionCard({
             onCancel={() => onCancel(player.player_id)}
           />
         ))}
+
+        {/* Signed-up players from other families */}
+        {session.signedUpPlayers.length > 0 && (
+          <div className="px-5 py-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="font-medium">Signed up:</span>{" "}
+              {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
+            </p>
+          </div>
+        )}
+
+        {/* Ineligible kids dropdown */}
+        {session.ineligiblePlayers.length > 0 && (
+          <IneligibleDropdown players={session.ineligiblePlayers} />
+        )}
       </div>
+    </div>
+  )
+}
+
+// ── IneligibleDropdown ────────────────────────────────────────────────────────
+
+function IneligibleDropdown({ players }: { players: IneligiblePlayer[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="px-5 py-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        {players.length} player{players.length !== 1 ? "s" : ""} not eligible
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-1 pl-4">
+          {players.map((p) => (
+            <li key={p.player_id} className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="font-medium text-gray-700 dark:text-gray-300">
+                {p.first_name} {p.last_name}
+              </span>
+              {" — "}{p.reason}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
