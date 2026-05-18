@@ -42,11 +42,24 @@ export default async function ParentTrainingPage() {
         id, title, description, location, session_date, session_time,
         session_end_time, max_players, payment_amount, payment_methods,
         notes, eligibility_rules,
-        training_signups(id, player_id, payment_method, players(first_name, last_name))
+        training_signups(id, player_id, payment_method)
       `)
       .gte("session_date", today)
       .order("session_date", { ascending: true }),
   ])
+
+  // Fetch signup player names via security-definer function (bypasses players RLS)
+  const sessionIds = (sessionsRaw ?? []).map((s: any) => s.id as string)
+  const { data: signupNamesRaw } = sessionIds.length > 0
+    ? await supabase.rpc("get_training_signup_names", { p_session_ids: sessionIds })
+    : { data: [] }
+
+  // session_id -> [{first_name, last_name}]
+  const signupNamesBySession = new Map<string, Array<{ first_name: string; last_name: string }>>()
+  for (const row of (signupNamesRaw ?? []) as Array<{ session_id: string; first_name: string; last_name: string }>) {
+    if (!signupNamesBySession.has(row.session_id)) signupNamesBySession.set(row.session_id, [])
+    signupNamesBySession.get(row.session_id)!.push({ first_name: row.first_name, last_name: row.last_name })
+  }
 
   // Build lookups
   const playerMap = new Map(
@@ -63,12 +76,8 @@ export default async function ParentTrainingPage() {
   // Evaluate eligibility and build sessions for this parent
   const sessions: TrainingSessionForParent[] = (sessionsRaw ?? [])
     .map((s: any) => {
-      const signups: Array<{
-        id: string
-        player_id: string
-        payment_method: string | null
-        players: { first_name: string; last_name: string } | null
-      }> = s.training_signups ?? []
+      const signups: Array<{ id: string; player_id: string; payment_method: string | null }> =
+        s.training_signups ?? []
 
       const eligiblePlayers: TrainingSessionForParent["players"] = []
       const ineligiblePlayers: TrainingSessionForParent["ineligiblePlayers"] = []
@@ -100,13 +109,8 @@ export default async function ParentTrainingPage() {
 
       if (eligiblePlayers.length === 0 && ineligiblePlayers.length === 0) return null
 
-      // All players currently signed up (for showing to the parent)
-      const signedUpPlayers: TrainingSessionForParent["signedUpPlayers"] = signups
-        .filter((su) => su.players)
-        .map((su) => ({
-          first_name: su.players!.first_name,
-          last_name:  su.players!.last_name,
-        }))
+      const signedUpPlayers: TrainingSessionForParent["signedUpPlayers"] =
+        signupNamesBySession.get(s.id) ?? []
 
       return {
         id:                s.id,
