@@ -4,7 +4,7 @@ import { useState, useMemo, useTransition } from "react"
 import type { SkillsSession, SkillsAttempt } from "../actions"
 import { createSkillsSession, deleteSkillsSession } from "../actions"
 import { hotShotsTotal, formatTime } from "../utils"
-import ScoringModal from "./ScoringModal"
+import FullScreenScorer from "./FullScreenScorer"
 
 export type PlayerOption = {
   id:         string
@@ -19,20 +19,19 @@ type Props = {
 }
 
 export default function SkillsHub({ initialSessions, initialAttempts, players }: Props) {
-  const [sessions, setSessions]               = useState(initialSessions)
-  const [attempts, setAttempts]               = useState(initialAttempts)
+  const [sessions, setSessions]       = useState(initialSessions)
+  const [attempts, setAttempts]       = useState(initialAttempts)
   const [selectedSessionId, setSelectedSession] = useState<string | null>(
     initialSessions[0]?.id ?? null
   )
-  const [scoringPlayer, setScoringPlayer]     = useState<{ playerId: string; sessionId: string } | null>(null)
-  const [showNewForm, setShowNewForm]         = useState(false)
-  const [newName, setNewName]                 = useState("")
-  const [newDate, setNewDate]                 = useState(new Date().toISOString().split("T")[0])
-  const [newNotes, setNewNotes]               = useState("")
-  const [isPending, startTransition]          = useTransition()
-  const [error, setError]                     = useState<string | null>(null)
+  const [scoringPlayer, setScoringPlayer] = useState<{ playerId: string; sessionId: string } | null>(null)
+  const [showNewForm, setShowNewForm]     = useState(false)
+  const [newName, setNewName]             = useState("")
+  const [newDate, setNewDate]             = useState(new Date().toISOString().split("T")[0])
+  const [newNotes, setNewNotes]           = useState("")
+  const [isPending, startTransition]      = useTransition()
+  const [error, setError]                 = useState<string | null>(null)
 
-  // Map attempt by sessionId+playerId for fast lookup
   const attemptMap = useMemo(() => {
     const m = new Map<string, SkillsAttempt>()
     for (const a of attempts) m.set(`${a.skills_session_id}:${a.player_id}`, a)
@@ -85,9 +84,7 @@ export default function SkillsHub({ initialSessions, initialAttempts, players }:
 
   return (
     <div className="space-y-6">
-      {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-      )}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {/* Session selector */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -231,9 +228,9 @@ export default function SkillsHub({ initialSessions, initialAttempts, players }:
         </p>
       )}
 
-      {/* Scoring modal */}
+      {/* Full-screen scorer */}
       {scoringPlayer && (
-        <ScoringModal
+        <FullScreenScorer
           player={players.find((p) => p.id === scoringPlayer.playerId)!}
           sessionId={scoringPlayer.sessionId}
           initialAttempt={scoringAttempt}

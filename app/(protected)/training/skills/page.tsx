@@ -12,7 +12,7 @@ export default async function SkillsPage() {
       .order("session_date", { ascending: false }),
     supabase
       .from("skills_attempts")
-      .select("id, skills_session_id, player_id, course_time_ms, free_throw_makes, hot_shots_8pt, hot_shots_7pt, hot_shots_5pt, hot_shots_3pt, hot_shots_2pt, notes"),
+      .select("id, skills_session_id, player_id, course_time_ms, course_splits, free_throw_makes, hot_shots_8pt, hot_shots_7pt, hot_shots_5pt, hot_shots_3pt, hot_shots_2pt, hot_shots_log, notes"),
     supabase
       .from("players")
       .select("id, first_name, last_name")

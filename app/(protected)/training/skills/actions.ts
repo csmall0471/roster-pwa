@@ -11,17 +11,32 @@ export type SkillsSession = {
   created_at:   string
 }
 
+export type CourseSplit = {
+  checkpoint: string
+  time_ms:    number
+  order:      number
+}
+
+export type ShotLogEntry = {
+  position: "8pt" | "7pt" | "5pt" | "3pt" | "2pt"
+  made:     boolean
+  time_ms:  number
+  order:    number
+}
+
 export type SkillsAttempt = {
   id:                string
   skills_session_id: string
   player_id:         string
   course_time_ms:    number | null
+  course_splits:     CourseSplit[] | null
   free_throw_makes:  number | null
   hot_shots_8pt:     number
   hot_shots_7pt:     number
   hot_shots_5pt:     number
   hot_shots_3pt:     number
   hot_shots_2pt:     number
+  hot_shots_log:     ShotLogEntry[] | null
   notes:             string | null
 }
 
@@ -54,18 +69,19 @@ export async function upsertSkillsAttempt(
   playerId: string,
   data: {
     course_time_ms?:   number | null
+    course_splits?:    CourseSplit[] | null
     free_throw_makes?: number | null
     hot_shots_8pt?:    number
     hot_shots_7pt?:    number
     hot_shots_5pt?:    number
     hot_shots_3pt?:    number
     hot_shots_2pt?:    number
+    hot_shots_log?:    ShotLogEntry[] | null
     notes?:            string | null
   }
 ) {
   const supabase = await createClient()
 
-  // Check if attempt exists
   const { data: existing } = await supabase
     .from("skills_attempts")
     .select("id")
@@ -73,20 +89,21 @@ export async function upsertSkillsAttempt(
     .eq("player_id", playerId)
     .maybeSingle()
 
-  let result: { data: any; error: any }
+  const selectCols = "id, skills_session_id, player_id, course_time_ms, course_splits, free_throw_makes, hot_shots_8pt, hot_shots_7pt, hot_shots_5pt, hot_shots_3pt, hot_shots_2pt, hot_shots_log, notes"
 
+  let result: { data: any; error: any }
   if (existing) {
     result = await supabase
       .from("skills_attempts")
       .update({ ...data, updated_at: new Date().toISOString() })
       .eq("id", existing.id)
-      .select()
+      .select(selectCols)
       .single()
   } else {
     result = await supabase
       .from("skills_attempts")
       .insert({ skills_session_id: skillsSessionId, player_id: playerId, ...data })
-      .select()
+      .select(selectCols)
       .single()
   }
 
