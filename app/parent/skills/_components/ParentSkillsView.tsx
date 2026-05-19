@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import type { SkillsSession, SkillsAttempt } from "@/app/(protected)/training/skills/actions"
-import { hotShotsTotal, formatTime } from "@/app/(protected)/training/skills/actions"
+import { hotShotsTotal, formatTime } from "@/app/(protected)/training/skills/utils"
 
 type Player = { id: string; first_name: string; last_name: string }
 

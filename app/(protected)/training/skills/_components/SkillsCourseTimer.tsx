@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { formatTime } from "../actions"
+import { formatTime } from "../utils"
 
 type Props = {
   initialMs: number | null

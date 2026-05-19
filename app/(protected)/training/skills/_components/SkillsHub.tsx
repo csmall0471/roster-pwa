@@ -3,7 +3,7 @@
 import { useState, useMemo, useTransition } from "react"
 import type { SkillsSession, SkillsAttempt } from "../actions"
 import { createSkillsSession, deleteSkillsSession } from "../actions"
-import { hotShotsTotal, formatTime } from "../actions"
+import { hotShotsTotal, formatTime } from "../utils"
 import ScoringModal from "./ScoringModal"
 
 export type PlayerOption = {
