@@ -3,39 +3,89 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import type { CourseSplit } from "../actions"
 import { formatTime } from "../utils"
+import CourtSVG from "./CourtSVG"
 
-// Checkpoints in order — positions on the SVG viewBox 390 x 580
+// ─── Course checkpoints (in order) ────────────────────────────────────────────
+// Court: basket at top (195,27), FT line y=200, 3pt arc bottom y=295, half-court y=565
 type Checkpoint = {
-  id:    string
-  label: string
-  cx:    number
-  cy:    number
+  id:       string
+  label:    string
+  sublabel: string
+  cx:       number
+  cy:       number
+  r:        number
   isFinish?: boolean
 }
 
 const CHECKPOINTS: Checkpoint[] = [
-  { id: "start",      label: "Start",          cx: 195, cy: 530 },
-  { id: "left1",      label: "Left Cones",      cx:  65, cy: 420 },
-  { id: "left2",      label: "Top Left",        cx:  65, cy: 200 },
-  { id: "across",     label: "Across Top",      cx: 195, cy: 155 },
-  { id: "coach",      label: "Pass to Coach",   cx: 305, cy: 200 },
-  { id: "right1",     label: "Right Cones",     cx: 325, cy: 370 },
-  { id: "layup",      label: "Layup / Finish",  cx: 195, cy: 440, isFinish: true },
+  { id: "layup1",   label: "1",  sublabel: "Layup",         cx: 238, cy:  60, r: 28 },
+  { id: "freethrow",label: "2",  sublabel: "Free Throw",    cx: 195, cy: 200, r: 28 },
+  { id: "halfcourt",label: "3",  sublabel: "Half Court",    cx: 195, cy: 550, r: 30 },
+  { id: "coach",    label: "4",  sublabel: "Pass to Coach", cx: 195, cy: 205, r: 28 },
+  { id: "receive",  label: "5",  sublabel: "Catch Pass",    cx: 195, cy: 205, r: 28 },
+  { id: "cone3pt",  label: "6",  sublabel: "3pt Cone",      cx:  68, cy: 295, r: 28 },
+  { id: "layup2",   label: "7",  sublabel: "Finish Layup",  cx: 152, cy:  60, r: 28, isFinish: true },
 ]
 
-// SVG path elements for the course route
-const COURSE_PATH = "M 195 530 L 65 480 L 65 360 L 65 240 L 65 200 L 195 155 L 305 200 L 325 300 L 325 370 L 230 440 L 195 440"
-
-// Cone positions along the left side (going up) and right side (going down)
-const CONES = [
-  { cx:  90, cy: 475 }, { cx:  45, cy: 445 },
-  { cx:  90, cy: 395 }, { cx:  45, cy: 360 },
-  { cx:  90, cy: 310 }, { cx:  45, cy: 275 },
-  { cx:  90, cy: 235 },
-  // right side
-  { cx: 305, cy: 305 }, { cx: 348, cy: 340 },
-  { cx: 305, cy: 385 }, { cx: 348, cy: 415 },
+// ─── Cones ────────────────────────────────────────────────────────────────────
+// Right side: 1 turn cone at bottom-right, 5 ascending zig-zag cones
+// Left side: 3 cones going down from FT line to 3pt arc
+const CONES: Array<{ cx: number; cy: number }> = [
+  // Right side — bottom corner turn
+  { cx: 350, cy: 488 },
+  // Right side — 5 ascending zig-zag cones
+  { cx: 375, cy: 440 },
+  { cx: 320, cy: 392 },
+  { cx: 372, cy: 344 },
+  { cx: 322, cy: 298 },
+  { cx: 368, cy: 252 },
+  // Left side — 3 descending cones (last at 3pt arc level)
+  { cx: 32,  cy: 220 },
+  { cx: 32,  cy: 258 },
+  { cx: 55,  cy: 295 },
 ]
+
+// ─── Course path (dashed yellow line following the exact route) ───────────────
+// 1→2: right of basket → FT line
+// 2→3: FT line → right → bottom-right corner → zig-zag up → half court
+// 3→4: half court → coach at FT line (pass)
+// 4→5: pass back (same zone — short animation)
+// 5→6: FT line area → left sideline → down 3 cones → 3pt level
+// 6→7: 3pt cone → finish layup
+const COURSE_PATH = [
+  "M 238 60",
+  "L 195 200",          // → FT line
+  "L 295 200",          // right of FT line
+  "L 350 488",          // → bottom-right corner cone
+  "L 375 440",          // zig
+  "L 320 392",          // zag
+  "L 372 344",          // zig
+  "L 322 298",          // zag
+  "L 368 252",          // zig
+  "L 195 550",          // → half court center
+  "L 195 205",          // → coach (top of key, pass up)
+  "L 195 340",          // bounce back (receive)
+  "L 32 210",           // → left sideline
+  "L 32 258",           // down through left cones
+  "L 55 295",           // → last cone at 3pt
+  "L 152 60",           // → finish layup
+].join(" ")
+
+// ─── Direction arrows ─────────────────────────────────────────────────────────
+// Small arrowheads at key path segments
+type Arrow = { x: number; y: number; angle: number }
+const ARROWS: Arrow[] = [
+  { x: 195, y: 150, angle: 90 },   // going down toward FT
+  { x: 250, y: 200, angle:  0 },   // going right
+  { x: 358, y: 370, angle: 90 },   // going up (right side)
+  { x: 350, y: 310, angle: 90 },   // going up (right side)
+  { x: 195, y: 480, angle: 270 },  // going up toward coach
+  { x: 110, y: 210, angle: 180 },  // going left
+  { x:  32, y: 238, angle: 90 },   // going down (left cones)
+  { x: 110, y:  80, angle: 315 },  // going up-right to layup
+]
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 type Props = {
   initialTimeMs: number | null
@@ -46,12 +96,41 @@ type Props = {
 
 type TimerState = "idle" | "running" | "stopped"
 
+function Cone({ cx, cy }: { cx: number; cy: number }) {
+  return (
+    <g>
+      <polygon
+        points={`${cx},${cy - 10} ${cx - 8},${cy + 6} ${cx + 8},${cy + 6}`}
+        fill="#f97316"
+        stroke="#ea580c"
+        strokeWidth="1"
+      />
+      <line x1={cx - 9} y1={cy + 6} x2={cx + 9} y2={cy + 6} stroke="#ea580c" strokeWidth="2" />
+    </g>
+  )
+}
+
+function ArrowHead({ x, y, angle }: Arrow) {
+  const rad = (angle * Math.PI) / 180
+  const len = 12
+  const tip = { x: x + Math.cos(rad) * len, y: y + Math.sin(rad) * len }
+  const left = { x: x - Math.cos(rad - 0.6) * 8, y: y - Math.sin(rad - 0.6) * 8 }
+  const right = { x: x - Math.cos(rad + 0.6) * 8, y: y - Math.sin(rad + 0.6) * 8 }
+  return (
+    <polygon
+      points={`${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`}
+      fill="#facc15"
+      opacity="0.85"
+    />
+  )
+}
+
 export default function CourseScorer({ initialTimeMs, initialSplits, saving, onSave }: Props) {
-  const [status, setStatus]         = useState<TimerState>("idle")
-  const [elapsed, setElapsed]       = useState(0)
-  const [splits, setSplits]         = useState<CourseSplit[]>(initialSplits ?? [])
+  const [status, setStatus]               = useState<TimerState>("idle")
+  const [elapsed, setElapsed]             = useState(0)
+  const [splits, setSplits]               = useState<CourseSplit[]>(initialSplits ?? [])
   const [nextCheckpoint, setNextCheckpoint] = useState(0)
-  const [finished, setFinished]     = useState(initialTimeMs != null)
+  const [finished, setFinished]           = useState(initialTimeMs != null)
 
   const startRef = useRef<number | null>(null)
   const rafRef   = useRef<number | null>(null)
@@ -68,7 +147,7 @@ export default function CourseScorer({ initialTimeMs, initialSplits, saving, onS
     rafRef.current = requestAnimationFrame(tick)
   }
 
-  function stop() {
+  function pause() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     setStatus("stopped")
   }
@@ -85,66 +164,56 @@ export default function CourseScorer({ initialTimeMs, initialSplits, saving, onS
 
   function tapCheckpoint(cp: Checkpoint, idx: number) {
     if (status !== "running") return
-    if (idx !== nextCheckpoint) return // must tap in order
+    if (idx !== nextCheckpoint) return
 
     const timeMs = Math.round(performance.now() - (startRef.current ?? 0))
-    const split: CourseSplit = { checkpoint: cp.label, time_ms: timeMs, order: idx + 1 }
+    const split: CourseSplit = { checkpoint: cp.sublabel, time_ms: timeMs, order: idx + 1 }
     const newSplits = [...splits, split]
     setSplits(newSplits)
     setNextCheckpoint(idx + 1)
 
     if (cp.isFinish) {
-      stop()
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
       setElapsed(timeMs)
+      setStatus("stopped")
       setFinished(true)
     }
   }
 
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }, [])
 
-  const canSave = finished && splits.length > 0
+  const displayMs = finished && status !== "running" ? (splits[splits.length - 1]?.time_ms ?? elapsed) : elapsed
 
   return (
     <div className="h-full flex flex-col bg-gray-950 select-none">
-      {/* Timer bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-900 shrink-0">
-        <div className="font-mono text-3xl font-bold text-white tracking-wider">
-          {formatTime(elapsed)}
+
+      {/* Timer + controls bar */}
+      <div className="flex items-center gap-3 px-4 py-2 bg-gray-900 border-b border-gray-800 shrink-0">
+        <div className="font-mono text-3xl font-bold text-white tracking-widest">
+          {formatTime(displayMs)}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 ml-auto">
           {status === "idle" && (
-            <button
-              onClick={start}
-              className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold text-sm"
-            >
+            <button onClick={start} className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold text-sm">
               Start
             </button>
           )}
           {status === "running" && (
-            <button
-              onClick={stop}
-              className="px-5 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg font-semibold text-sm"
-            >
+            <button onClick={pause} className="px-5 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg font-semibold text-sm">
               Pause
             </button>
           )}
           {status === "stopped" && !finished && (
-            <button
-              onClick={start}
-              className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold text-sm"
-            >
+            <button onClick={start} className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold text-sm">
               Resume
             </button>
           )}
-          <button
-            onClick={reset}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm"
-          >
+          <button onClick={reset} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm">
             Reset
           </button>
-          {canSave && (
+          {finished && (
             <button
-              onClick={() => onSave(elapsed, splits)}
+              onClick={() => onSave(displayMs, splits)}
               disabled={saving}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-semibold text-sm"
             >
@@ -154,44 +223,14 @@ export default function CourseScorer({ initialTimeMs, initialSplits, saving, onS
         </div>
       </div>
 
-      {/* Main area: court + splits panel */}
+      {/* Court + splits */}
       <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
-        {/* SVG court */}
+
+        {/* Court */}
         <div className="flex-1 min-h-0 flex items-center justify-center p-2">
-          <svg
-            viewBox="0 0 390 580"
-            className="h-full max-h-full w-auto"
-            style={{ maxHeight: "100%", maxWidth: "100%" }}
-          >
-            {/* Court background */}
-            <rect x="0" y="0" width="390" height="580" fill="#c8a96e" />
-            <rect x="6" y="6" width="378" height="568" fill="none" stroke="#fff" strokeWidth="3" />
+          <CourtSVG className="h-full w-auto">
 
-            {/* Half-court line */}
-            <line x1="6" y1="490" x2="384" y2="490" stroke="white" strokeWidth="2" />
-
-            {/* Key / paint (basket at top) */}
-            <rect x="135" y="6" width="120" height="175" fill="rgba(180,120,40,0.4)" stroke="white" strokeWidth="2" />
-
-            {/* Free throw line */}
-            <line x1="135" y1="181" x2="255" y2="181" stroke="white" strokeWidth="2" />
-
-            {/* Free throw circle */}
-            <circle cx="195" cy="181" r="55" fill="none" stroke="white" strokeWidth="2" />
-
-            {/* Backboard */}
-            <rect x="160" y="6" width="70" height="10" fill="none" stroke="white" strokeWidth="3" />
-
-            {/* Rim */}
-            <circle cx="195" cy="28" r="15" fill="none" stroke="#e55" strokeWidth="3" />
-
-            {/* Three-point arc */}
-            <path d="M 25 490 A 173 173 0 0 1 365 490" fill="none" stroke="white" strokeWidth="2" />
-
-            {/* Restricted area arc */}
-            <path d="M 170 28 A 30 30 0 0 1 220 28" fill="none" stroke="white" strokeWidth="1.5" strokeDasharray="4,3" />
-
-            {/* Course path (dashed arrows) */}
+            {/* Course path */}
             <path
               d={COURSE_PATH}
               fill="none"
@@ -201,124 +240,95 @@ export default function CourseScorer({ initialTimeMs, initialSplits, saving, onS
               strokeLinecap="round"
             />
 
-            {/* Direction arrowheads along path */}
-            {/* Left side going up */}
-            <polygon points="65,380 58,394 72,394" fill="#facc15" />
-            <polygon points="65,260 58,274 72,274" fill="#facc15" />
-            {/* Across top */}
-            <polygon points="155,155 143,148 143,162" fill="#facc15" />
-            {/* Right side going down */}
-            <polygon points="325,310 318,296 332,296" fill="#facc15" transform="rotate(180,325,310)" />
+            {/* Direction arrows */}
+            {ARROWS.map((a, i) => <ArrowHead key={i} {...a} />)}
 
             {/* Cones */}
-            {CONES.map((c, i) => (
-              <g key={i}>
-                <polygon
-                  points={`${c.cx},${c.cy - 9} ${c.cx - 7},${c.cy + 5} ${c.cx + 7},${c.cy + 5}`}
-                  fill="#f97316"
-                  stroke="#ea580c"
-                  strokeWidth="1"
-                />
-                <line x1={c.cx - 8} y1={c.cy + 5} x2={c.cx + 8} y2={c.cy + 5} stroke="#ea580c" strokeWidth="2" />
-              </g>
-            ))}
+            {CONES.map((c, i) => <Cone key={i} {...c} />)}
 
             {/* Checkpoint zones */}
             {CHECKPOINTS.map((cp, idx) => {
-              const tapped = splits.findIndex((s) => s.checkpoint === cp.label) !== -1
-              const isNext = idx === nextCheckpoint && status === "running"
-              const r = cp.isFinish ? 34 : 28
+              const split = splits.find((s) => s.checkpoint === cp.sublabel)
+              const tapped  = split != null
+              const isNext  = idx === nextCheckpoint && status === "running"
+              // Coach (4) and Receive (5) share same location — offset label
+              const labelX = cp.id === "receive" ? cp.cx + 30 : cp.cx
+              const labelY = cp.id === "receive" ? cp.cy + 30 : cp.cy
 
               return (
                 <g
                   key={cp.id}
                   onClick={() => tapCheckpoint(cp, idx)}
-                  style={{ cursor: status === "running" && idx === nextCheckpoint ? "pointer" : "default" }}
+                  style={{ cursor: isNext ? "pointer" : "default" }}
                 >
-                  {/* Pulse ring for next checkpoint */}
+                  {/* Pulse ring */}
                   {isNext && (
-                    <circle cx={cp.cx} cy={cp.cy} r={r + 10} fill="none" stroke="#facc15" strokeWidth="2" opacity="0.6" />
+                    <circle cx={cp.cx} cy={cp.cy} r={cp.r + 12} fill="none" stroke="#facc15" strokeWidth="2.5" opacity="0.7" />
                   )}
                   <circle
                     cx={cp.cx}
                     cy={cp.cy}
-                    r={r}
-                    fill={tapped ? "#16a34a" : isNext ? "#854d0e" : "rgba(0,0,0,0.55)"}
-                    stroke={tapped ? "#4ade80" : isNext ? "#facc15" : "rgba(255,255,255,0.4)"}
+                    r={cp.r}
+                    fill={tapped ? "#16a34a" : isNext ? "#92400e" : "rgba(0,0,0,0.6)"}
+                    stroke={tapped ? "#4ade80" : isNext ? "#facc15" : "rgba(255,255,255,0.45)"}
                     strokeWidth={isNext ? 3 : 2}
                   />
-                  <text
-                    x={cp.cx}
-                    y={cp.cy - 5}
-                    textAnchor="middle"
-                    fill="white"
-                    fontSize="11"
-                    fontWeight="bold"
-                  >
-                    {idx + 1}
+                  <text x={labelX} y={labelY - 6} textAnchor="middle" fill="white" fontSize="13" fontWeight="bold">
+                    {cp.label}
                   </text>
-                  <text
-                    x={cp.cx}
-                    y={cp.cy + 8}
-                    textAnchor="middle"
-                    fill={tapped ? "#bbf7d0" : "#d1d5db"}
-                    fontSize="8"
-                  >
-                    {tapped ? formatTime(splits.find((s) => s.checkpoint === cp.label)!.time_ms) : cp.label.split(" ")[0]}
+                  <text x={labelX} y={labelY + 7} textAnchor="middle" fill={tapped ? "#bbf7d0" : "#d1d5db"} fontSize="8">
+                    {tapped ? formatTime(split!.time_ms) : cp.sublabel.split(" ")[0]}
                   </text>
                 </g>
               )
             })}
 
-            {/* Coach marker */}
-            <text x="195" y="175" textAnchor="middle" fill="#fde68a" fontSize="10" fontWeight="bold">COACH</text>
-          </svg>
+          </CourtSVG>
         </div>
 
         {/* Splits panel */}
         <div className="md:w-52 shrink-0 bg-gray-900 border-t md:border-t-0 md:border-l border-gray-800 overflow-y-auto">
-          <div className="p-3">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Split Times</p>
+          <div className="p-3 space-y-3">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Split Times</p>
+
             {splits.length === 0 ? (
               <p className="text-xs text-gray-600 italic">
                 {status === "idle"
-                  ? "Start the timer, then tap checkpoints in order."
-                  : "Tap checkpoint 1 on the court."}
+                  ? "Start the timer, then tap each checkpoint on the court in order."
+                  : `Tap checkpoint ${nextCheckpoint + 1} on the court.`}
               </p>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {splits.map((s, i) => {
-                  const prev = i > 0 ? splits[i - 1].time_ms : 0
+                  const prev  = i > 0 ? splits[i - 1].time_ms : 0
                   const split = s.time_ms - prev
                   return (
-                    <div key={i} className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">{s.checkpoint}</span>
-                      <div className="text-right">
-                        <span className="text-xs font-mono text-white">{formatTime(s.time_ms)}</span>
+                    <div key={i} className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs text-white font-medium leading-tight">{s.checkpoint}</p>
                         {i > 0 && (
-                          <span className="block text-xs font-mono text-gray-500">+{formatTime(split)}</span>
+                          <p className="text-xs font-mono text-gray-500">+{formatTime(split)}</p>
                         )}
                       </div>
+                      <span className="text-xs font-mono text-yellow-400 shrink-0">{formatTime(s.time_ms)}</span>
                     </div>
                   )
                 })}
               </div>
             )}
 
-            {/* Instruction overlay */}
             {status === "running" && nextCheckpoint < CHECKPOINTS.length && (
-              <div className="mt-4 p-2 bg-yellow-900/40 border border-yellow-700 rounded-lg">
-                <p className="text-xs text-yellow-300 font-medium">
-                  Next: {CHECKPOINTS[nextCheckpoint].label}
+              <div className="p-2 bg-yellow-900/40 border border-yellow-700/60 rounded-lg">
+                <p className="text-xs text-yellow-300 font-semibold">
+                  Next → {CHECKPOINTS[nextCheckpoint].sublabel}
                 </p>
-                <p className="text-xs text-yellow-500 mt-0.5">Tap the glowing zone</p>
               </div>
             )}
 
             {finished && (
-              <div className="mt-4 p-2 bg-green-900/40 border border-green-700 rounded-lg">
+              <div className="p-2 bg-green-900/40 border border-green-700/60 rounded-lg">
                 <p className="text-xs text-green-300 font-semibold">Finished!</p>
-                <p className="text-xs font-mono text-green-400">{formatTime(elapsed)}</p>
+                <p className="text-sm font-mono text-green-400 font-bold">{formatTime(displayMs)}</p>
               </div>
             )}
           </div>
