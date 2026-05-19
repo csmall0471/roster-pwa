@@ -50,6 +50,12 @@ export default async function ParentLayout({ children }: { children: React.React
           >
             Training
           </Link>
+          <Link
+            href="/parent/skills"
+            className="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+          >
+            Skills
+          </Link>
         </div>
       </nav>
 

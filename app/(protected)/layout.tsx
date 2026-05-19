@@ -81,6 +81,9 @@ export default async function ProtectedLayout({
             <Link href="/training" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
               Training
             </Link>
+            <Link href="/training/skills" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+              Skills
+            </Link>
             <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
               Preview
             </Link>
