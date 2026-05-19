@@ -241,7 +241,7 @@ export default function CourseScorer({ initialTimeMs, initialSplits, saving, onS
       </div>
 
       {/* Court + splits */}
-      <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-row overflow-hidden">
 
         {/* Court */}
         <div className="flex-1 min-h-0 flex items-center justify-center p-2">
@@ -317,7 +317,7 @@ export default function CourseScorer({ initialTimeMs, initialSplits, saving, onS
         </div>
 
         {/* Splits panel */}
-        <div className="md:w-52 shrink-0 bg-gray-900 border-t md:border-t-0 md:border-l border-gray-800 overflow-y-auto">
+        <div className="w-44 shrink-0 bg-gray-900 border-l border-gray-800 overflow-y-auto h-full">
           <div className="p-3 space-y-3">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Split Times</p>
 
