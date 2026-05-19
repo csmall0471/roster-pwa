@@ -56,31 +56,25 @@ export default function CourtSVG({ className, children, style, flip }: Props) {
 
         {/* 3-point line — corner straights + arc */}
         {/* Corners: x=30 and x=360, from baseline (y=5) to y=220 */}
-        <line x1="30" y1="5" x2="30" y2="220" stroke="white" strokeWidth="2" />
-        <line x1="360" y1="5" x2="360" y2="220" stroke="white" strokeWidth="2" />
+        <line x1="30" y1="5" x2="30" y2="180" stroke="white" strokeWidth="2" />
+        <line x1="360" y1="5" x2="360" y2="180" stroke="white" strokeWidth="2" />
         {/* Arc: radius 219, center at (195, 76), bottom at (195, 295) */}
-        <path d="M 30 220 A 219 219 0 0 1 360 220" fill="none" stroke="white" strokeWidth="2" />
+        <path d="M 30 180 A 219 219 0 0 0 360 180" fill="none" stroke="white" strokeWidth="2" />
 
         {/* Half-court line */}
-        <line x1="5" y1="565" x2="385" y2="565" stroke="white" strokeWidth="2" />
+        <line x1="5" y1="450" x2="385" y2="450" stroke="white" strokeWidth="2" />
 
         {/* Center circle (half-court) */}
-        <circle cx="195" cy="565" r="35" fill="none" stroke="white" strokeWidth="2" />
+        <circle cx="195" cy="450" r="35" fill="none" stroke="white" strokeWidth="2" />
 
-        {/* Restricted area arc (small, near basket) */}
-        <path d="M 169 27 A 26 26 0 0 1 221 27" fill="none" stroke="white" strokeWidth="1.5" strokeDasharray="4,3" />
-
+        
         {/* Backboard */}
         <rect x="163" y="5" width="64" height="8" fill="none" stroke="white" strokeWidth="3" />
 
         {/* Rim */}
         <circle cx="195" cy="27" r="14" fill="none" stroke="#f97316" strokeWidth="3" />
 
-        {/* Net (simple lines) */}
-        <line x1="185" y1="41" x2="183" y2="54" stroke="white" strokeWidth="1" opacity="0.5" />
-        <line x1="195" y1="41" x2="195" y2="55" stroke="white" strokeWidth="1" opacity="0.5" />
-        <line x1="205" y1="41" x2="207" y2="54" stroke="white" strokeWidth="1" opacity="0.5" />
-      </g>
+        </g>
 
       {/* Overlay children — always in normal coordinate space */}
       {children}
