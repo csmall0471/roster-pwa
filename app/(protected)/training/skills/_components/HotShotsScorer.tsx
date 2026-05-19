@@ -6,15 +6,15 @@ import { formatTime, hotShotsTotal } from "../utils"
 import CourtSVG from "./CourtSVG"
 
 // ─── Shot positions ────────────────────────────────────────────────────────────
-// Score sheet (basket at bottom): 8pt top-left, 7pt top-right, 5pt center,
-// 3pt right-middle, 2pt left-middle.
-// Our court: basket at TOP → those positions flip vertically.
-// Mapping (approximate to match score sheet layout):
-//   8pt → lower-left  (far, left side)
-//   7pt → lower-right (far, right side)
-//   5pt → center, just below FT line
-//   3pt → right, between basket and 3pt arc
-//   2pt → left, between basket and 3pt arc (max 8)
+// Court is rendered with flip=true so the basket appears at the BOTTOM, matching
+// the score sheet orientation. Zone coordinates are in normal SVG viewport space
+// (basket visually at bottom ≈ y=553, half-court at top ≈ y=15).
+//
+//   8pt → top-left far corner (beyond 3pt, left)
+//   7pt → top-right far corner (beyond 3pt, right)
+//   5pt → center, at free throw line level
+//   3pt → right wing, closer to basket
+//   2pt → left wing, closer to basket (max 8)
 
 type Position = {
   id:    ShotLogEntry["position"]
@@ -27,11 +27,11 @@ type Position = {
 }
 
 const POSITIONS: Position[] = [
-  { id: "8pt", pts: 8, max: 10, cx:  55, cy: 400, r: 36, color: "#7c3aed" },
-  { id: "7pt", pts: 7, max: 10, cx: 335, cy: 400, r: 36, color: "#2563eb" },
-  { id: "5pt", pts: 5, max: 10, cx: 195, cy: 250, r: 34, color: "#0891b2" },
-  { id: "3pt", pts: 3, max: 10, cx: 298, cy: 148, r: 30, color: "#059669" },
-  { id: "2pt", pts: 2, max:  8, cx:  92, cy: 148, r: 30, color: "#d97706" },
+  { id: "8pt", pts: 8, max: 10, cx:  55, cy:  90, r: 36, color: "#7c3aed" },
+  { id: "7pt", pts: 7, max: 10, cx: 335, cy:  90, r: 36, color: "#2563eb" },
+  { id: "5pt", pts: 5, max: 10, cx: 195, cy: 375, r: 34, color: "#0891b2" },
+  { id: "3pt", pts: 3, max: 10, cx: 300, cy: 460, r: 30, color: "#059669" },
+  { id: "2pt", pts: 2, max:  8, cx:  90, cy: 460, r: 30, color: "#d97706" },
 ]
 
 const POS_COLORS: Record<ShotLogEntry["position"], string> = {
@@ -240,7 +240,7 @@ export default function HotShotsScorer({ initialLog, saving, onSave }: Props) {
 
         {/* Court */}
         <div className="flex-1 min-h-0 flex items-center justify-center p-2">
-          <CourtSVG className="h-full w-auto">
+          <CourtSVG className="h-full w-auto" flip>
 
             {/* Shot zones */}
             {POSITIONS.map((pos) => {
@@ -298,9 +298,9 @@ export default function HotShotsScorer({ initialLog, saving, onSave }: Props) {
             {/* Ended overlay */}
             {isEnded && (
               <>
-                <rect x="80" y="260" width="230" height="65" rx="12" fill="rgba(0,0,0,0.8)" />
-                <text x="195" y="290" textAnchor="middle" fill="#facc15" fontSize="18" fontWeight="bold">Time&apos;s up!</text>
-                <text x="195" y="312" textAnchor="middle" fill="white" fontSize="13">{totalPts} pts total</text>
+                <rect x="80" y="220" width="230" height="65" rx="12" fill="rgba(0,0,0,0.8)" />
+                <text x="195" y="250" textAnchor="middle" fill="#facc15" fontSize="18" fontWeight="bold">Time&apos;s up!</text>
+                <text x="195" y="272" textAnchor="middle" fill="white" fontSize="13">{totalPts} pts total</text>
               </>
             )}
 

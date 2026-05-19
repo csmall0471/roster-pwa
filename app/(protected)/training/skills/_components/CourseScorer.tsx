@@ -17,14 +17,15 @@ type Checkpoint = {
   isFinish?: boolean
 }
 
+// 5 non-overlapping checkpoints. The coach pass exchange (steps 4+5 in the
+// original description) happens between CP3 and CP4 but is not a separate tap
+// since it occupies the same court location as CP2.
 const CHECKPOINTS: Checkpoint[] = [
-  { id: "layup1",   label: "1",  sublabel: "Layup",         cx: 238, cy:  60, r: 28 },
-  { id: "freethrow",label: "2",  sublabel: "Free Throw",    cx: 195, cy: 200, r: 28 },
-  { id: "halfcourt",label: "3",  sublabel: "Half Court",    cx: 195, cy: 550, r: 30 },
-  { id: "coach",    label: "4",  sublabel: "Pass to Coach", cx: 195, cy: 205, r: 28 },
-  { id: "receive",  label: "5",  sublabel: "Catch Pass",    cx: 195, cy: 205, r: 28 },
-  { id: "cone3pt",  label: "6",  sublabel: "3pt Cone",      cx:  68, cy: 295, r: 28 },
-  { id: "layup2",   label: "7",  sublabel: "Finish Layup",  cx: 152, cy:  60, r: 28, isFinish: true },
+  { id: "layup1",   label: "1", sublabel: "Layup →",      cx: 238, cy:  60, r: 28 },
+  { id: "freethrow",label: "2", sublabel: "Free Throw",   cx: 195, cy: 200, r: 28 },
+  { id: "halfcourt",label: "3", sublabel: "Half Court",   cx: 195, cy: 545, r: 30 },
+  { id: "cone3pt",  label: "4", sublabel: "3pt Cone",     cx:  65, cy: 295, r: 28 },
+  { id: "layup2",   label: "5", sublabel: "← Layup",      cx: 152, cy:  60, r: 28, isFinish: true },
 ]
 
 // ─── Cones ────────────────────────────────────────────────────────────────────
@@ -252,8 +253,8 @@ export default function CourseScorer({ initialTimeMs, initialSplits, saving, onS
               const tapped  = split != null
               const isNext  = idx === nextCheckpoint && status === "running"
               // Coach (4) and Receive (5) share same location — offset label
-              const labelX = cp.id === "receive" ? cp.cx + 30 : cp.cx
-              const labelY = cp.id === "receive" ? cp.cy + 30 : cp.cy
+              const labelX = cp.cx
+              const labelY = cp.cy
 
               return (
                 <g

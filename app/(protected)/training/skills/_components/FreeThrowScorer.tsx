@@ -72,7 +72,8 @@ export default function FreeThrowScorer({ initialMakes, saving, onSave }: Props)
 
           {/* Shot attempt dots on court — 10 dots arranged along the FT circle */}
           {shots.map((s, i) => {
-            const angle = (i / TOTAL) * Math.PI + Math.PI  // bottom half of circle
+            // Arc below FT line (into open court): angle 0=right, π=left, peaks at π/2=bottom
+            const angle = (i / (TOTAL - 1)) * Math.PI
             const r = 55
             const cx = 195 + r * Math.cos(angle)
             const cy = 200 + r * Math.sin(angle)
