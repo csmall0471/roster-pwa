@@ -26,10 +26,14 @@ type Position = {
   color: string
 }
 
+// In flipped viewport: basket at y≈553 (bottom), FT line at y≈380, 3pt arc peak at y≈285.
+// 8pt/7pt are just outside the 3pt arc at the left/right corners.
+// 5pt is at the free throw line center.
+// 3pt/2pt are in the wing/elbow area between the FT line and basket.
 const POSITIONS: Position[] = [
-  { id: "8pt", pts: 8, max: 10, cx:  55, cy:  90, r: 36, color: "#7c3aed" },
-  { id: "7pt", pts: 7, max: 10, cx: 335, cy:  90, r: 36, color: "#2563eb" },
-  { id: "5pt", pts: 5, max: 10, cx: 195, cy: 375, r: 34, color: "#0891b2" },
+  { id: "8pt", pts: 8, max: 10, cx:  55, cy: 265, r: 36, color: "#7c3aed" },
+  { id: "7pt", pts: 7, max: 10, cx: 335, cy: 265, r: 36, color: "#2563eb" },
+  { id: "5pt", pts: 5, max: 10, cx: 195, cy: 380, r: 34, color: "#0891b2" },
   { id: "3pt", pts: 3, max: 10, cx: 300, cy: 460, r: 30, color: "#059669" },
   { id: "2pt", pts: 2, max:  8, cx:  90, cy: 460, r: 30, color: "#d97706" },
 ]

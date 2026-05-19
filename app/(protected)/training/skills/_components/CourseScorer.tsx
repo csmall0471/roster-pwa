@@ -25,7 +25,7 @@ const CHECKPOINTS: Checkpoint[] = [
   { id: "freethrow",label: "2", sublabel: "Free Throw",   cx: 195, cy: 200, r: 28 },
   { id: "halfcourt",label: "3", sublabel: "Half Court",   cx: 195, cy: 545, r: 30 },
   { id: "cone3pt",  label: "4", sublabel: "3pt Cone",     cx:  65, cy: 295, r: 28 },
-  { id: "layup2",   label: "5", sublabel: "← Layup",      cx: 152, cy:  60, r: 28, isFinish: true },
+  { id: "layup2",   label: "5", sublabel: "Layup ←",      cx: 152, cy:  60, r: 28, isFinish: true },
 ]
 
 // ─── Cones ────────────────────────────────────────────────────────────────────
