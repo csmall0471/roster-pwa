@@ -240,7 +240,7 @@ export default function HotShotsScorer({ initialLog, saving, onSave }: Props) {
       </div>
 
       {/* Court + log */}
-      <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-row overflow-hidden">
 
         {/* Court */}
         <div className="flex-1 min-h-0 flex items-center justify-center p-2">
@@ -312,7 +312,7 @@ export default function HotShotsScorer({ initialLog, saving, onSave }: Props) {
         </div>
 
         {/* Shot log + summary */}
-        <div className="md:w-52 shrink-0 bg-gray-900 border-t md:border-t-0 md:border-l border-gray-800 overflow-y-auto flex flex-col">
+        <div className="w-44 shrink-0 bg-gray-900 border-l border-gray-800 overflow-y-auto flex flex-col h-full">
 
           {/* Score summary */}
           <div className="p-3 border-b border-gray-800 shrink-0">
