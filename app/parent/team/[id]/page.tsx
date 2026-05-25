@@ -236,7 +236,10 @@ export default async function ParentTeamPage({
 
       {(gamesRaw?.length ?? 0) > 0 && (
         <SnackSchedule
-          initialGames={(gamesRaw ?? []) as unknown as SnackGameRow[]}
+          initialGames={(gamesRaw ?? []).map((g) => ({
+            ...g,
+            signups: (g as any).snack_signups ?? [],
+          })) as SnackGameRow[]}
           slotsPerGame={team.snack_slots_per_game ?? 1}
           parentId={parentId}
           teamName={team.name}
