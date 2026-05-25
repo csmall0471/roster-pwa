@@ -117,7 +117,7 @@ export async function claimSnackSlot(
   const parent = parentLink.parents as any;
   notifyCoachSignupChange({
     type: "signup",
-    parentName: `${parent.first_name} ${parent.last_name}`,
+    parentName: parent ? `${parent.first_name} ${parent.last_name}` : "A parent",
     teamName: (game.teams as any)?.name ?? "your team",
     gameDate: game.game_date,
     opponent: game.opponent,
@@ -151,7 +151,7 @@ export async function cancelSnackSlot(signupId: string) {
     const game   = signup.games as any;
     notifyCoachSignupChange({
       type: "cancel",
-      parentName: `${parent?.first_name} ${parent?.last_name}`,
+      parentName: parent ? `${parent.first_name} ${parent.last_name}` : "A parent",
       teamName: game?.teams?.name ?? "your team",
       gameDate: game?.game_date,
       opponent: game?.opponent ?? null,
