@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { claimSnackSlot, cancelSnackSlot } from "@/app/(protected)/teams/schedule-actions";
+import { cancelSnackSlot } from "@/app/(protected)/teams/schedule-actions";
 
 export type SnackDashGame = {
   id: string;
@@ -29,8 +29,7 @@ function fmtDate(iso: string) {
 function fmtTime(t: string | null) {
   if (!t) return null;
   const [h, m] = t.split(":").map(Number);
-  const ampm = h >= 12 ? "PM" : "AM";
-  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${ampm}`;
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
 }
 
 export default function SnackDashboard({
@@ -42,27 +41,33 @@ export default function SnackDashboard({
 }) {
   const [games, setGames] = useState(initialGames);
 
-  if (games.length === 0) return null;
-
-  function onSignup(gameId: string, signupId: string) {
-    setGames((prev) =>
-      prev.map((g) =>
-        g.id === gameId
-          ? { ...g, signups: [...g.signups, { id: signupId, parent_id: parentId, parents: null }] }
-          : g
-      )
-    );
-  }
-
   function onCancel(gameId: string, signupId: string) {
     setGames((prev) =>
       prev.map((g) =>
-        g.id === gameId
-          ? { ...g, signups: g.signups.filter((s) => s.id !== signupId) }
-          : g
+        g.id === gameId ? { ...g, signups: g.signups.filter((s) => s.id !== signupId) } : g
       )
     );
   }
+
+  // Group by team. Per team: show signed-up game rows OR one sign-up prompt.
+  const teamBuckets = useMemo(() => {
+    const map = new Map<string, SnackDashGame[]>();
+    for (const g of games) {
+      if (!map.has(g.team_id)) map.set(g.team_id, []);
+      map.get(g.team_id)!.push(g);
+    }
+    return Array.from(map.values())
+      .map((teamGames) => {
+        const myGames   = teamGames.filter((g) => g.signups.some((s) => s.parent_id === parentId));
+        const openGames = teamGames.filter(
+          (g) => !g.signups.some((s) => s.parent_id === parentId) && g.signups.length < g.slots_per_game
+        );
+        return { teamId: teamGames[0].team_id, teamName: teamGames[0].team_name, myGames, openGames };
+      })
+      .filter((b) => b.myGames.length > 0 || b.openGames.length > 0);
+  }, [games, parentId]);
+
+  if (teamBuckets.length === 0) return null;
 
   return (
     <section className="mt-6">
@@ -70,51 +75,43 @@ export default function SnackDashboard({
         Upcoming Snack Duties
       </h2>
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
-        {games.map((g) => (
-          <SnackRow
-            key={g.id}
-            game={g}
-            parentId={parentId}
-            onSignup={(sid) => onSignup(g.id, sid)}
-            onCancel={(sid) => onCancel(g.id, sid)}
-          />
-        ))}
+        {teamBuckets.map((bucket) =>
+          bucket.myGames.length > 0
+            ? bucket.myGames.map((g) => (
+                <SignedUpRow
+                  key={g.id}
+                  game={g}
+                  parentId={parentId}
+                  onCancel={(sid) => onCancel(g.id, sid)}
+                />
+              ))
+            : (
+                <TeamSignupPrompt
+                  key={bucket.teamId}
+                  teamId={bucket.teamId}
+                  teamName={bucket.teamName}
+                  openCount={bucket.openGames.length}
+                />
+              )
+        )}
       </div>
     </section>
   );
 }
 
-function SnackRow({
-  game, parentId, onSignup, onCancel,
+function SignedUpRow({
+  game, parentId, onCancel,
 }: {
   game: SnackDashGame;
   parentId: string;
-  onSignup: (signupId: string) => void;
   onCancel: (signupId: string) => void;
 }) {
-  const [showForm, setShowForm]       = useState(false);
-  const [reminderEmail, setRem]       = useState(true);
-  const [reminderSms, setRemSms]      = useState(false);
-  const [error, setError]             = useState<string | null>(null);
-  const [pending, start]              = useTransition();
-
-  const mySignup  = game.signups.find((s) => s.parent_id === parentId);
-  const openSlots = game.slots_per_game - game.signups.length;
-  const isFull    = openSlots <= 0 && !mySignup;
-  const time      = fmtTime(game.game_time);
-
-  function handleSignup() {
-    setError(null);
-    start(async () => {
-      const result = await claimSnackSlot(game.id, reminderEmail, reminderSms);
-      if (result.error) { setError(result.error); return; }
-      onSignup(crypto.randomUUID());
-      setShowForm(false);
-    });
-  }
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start]  = useTransition();
+  const mySignup          = game.signups.find((s) => s.parent_id === parentId)!;
+  const time              = fmtTime(game.game_time);
 
   function handleCancel() {
-    if (!mySignup) return;
     if (!confirm("Cancel your snack signup?")) return;
     start(async () => {
       const result = await cancelSnackSlot(mySignup.id);
@@ -125,11 +122,10 @@ function SnackRow({
 
   return (
     <div className="px-5 py-3">
-      {/* Game info */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <Link
-            href={`/parent/team/${game.team_id}`}
+            href={`/parent/team/${game.team_id}?tab=schedule`}
             className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
           >
             {game.team_name}
@@ -146,64 +142,45 @@ function SnackRow({
             )}
           </div>
         </div>
-
-        {/* Quick action */}
-        {mySignup ? (
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs font-semibold text-green-700 dark:text-green-400">
-              ✓ You&apos;re signed up
-            </span>
-            <button
-              onClick={handleCancel}
-              disabled={pending}
-              className="text-xs text-red-500 hover:underline disabled:opacity-50"
-            >
-              {pending ? "…" : "Cancel"}
-            </button>
-          </div>
-        ) : isFull ? (
-          <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">Covered ✓</span>
-        ) : (
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs font-semibold text-green-700 dark:text-green-400">
+            ✓ You&apos;re signed up
+          </span>
           <button
-            onClick={() => setShowForm((v) => !v)}
-            className="shrink-0 rounded-lg border border-green-300 dark:border-green-700 px-3 py-1 text-xs font-medium text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 transition-colors"
+            onClick={handleCancel}
+            disabled={pending}
+            className="text-xs text-red-500 hover:underline disabled:opacity-50"
           >
-            I&apos;ll bring snacks
+            {pending ? "…" : "Cancel"}
           </button>
-        )}
-      </div>
-
-      {/* Inline reminder form */}
-      {showForm && !mySignup && (
-        <div className="mt-3 space-y-2 pl-1">
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={reminderEmail} onChange={(e) => setRem(e.target.checked)} className="accent-green-600" />
-              Email reminder
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={reminderSms} onChange={(e) => setRemSms(e.target.checked)} className="accent-green-600" />
-              Text reminder
-            </label>
-          </div>
-          {error && <p className="text-xs text-red-500">{error}</p>}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSignup}
-              disabled={pending}
-              className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-            >
-              {pending ? "Signing up…" : "Confirm"}
-            </button>
-            <button
-              onClick={() => setShowForm(false)}
-              className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            >
-              Cancel
-            </button>
-          </div>
         </div>
-      )}
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+}
+
+function TeamSignupPrompt({
+  teamId, teamName, openCount,
+}: {
+  teamId: string;
+  teamName: string;
+  openCount: number;
+}) {
+  return (
+    <div className="px-5 py-3 flex items-center justify-between gap-3">
+      <div>
+        <p className="text-sm font-medium text-gray-900 dark:text-white">{teamName}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+          {openCount === 1 ? "1 game needs snack coverage" : `${openCount} games need snack coverage`}
+        </p>
+      </div>
+      <Link
+        href={`/parent/team/${teamId}?tab=schedule`}
+        className="shrink-0 rounded-lg border border-green-300 dark:border-green-700 px-3 py-1.5 text-xs font-medium text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 transition-colors whitespace-nowrap"
+      >
+        Sign up →
+      </Link>
     </div>
   );
 }
