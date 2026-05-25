@@ -254,7 +254,10 @@ export default async function TeamDetailPage({
       {tab === "schedule" && (
         <ScheduleTab
           teamId={id}
-          initialGames={(gamesRaw ?? []) as unknown as GameRow[]}
+          initialGames={(gamesRaw ?? []).map((g) => ({
+            ...g,
+            signups: (g as any).snack_signups ?? [],
+          })) as GameRow[]}
           snackEnabled={t.snack_signup_enabled ?? false}
           slotsPerGame={t.snack_slots_per_game ?? 1}
           rosterCount={sorted.length}

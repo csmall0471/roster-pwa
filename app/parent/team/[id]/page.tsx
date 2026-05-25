@@ -80,10 +80,13 @@ function PlayerCard({
 
 export default async function ParentTeamPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
+  const tab = (await searchParams).tab ?? "roster";
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -210,41 +213,73 @@ export default async function ParentTeamPage({
         )}
       </div>
 
-      <section>
-        <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+      {/* Tab nav */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-6">
+        <Link
+          href={`/parent/team/${id}`}
+          className={`px-4 py-2 text-sm -mb-px ${
+            tab === "roster"
+              ? "border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 font-medium"
+              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+          }`}
+        >
           Roster ({active.length})
-        </h2>
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-          {active.map((entry) => (
-            <PlayerCard key={entry.player_id} entry={entry} isMyKid={myKidIds.has(entry.player_id)} />
-          ))}
-        </div>
-      </section>
+        </Link>
+        <Link
+          href={`/parent/team/${id}?tab=schedule`}
+          className={`px-4 py-2 text-sm -mb-px ${
+            tab === "schedule"
+              ? "border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 font-medium"
+              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+          }`}
+        >
+          {team.snack_signup_enabled ? "Schedule & Snacks" : "Schedule"}
+          {(gamesRaw?.length ?? 0) > 0 ? ` (${gamesRaw!.length})` : ""}
+        </Link>
+      </div>
 
-      {inactive.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-            Inactive
-          </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 opacity-50">
-            {inactive.map((entry) => (
-              <PlayerCard key={entry.player_id} entry={entry} isMyKid={myKidIds.has(entry.player_id)} />
-            ))}
-          </div>
-        </section>
+      {tab === "roster" && (
+        <>
+          <section>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+              {active.map((entry) => (
+                <PlayerCard key={entry.player_id} entry={entry} isMyKid={myKidIds.has(entry.player_id)} />
+              ))}
+            </div>
+          </section>
+
+          {inactive.length > 0 && (
+            <section className="mt-8">
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+                Inactive
+              </h2>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 opacity-50">
+                {inactive.map((entry) => (
+                  <PlayerCard key={entry.player_id} entry={entry} isMyKid={myKidIds.has(entry.player_id)} />
+                ))}
+              </div>
+            </section>
+          )}
+        </>
       )}
 
-      {(gamesRaw?.length ?? 0) > 0 && (
-        <SnackSchedule
-          initialGames={(gamesRaw ?? []).map((g) => ({
-            ...g,
-            signups: (g as any).snack_signups ?? [],
-          })) as SnackGameRow[]}
-          slotsPerGame={team.snack_slots_per_game ?? 1}
-          parentId={parentId}
-          teamName={team.name}
-          snackEnabled={team.snack_signup_enabled ?? false}
-        />
+      {tab === "schedule" && (
+        (gamesRaw?.length ?? 0) > 0 ? (
+          <SnackSchedule
+            initialGames={(gamesRaw ?? []).map((g) => ({
+              ...g,
+              signups: (g as any).snack_signups ?? [],
+            })) as SnackGameRow[]}
+            slotsPerGame={team.snack_slots_per_game ?? 1}
+            parentId={parentId}
+            teamName={team.name}
+            snackEnabled={team.snack_signup_enabled ?? false}
+          />
+        ) : (
+          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-12">
+            No games scheduled yet.
+          </p>
+        )
       )}
     </div>
   );
