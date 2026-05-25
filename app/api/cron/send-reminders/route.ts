@@ -51,80 +51,89 @@ export async function GET(request: Request) {
   const preview: PreviewEmail[] = []
 
   // ── Snack reminders ───────────────────────────────────────────────────────
+  // Query from games so we can filter game_date directly on the root table.
 
-  const { data: snackSignups, error: snackErr } = await supabase
-    .from("snack_signups")
+  const { data: snackGames, error: snackErr } = await supabase
+    .from("games")
     .select(`
-      reminder_email,
-      parents(first_name, email),
-      games!inner(
-        game_date, game_time, opponent, location, is_home,
-        teams!inner(name, snack_signup_enabled)
+      game_date, game_time, opponent, location, is_home,
+      teams!inner(name, snack_signup_enabled),
+      snack_signups(
+        reminder_email,
+        parents(first_name, email)
       )
     `)
-    .eq("games.game_date", targetDate)
-    .eq("games.teams.snack_signup_enabled", true)
-    .eq("reminder_email", true)
+    .eq("game_date", targetDate)
 
   if (snackErr) {
     errors.push(`snack query: ${snackErr.message}`)
   } else {
-    for (const signup of snackSignups ?? []) {
-      const parent = signup.parents as any
-      const game   = signup.games   as any
-      const team   = game?.teams    as any
-      if (!parent?.email) continue
+    for (const game of snackGames ?? []) {
+      const team = game.teams as any
+      if (!team?.snack_signup_enabled) continue
 
-      const vs      = game?.opponent ? `${game.is_home ? "vs" : "@"} ${game.opponent}` : "your game"
+      const vs      = game.opponent ? `${game.is_home ? "vs" : "@"} ${game.opponent}` : "your game"
       const dateStr = `${fmtDate(game.game_date)}${fmtTime(game.game_time)}`
-      const loc     = game?.location ? `\nLocation: ${game.location}` : ""
-      const subject = `Reminder: You're bringing snacks tomorrow — ${team?.name}`
-      const text    = `Hi ${parent.first_name},\n\nReminder: you signed up to bring snacks for ${team?.name} ${vs} tomorrow (${dateStr}).${loc}\n\nThank you!\n— Coach Connor`
+      const loc     = game.location ? `\nLocation: ${game.location}` : ""
 
-      if (dry) {
-        preview.push({ to: parent.email, subject, body: text })
-      } else {
-        const { error } = await resend.emails.send({ from, to: parent.email, subject, text })
-        if (error) errors.push(`snack email ${parent.email}: ${error.message}`)
-        else emailsSent++
+      for (const signup of (game.snack_signups as any[]) ?? []) {
+        if (!signup.reminder_email) continue
+        const parent = signup.parents as any
+        if (!parent?.email) continue
+
+        const subject = `Reminder: You're bringing snacks tomorrow — ${team.name}`
+        const text    = `Hi ${parent.first_name},\n\nReminder: you signed up to bring snacks for ${team.name} ${vs} tomorrow (${dateStr}).${loc}\n\nThank you!\n— Coach Connor`
+
+        if (dry) {
+          preview.push({ to: parent.email, subject, body: text })
+        } else {
+          const { error } = await resend.emails.send({ from, to: parent.email, subject, text })
+          if (error) errors.push(`snack email ${parent.email}: ${error.message}`)
+          else emailsSent++
+        }
       }
     }
   }
 
   // ── Training reminders ────────────────────────────────────────────────────
+  // Query from training_sessions so we can filter session_date directly.
 
-  const { data: trainingSignups, error: trainingErr } = await supabase
-    .from("training_signups")
+  const { data: trainingSessions, error: trainingErr } = await supabase
+    .from("training_sessions")
     .select(`
-      reminder_email,
-      parents(first_name, email),
-      players(first_name, last_name),
-      training_sessions!inner(title, session_date, session_time, location)
+      title, session_date, session_time, location,
+      training_signups(
+        reminder_email,
+        parents(first_name, email),
+        players(first_name, last_name)
+      )
     `)
-    .eq("training_sessions.session_date", targetDate)
-    .eq("reminder_email", true)
+    .eq("session_date", targetDate)
 
   if (trainingErr) {
     errors.push(`training query: ${trainingErr.message}`)
   } else {
-    for (const signup of trainingSignups ?? []) {
-      const parent  = signup.parents           as any
-      const player  = signup.players           as any
-      const session = signup.training_sessions as any
-      if (!parent?.email) continue
+    for (const session of trainingSessions ?? []) {
+      const dateStr = `${fmtDate(session.session_date)}${fmtTime(session.session_time)}`
+      const loc     = session.location ? `\nLocation: ${session.location}` : ""
 
-      const playerName = player ? `${player.first_name} ${player.last_name}` : "your player"
-      const dateStr    = `${fmtDate(session.session_date)}${fmtTime(session.session_time)}`
-      const loc        = session?.location ? `\nLocation: ${session.location}` : ""
-      const subject    = `Reminder: Training session tomorrow — ${session.title}`
-      const text       = `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session.title} tomorrow (${dateStr}).${loc}\n\nSee you there!\n— Coach Connor`
+      for (const signup of (session.training_signups as any[]) ?? []) {
+        if (!signup.reminder_email) continue
+        const parent = signup.parents as any
+        const player = signup.players as any
+        if (!parent?.email) continue
 
-      if (dry) {
-        preview.push({ to: parent.email, subject, body: text })
-      } else {
-        const { error } = await resend.emails.send({ from, to: parent.email, subject, text })
-        if (error) errors.push(`training email ${parent.email}: ${error.message}`)
-        else emailsSent++
+        const playerName = player ? `${player.first_name} ${player.last_name}` : "your player"
+        const subject    = `Reminder: Training session tomorrow — ${session.title}`
+        const text       = `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session.title} tomorrow (${dateStr}).${loc}\n\nSee you there!\n— Coach Connor`
+
+        if (dry) {
+          preview.push({ to: parent.email, subject, body: text })
+        } else {
+          const { error } = await resend.emails.send({ from, to: parent.email, subject, text })
+          if (error) errors.push(`training email ${parent.email}: ${error.message}`)
+          else emailsSent++
+        }
       }
     }
   }
