@@ -392,7 +392,7 @@ function PlayerRow({
   const [showForm, setShowForm]         = useState(false)
   const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set())
   const [selectedMethod, setMethod]     = useState<string | null>(null)
-  const [reminderEmail, setReminderEmail] = useState(false)
+  const [reminderEmail, setReminderEmail] = useState(true)
   const [reminderSms, setReminderSms]   = useState(false)
   const [error, setError]               = useState<string | null>(null)
   const [pending, start]                = useTransition()
@@ -577,14 +577,24 @@ function PlayerRow({
             </div>
           )}
 
-          {/* Reminder preferences */}
+          {/* Reminder preferences — at least one required */}
           <div className="flex flex-wrap gap-4">
             <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={reminderEmail} onChange={(e) => setReminderEmail(e.target.checked)} className="accent-blue-600" />
+              <input
+                type="checkbox"
+                checked={reminderEmail}
+                onChange={(e) => { if (!e.target.checked && !reminderSms) return; setReminderEmail(e.target.checked) }}
+                className="accent-blue-600"
+              />
               Email reminder
             </label>
             <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={reminderSms} onChange={(e) => setReminderSms(e.target.checked)} className="accent-blue-600" />
+              <input
+                type="checkbox"
+                checked={reminderSms}
+                onChange={(e) => { if (!e.target.checked && !reminderEmail) return; setReminderSms(e.target.checked) }}
+                className="accent-blue-600"
+              />
               Text reminder
             </label>
           </div>

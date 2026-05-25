@@ -264,7 +264,7 @@ function GameRow({
                   <input
                     type="checkbox"
                     checked={reminderEmail}
-                    onChange={(e) => setReminderEmail(e.target.checked)}
+                    onChange={(e) => { if (!e.target.checked && !reminderSms) return; setReminderEmail(e.target.checked) }}
                     className="accent-green-600"
                   />
                   Email me the day before
@@ -273,7 +273,7 @@ function GameRow({
                   <input
                     type="checkbox"
                     checked={reminderSms}
-                    onChange={(e) => setReminderSms(e.target.checked)}
+                    onChange={(e) => { if (!e.target.checked && !reminderEmail) return; setReminderSms(e.target.checked) }}
                     className="accent-green-600"
                   />
                   Text me the day before
