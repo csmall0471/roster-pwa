@@ -151,7 +151,7 @@ export async function GET(request: Request) {
   }
 
   if (dry) {
-    return Response.json({ dry: true, date: targetDate, wouldSend: preview.length, preview, debug })
+    return Response.json({ dry: true, date: targetDate, wouldSend: preview.length, preview, debug, errors: errors.length ? errors : undefined })
   }
 
   return Response.json({
