@@ -163,6 +163,7 @@ export async function GET(request: Request) {
 
   // ── Coach summary email ───────────────────────────────────────────────────
 
+  let summarySent = false
   if (!dry && notifyEmail && emailsSent > 0) {
     const summaryLines = sentSummary.map((e) => `  • ${e.to} — ${e.subject}`).join("\n")
     const summaryText  = `Reminder run for ${targetDate}: ${emailsSent} email${emailsSent !== 1 ? "s" : ""} sent.\n\n${summaryLines}`
@@ -173,7 +174,22 @@ export async function GET(request: Request) {
       text: summaryText,
     })
     if (summaryErr) errors.push(`summary email: ${summaryErr.message}`)
+    else summarySent = true
   }
+
+  // ── Persist log entry ─────────────────────────────────────────────────────
+
+  const snackCount    = sentSummary.filter((e) => e.subject.startsWith("Reminder: You're bringing")).length
+  const trainingCount = sentSummary.filter((e) => e.subject.startsWith("Reminder: Training")).length
+
+  await supabase.from("cron_logs").insert({
+    target_date:    targetDate,
+    dry_run:        dry,
+    snack_count:    snackCount,
+    training_count: trainingCount,
+    summary_sent:   summarySent,
+    error:          errors.length ? errors.join("; ") : null,
+  })
 
   if (dry) {
     return Response.json({ dry: true, date: targetDate, wouldSend: preview.length, preview, debug, errors: errors.length ? errors : undefined })
