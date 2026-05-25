@@ -40,7 +40,9 @@ export async function GET(request: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   )
   const resend = new Resend(process.env.RESEND_API_KEY)
-  const from   = process.env.EMAIL_FROM ?? "roster@cssports-az.com"
+  const from        = process.env.EMAIL_FROM ?? "roster@cssports-az.com"
+  const appUrl      = process.env.APP_URL ?? "https://cssports-az.com"
+  const notifyEmail = process.env.NOTIFY_EMAIL
 
   const tomorrow = new Date()
   tomorrow.setDate(tomorrow.getDate() + 1)
@@ -50,6 +52,7 @@ export async function GET(request: Request) {
   const errors: string[] = []
   const preview: PreviewEmail[] = []
   const debug: Record<string, unknown> = {}
+  const sentSummary: Array<{ to: string; subject: string }> = []
 
   // ── Snack reminders ───────────────────────────────────────────────────────
   // Query from games so we can filter game_date directly on the root table.
@@ -57,7 +60,7 @@ export async function GET(request: Request) {
   const { data: snackGames, error: snackErr } = await supabase
     .from("games")
     .select(`
-      game_date, game_time, opponent, location, is_home,
+      id, team_id, game_date, game_time, opponent, location, is_home,
       teams!inner(name, snack_signup_enabled),
       snack_signups(
         reminder_email,
@@ -82,9 +85,10 @@ export async function GET(request: Request) {
       const team = game.teams as any
       if (!team?.snack_signup_enabled) continue
 
-      const vs      = game.opponent ? `${game.is_home ? "vs" : "@"} ${game.opponent}` : "your game"
-      const dateStr = `${fmtDate(game.game_date)}${fmtTime(game.game_time)}`
-      const loc     = game.location ? `\nLocation: ${game.location}` : ""
+      const vs        = game.opponent ? `${game.is_home ? "vs" : "@"} ${game.opponent}` : "your game"
+      const dateStr   = `${fmtDate(game.game_date)}${fmtTime(game.game_time)}`
+      const loc       = game.location ? `\nLocation: ${game.location}` : ""
+      const manageUrl = `${appUrl}/parent/team/${game.team_id}?tab=schedule`
 
       for (const signup of (game.snack_signups as any[]) ?? []) {
         if (!signup.reminder_email) continue
@@ -92,14 +96,17 @@ export async function GET(request: Request) {
         if (!parent?.email) continue
 
         const subject = `Reminder: You're bringing snacks tomorrow — ${team.name}`
-        const text    = `Hi ${parent.first_name},\n\nReminder: you signed up to bring snacks for ${team.name} ${vs} tomorrow (${dateStr}).${loc}\n\nThank you!\n— Coach Connor`
+        const text    = `Hi ${parent.first_name},\n\nReminder: you signed up to bring snacks for ${team.name} ${vs} tomorrow (${dateStr}).${loc}\n\nTo cancel or manage your signup:\n${manageUrl}\n\nThank you!\n— Coach Connor`
 
         if (dry) {
           preview.push({ to: parent.email, subject, body: text })
         } else {
           const { error } = await resend.emails.send({ from, to: parent.email, subject, text })
           if (error) errors.push(`snack email ${parent.email}: ${error.message}`)
-          else emailsSent++
+          else {
+            emailsSent++
+            sentSummary.push({ to: parent.email, subject })
+          }
         }
       }
     }
@@ -126,8 +133,9 @@ export async function GET(request: Request) {
     errors.push(`training query: ${trainingErr.message}`)
   } else {
     for (const session of trainingSessions ?? []) {
-      const dateStr = `${fmtDate(session.session_date)}${fmtTime(session.session_time)}`
-      const loc     = session.location ? `\nLocation: ${session.location}` : ""
+      const dateStr   = `${fmtDate(session.session_date)}${fmtTime(session.session_time)}`
+      const loc       = session.location ? `\nLocation: ${session.location}` : ""
+      const manageUrl = `${appUrl}/parent/training`
 
       for (const signup of (session.training_signups as any[]) ?? []) {
         if (!signup.reminder_email) continue
@@ -137,17 +145,34 @@ export async function GET(request: Request) {
 
         const playerName = player ? `${player.first_name} ${player.last_name}` : "your player"
         const subject    = `Reminder: Training session tomorrow — ${session.title}`
-        const text       = `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session.title} tomorrow (${dateStr}).${loc}\n\nSee you there!\n— Coach Connor`
+        const text       = `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session.title} tomorrow (${dateStr}).${loc}\n\nTo cancel or manage your registration:\n${manageUrl}\n\nSee you there!\n— Coach Connor`
 
         if (dry) {
           preview.push({ to: parent.email, subject, body: text })
         } else {
           const { error } = await resend.emails.send({ from, to: parent.email, subject, text })
           if (error) errors.push(`training email ${parent.email}: ${error.message}`)
-          else emailsSent++
+          else {
+            emailsSent++
+            sentSummary.push({ to: parent.email, subject })
+          }
         }
       }
     }
+  }
+
+  // ── Coach summary email ───────────────────────────────────────────────────
+
+  if (!dry && notifyEmail && emailsSent > 0) {
+    const summaryLines = sentSummary.map((e) => `  • ${e.to} — ${e.subject}`).join("\n")
+    const summaryText  = `Reminder run for ${targetDate}: ${emailsSent} email${emailsSent !== 1 ? "s" : ""} sent.\n\n${summaryLines}`
+    const { error: summaryErr } = await resend.emails.send({
+      from,
+      to: notifyEmail,
+      subject: `Roster reminders sent: ${emailsSent} email${emailsSent !== 1 ? "s" : ""} for ${targetDate}`,
+      text: summaryText,
+    })
+    if (summaryErr) errors.push(`summary email: ${summaryErr.message}`)
   }
 
   if (dry) {
