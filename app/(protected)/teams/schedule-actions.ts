@@ -115,13 +115,13 @@ export async function claimSnackSlot(
   if (error) return { error: error.message };
 
   const parent = parentLink.parents as any;
-  await notifyCoachSignupChange({
+  notifyCoachSignupChange({
     type: "signup",
     parentName: `${parent.first_name} ${parent.last_name}`,
     teamName: (game.teams as any)?.name ?? "your team",
     gameDate: game.game_date,
     opponent: game.opponent,
-  });
+  }).catch((err) => console.error("[notify] claimSnackSlot:", err));
 
   revalidatePath("/parent");
   revalidatePath(`/parent/team/${game.team_id}`);
@@ -149,13 +149,13 @@ export async function cancelSnackSlot(signupId: string) {
   if (signup) {
     const parent = signup.parents as any;
     const game   = signup.games as any;
-    await notifyCoachSignupChange({
+    notifyCoachSignupChange({
       type: "cancel",
       parentName: `${parent?.first_name} ${parent?.last_name}`,
       teamName: game?.teams?.name ?? "your team",
       gameDate: game?.game_date,
       opponent: game?.opponent ?? null,
-    });
+    }).catch((err) => console.error("[notify] cancelSnackSlot:", err));
     const teamId = game?.team_id;
     revalidatePath("/parent");
     if (teamId) revalidatePath(`/parent/team/${teamId}`);
