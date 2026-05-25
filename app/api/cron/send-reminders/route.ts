@@ -49,6 +49,7 @@ export async function GET(request: Request) {
   let emailsSent = 0
   const errors: string[] = []
   const preview: PreviewEmail[] = []
+  const debug: Record<string, unknown> = {}
 
   // ── Snack reminders ───────────────────────────────────────────────────────
   // Query from games so we can filter game_date directly on the root table.
@@ -68,6 +69,15 @@ export async function GET(request: Request) {
   if (snackErr) {
     errors.push(`snack query: ${snackErr.message}`)
   } else {
+    debug.snackGamesFound = snackGames?.length ?? 0
+    debug.snackGames = snackGames?.map((g) => ({
+      game_date: g.game_date,
+      snack_signup_enabled: (g.teams as any)?.snack_signup_enabled,
+      signups: (g.snack_signups as any[])?.map((s) => ({
+        reminder_email: s.reminder_email,
+        has_parent_email: !!(s.parents as any)?.email,
+      })),
+    }))
     for (const game of snackGames ?? []) {
       const team = game.teams as any
       if (!team?.snack_signup_enabled) continue
@@ -110,6 +120,8 @@ export async function GET(request: Request) {
     `)
     .eq("session_date", targetDate)
 
+  debug.trainingSessionsFound = trainingSessions?.length ?? 0
+
   if (trainingErr) {
     errors.push(`training query: ${trainingErr.message}`)
   } else {
@@ -139,7 +151,7 @@ export async function GET(request: Request) {
   }
 
   if (dry) {
-    return Response.json({ dry: true, date: targetDate, wouldSend: preview.length, preview })
+    return Response.json({ dry: true, date: targetDate, wouldSend: preview.length, preview, debug })
   }
 
   return Response.json({
