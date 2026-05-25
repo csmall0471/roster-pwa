@@ -65,6 +65,8 @@ export async function signUpForTraining(
   sessionId:     string,
   playerId:      string,
   paymentMethod: string | null,
+  reminderEmail  = false,
+  reminderSms    = false,
 ) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -97,6 +99,8 @@ export async function signUpForTraining(
       player_id:      playerId,
       parent_id:      parentLink.parent_id,
       payment_method: paymentMethod,
+      reminder_email: reminderEmail,
+      reminder_sms:   reminderSms,
     })
     .select("id")
     .single()
@@ -110,6 +114,8 @@ export async function bulkSignUpForTraining(
   sessionIds:    string[],
   playerId:      string,
   paymentMethod: string | null,
+  reminderEmail  = false,
+  reminderSms    = false,
 ) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -145,6 +151,8 @@ export async function bulkSignUpForTraining(
         player_id:      playerId,
         parent_id:      parentLink.parent_id,
         payment_method: paymentMethod,
+        reminder_email: reminderEmail,
+        reminder_sms:   reminderSms,
       })
       .select("id")
       .single()

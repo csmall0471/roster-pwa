@@ -396,20 +396,22 @@ function PlayerRow({
   onCancel:              () => void
   onBulkSignup:          (results: Array<{ sessionId: string; signupId: string }>) => void
 }) {
-  const [showForm, setShowForm]       = useState(false)
-  const [selectedMethod, setMethod]   = useState<string | null>(null)
-  const [error, setError]             = useState<string | null>(null)
-  const [pending, start]              = useTransition()
-  const isRegistered                  = !!player.signup_id
-  const name                          = `${player.first_name} ${player.last_name}`
-  const needsPaymentChoice            = paymentMethods.length > 0
-  const isInSeries                    = unregisteredSiblings.length > 0
-  const needsPanel                    = needsPaymentChoice || isInSeries
+  const [showForm, setShowForm]         = useState(false)
+  const [selectedMethod, setMethod]     = useState<string | null>(null)
+  const [reminderEmail, setReminderEmail] = useState(false)
+  const [reminderSms, setReminderSms]   = useState(false)
+  const [error, setError]               = useState<string | null>(null)
+  const [pending, start]                = useTransition()
+  const isRegistered                    = !!player.signup_id
+  const name                            = `${player.first_name} ${player.last_name}`
+  const needsPaymentChoice              = paymentMethods.length > 0
+  const isInSeries                      = unregisteredSiblings.length > 0
+  const needsPanel                      = needsPaymentChoice || isInSeries
 
   function handleSignup() {
     setError(null)
     start(async () => {
-      const result = await signUpForTraining(sessionId, player.player_id, selectedMethod)
+      const result = await signUpForTraining(sessionId, player.player_id, selectedMethod, reminderEmail, reminderSms)
       if (result.error) { setError(result.error); return }
       onSignup(result.signupId!)
       setShowForm(false)
@@ -434,7 +436,7 @@ function PlayerRow({
       ...unregisteredSiblings.map((s) => s.id),
     ]
     start(async () => {
-      const result = await bulkSignUpForTraining(ids, player.player_id, selectedMethod)
+      const result = await bulkSignUpForTraining(ids, player.player_id, selectedMethod, reminderEmail, reminderSms)
       if (result.error) { setError(result.error); return }
       onBulkSignup(result.results)
       setShowForm(false)
@@ -530,6 +532,16 @@ function PlayerRow({
               </div>
             </div>
           )}
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+              <input type="checkbox" checked={reminderEmail} onChange={(e) => setReminderEmail(e.target.checked)} className="accent-blue-600" />
+              Email reminder
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+              <input type="checkbox" checked={reminderSms} onChange={(e) => setReminderSms(e.target.checked)} className="accent-blue-600" />
+              Text reminder
+            </label>
+          </div>
           {error && <p className="text-xs text-red-500">{error}</p>}
           <div className="flex items-center gap-3 flex-wrap">
             {!isRegistered && (

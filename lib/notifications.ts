@@ -2,6 +2,19 @@
 // Resend is active. SMS (Twilio) is stubbed until keys are provided:
 //   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
 
+export type TrainingReminderPayload = {
+  parentEmail:   string | null;
+  parentPhone:   string | null;
+  parentName:    string;
+  playerName:    string;
+  title:         string;
+  sessionDate:   string;
+  sessionTime:   string | null;
+  location:      string | null;
+  reminderEmail: boolean;
+  reminderSms:   boolean;
+};
+
 export type SignupChangePayload = {
   type: "signup" | "cancel";
   parentName: string;
@@ -85,6 +98,44 @@ export async function sendSnackReminder(payload: ReminderPayload): Promise<void>
   // ── SMS via Twilio ──
   if (payload.reminderSms && payload.parentPhone) {
     const body = `Reminder: You're bringing snacks for ${payload.teamName} ${vs} tomorrow (${dateStr}).${locationLine} — Coach Connor`;
+
+    // TODO: uncomment when Twilio keys are available
+    // const twilio = (await import("twilio")).default;
+    // const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    // await client.messages.create({
+    //   from: process.env.TWILIO_FROM_NUMBER,
+    //   to: payload.parentPhone,
+    //   body,
+    // });
+
+    console.log("[notify:sms]", payload.parentPhone, body);
+  }
+}
+
+// ── Training day-before reminder ──────────────────────────────────────────────
+
+export async function sendTrainingReminder(payload: TrainingReminderPayload): Promise<void> {
+  const dateStr = `${fmtDate(payload.sessionDate)}${fmtTime(payload.sessionTime)}`;
+  const locationLine = payload.location ? `\nLocation: ${payload.location}` : "";
+
+  // ── Email via Resend ──
+  if (payload.reminderEmail && payload.parentEmail) {
+    const subject = `Reminder: Training session tomorrow — ${payload.title}`;
+    const text = `Hi ${payload.parentName},\n\nJust a reminder that ${payload.playerName} is registered for ${payload.title} tomorrow (${dateStr}).${locationLine}\n\nSee you there!\n— Coach Connor`;
+
+    const { Resend } = await import("resend");
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+      to: payload.parentEmail,
+      subject,
+      text,
+    });
+  }
+
+  // ── SMS via Twilio ──
+  if (payload.reminderSms && payload.parentPhone) {
+    const body = `Reminder: ${payload.playerName} has training tomorrow — ${payload.title} (${dateStr}).${locationLine} — Coach Connor`;
 
     // TODO: uncomment when Twilio keys are available
     // const twilio = (await import("twilio")).default;

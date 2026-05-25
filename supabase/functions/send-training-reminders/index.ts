@@ -1,13 +1,13 @@
-// Supabase Edge Function: send-snack-reminders
+// Supabase Edge Function: send-training-reminders
 //
 // Run daily at 8 AM via pg_cron. Set up in Supabase SQL editor:
 //
 //   select cron.schedule(
-//     'send-snack-reminders',
+//     'send-training-reminders',
 //     '0 8 * * *',
 //     $$
 //       select net.http_post(
-//         url     := '<YOUR_SUPABASE_URL>/functions/v1/send-snack-reminders',
+//         url     := '<YOUR_SUPABASE_URL>/functions/v1/send-training-reminders',
 //         headers := '{"Authorization": "Bearer <SERVICE_ROLE_KEY>"}'::jsonb,
 //         body    := '{}'::jsonb
 //       );
@@ -35,21 +35,20 @@ Deno.serve(async (_req) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
-  // Find all signups for tomorrow's games with reminders enabled
+  // Find all signups for tomorrow's sessions with reminders enabled
   const { data: signups, error } = await supabase
-    .from("snack_signups")
+    .from("training_signups")
     .select(`
       id,
       reminder_email,
       reminder_sms,
       parents(first_name, last_name, email, phone),
-      games!inner(
-        game_date, game_time, opponent, location, is_home,
-        teams!inner(name, snack_signup_enabled)
+      players(first_name, last_name),
+      training_sessions!inner(
+        title, session_date, session_time, location
       )
     `)
-    .eq("games.game_date", tomorrowStr)
-    .eq("games.teams.snack_signup_enabled", true);
+    .eq("training_sessions.session_date", tomorrowStr);
 
   if (error) {
     console.error("Error fetching signups:", error);
@@ -62,16 +61,16 @@ Deno.serve(async (_req) => {
   let smsSent    = 0;
 
   for (const signup of signups ?? []) {
-    const parent = signup.parents as any;
-    const game   = signup.games   as any;
-    const team   = game?.teams    as any;
+    const parent  = signup.parents   as any;
+    const player  = signup.players   as any;
+    const session = signup.training_sessions as any;
 
-    const vs       = game?.opponent ? `${game.is_home ? "vs" : "@"} ${game.opponent}` : "your game";
-    const dateStr  = new Date(game?.game_date + "T00:00:00").toLocaleDateString("en-US", {
+    const dateStr     = new Date(session?.session_date + "T00:00:00").toLocaleDateString("en-US", {
       weekday: "long", month: "long", day: "numeric",
     });
-    const timeStr  = game?.game_time ? ` at ${game.game_time}` : "";
-    const locationLine = game?.location ? `\nLocation: ${game.location}` : "";
+    const timeStr     = session?.session_time ? ` at ${session.session_time}` : "";
+    const locationLine = session?.location ? `\nLocation: ${session.location}` : "";
+    const playerName  = player ? `${player.first_name} ${player.last_name}` : "your player";
 
     // ── Email via Resend ──────────────────────────────────────────────────────
     if (signup.reminder_email && parent?.email) {
@@ -84,8 +83,8 @@ Deno.serve(async (_req) => {
         body: JSON.stringify({
           from: Deno.env.get("EMAIL_FROM") ?? "roster@cssports-az.com",
           to: [parent.email],
-          subject: `Reminder: You're bringing snacks tomorrow — ${team?.name}`,
-          text: `Hi ${parent.first_name},\n\nReminder: you signed up to bring snacks for ${team?.name} ${vs} tomorrow (${dateStr}${timeStr}).${locationLine}\n\nThank you!\n— Coach Connor`,
+          subject: `Reminder: Training session tomorrow — ${session?.title}`,
+          text: `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session?.title} tomorrow (${dateStr}${timeStr}).${locationLine}\n\nSee you there!\n— Coach Connor`,
         }),
       });
       if (res.ok) emailsSent++;
@@ -94,7 +93,7 @@ Deno.serve(async (_req) => {
 
     // ── SMS via Twilio ────────────────────────────────────────────────────────
     if (signup.reminder_sms && parent?.phone) {
-      const body = `Reminder: You're bringing snacks for ${team?.name} ${vs} tomorrow (${dateStr}${timeStr}).${locationLine} — Coach Connor`;
+      const body = `Reminder: ${playerName} has training tomorrow — ${session?.title} (${dateStr}${timeStr}).${locationLine} — Coach Connor`;
       const auth = btoa(`${Deno.env.get("TWILIO_ACCOUNT_SID")}:${Deno.env.get("TWILIO_AUTH_TOKEN")}`);
       const res = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${Deno.env.get("TWILIO_ACCOUNT_SID")}/Messages.json`,
