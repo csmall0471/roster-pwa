@@ -74,6 +74,23 @@ function fmtDate(iso: string) {
   })
 }
 
+function fmtShortDate(iso: string) {
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
+function groupBySeries(sessions: TrainingSession[]) {
+  const map = new Map<string, TrainingSession[]>()
+  for (const s of sessions) {
+    const key = s.series_id ?? s.id
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(s)
+  }
+  for (const group of map.values()) {
+    group.sort((a, b) => a.session_date.localeCompare(b.session_date))
+  }
+  return map
+}
+
 function fmtTime(t: string | null) {
   if (!t) return null
   const [h, m] = t.split(":").map(Number)
@@ -101,8 +118,28 @@ export default function SessionList({
   const [error, setError]       = useState<string | null>(null)
   const [pending, start]        = useTransition()
 
-  const upcoming = sessions.filter((s) => !isPast(s.session_date))
-  const past     = sessions.filter((s) =>  isPast(s.session_date))
+  const upcomingCount = sessions.filter((s) => !isPast(s.session_date)).length
+  const pastCount     = sessions.filter((s) =>  isPast(s.session_date)).length
+
+  const grouped = useMemo(() => groupBySeries(sessions), [sessions])
+
+  const ongoingGroups = useMemo(() =>
+    [...grouped.values()]
+      .filter((g) => g.some((s) => !isPast(s.session_date)))
+      .sort((a, b) => {
+        const aNext = (a.find((s) => !isPast(s.session_date)) ?? a[0]).session_date
+        const bNext = (b.find((s) => !isPast(s.session_date)) ?? b[0]).session_date
+        return aNext.localeCompare(bNext)
+      }),
+    [grouped]
+  )
+
+  const pastGroups = useMemo(() =>
+    [...grouped.values()]
+      .filter((g) => g.every((s) => isPast(s.session_date)))
+      .sort((a, b) => b[b.length - 1].session_date.localeCompare(a[a.length - 1].session_date)),
+    [grouped]
+  )
 
   const seriesOptions = useMemo(() => {
     const map = new Map<string, TrainingSession[]>()
@@ -235,7 +272,7 @@ export default function SessionList({
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {sessions.length === 0
             ? "No sessions yet"
-            : `${upcoming.length} upcoming · ${past.length} past`}
+            : `${upcomingCount} upcoming · ${pastCount} past`}
         </p>
         <button
           onClick={openAdd}
@@ -483,51 +520,47 @@ export default function SessionList({
         </form>
       )}
 
-      {/* Upcoming sessions */}
-      {upcoming.length > 0 && (
+      {/* Ongoing / upcoming groups */}
+      {ongoingGroups.length > 0 && (
         <div className="space-y-2">
-          {upcoming.map((s) => (
-            <SessionCard
-              key={s.id}
-              session={s}
+          {ongoingGroups.map((g) => (
+            <AdminSeriesGroup
+              key={g[0].series_id ?? g[0].id}
+              sessions={g}
               players={players}
-              expanded={expandedId === s.id}
-              onToggleExpand={() => setExpandedId((v) => v === s.id ? null : s.id)}
-              onEdit={() => openEdit(s)}
-              onDuplicate={() => openDuplicate(s)}
-              onDelete={() => handleDelete(s.id)}
-              onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
-              onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
-              onSignupPaidToggled={(signupId, paid) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.map((su) => su.id === signupId ? { ...su, paid } : su) } : p))}
-              dimmed={false}
-              seriesLabel={s.series_id ? (seriesOptions.find((o) => o.id === s.series_id)?.label ?? null) : null}
+              expandedId={expandedId}
+              onToggleExpand={(id) => setExpandedId((v) => v === id ? null : id)}
+              onEdit={openEdit}
+              onDuplicate={openDuplicate}
+              onDelete={(id) => handleDelete(id)}
+              onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
+              onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
+              onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
             />
           ))}
         </div>
       )}
 
-      {/* Past sessions */}
-      {past.length > 0 && (
+      {/* All-past groups */}
+      {pastGroups.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
             Past sessions
           </p>
           <div className="space-y-2 opacity-50">
-            {[...past].reverse().map((s) => (
-              <SessionCard
-                key={s.id}
-                session={s}
+            {pastGroups.map((g) => (
+              <AdminSeriesGroup
+                key={g[0].series_id ?? g[0].id}
+                sessions={g}
                 players={players}
-                expanded={expandedId === s.id}
-                onToggleExpand={() => setExpandedId((v) => v === s.id ? null : s.id)}
-                onEdit={() => openEdit(s)}
-                onDuplicate={() => openDuplicate(s)}
-                onDelete={() => handleDelete(s.id)}
-                onSignupAdded={(signup) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: [...p.signups, signup] } : p))}
-                onSignupRemoved={(signupId) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.filter((su) => su.id !== signupId) } : p))}
-                onSignupPaidToggled={(signupId, paid) => setSessions((prev) => prev.map((p) => p.id === s.id ? { ...p, signups: p.signups.map((su) => su.id === signupId ? { ...su, paid } : su) } : p))}
-                dimmed
-                seriesLabel={s.series_id ? (seriesOptions.find((o) => o.id === s.series_id)?.label ?? null) : null}
+                expandedId={expandedId}
+                onToggleExpand={(id) => setExpandedId((v) => v === id ? null : id)}
+                onEdit={openEdit}
+                onDuplicate={openDuplicate}
+                onDelete={(id) => handleDelete(id)}
+                onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
+                onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
+                onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
               />
             ))}
           </div>
@@ -547,11 +580,82 @@ export default function SessionList({
   )
 }
 
+// ── AdminSeriesGroup ──────────────────────────────────────────────────────────
+
+function AdminSeriesGroup({
+  sessions, players, expandedId, onToggleExpand, onEdit, onDuplicate, onDelete,
+  onSignupAdded, onSignupRemoved, onSignupPaidToggled,
+}: {
+  sessions:        TrainingSession[]
+  players:         PlayerOption[]
+  expandedId:      string | null
+  onToggleExpand:  (id: string) => void
+  onEdit:          (s: TrainingSession) => void
+  onDuplicate:     (s: TrainingSession) => void
+  onDelete:        (id: string) => void
+  onSignupAdded:       (sessionId: string, signup: TrainingSession["signups"][0]) => void
+  onSignupRemoved:     (sessionId: string, signupId: string) => void
+  onSignupPaidToggled: (sessionId: string, signupId: string, paid: boolean) => void
+}) {
+  // Standalone sessions start open so they're immediately visible
+  const [open, setOpen] = useState(sessions.length === 1)
+  const title           = sessions[0].title
+  const count           = sessions.length
+  const firstDate       = sessions[0].session_date
+  const lastDate        = sessions[sessions.length - 1].session_date
+  const upcomingInGroup = sessions.filter((s) => !isPast(s.session_date)).length
+
+  const subtitle = count === 1
+    ? fmtDate(firstDate)
+    : `${count} sessions · ${fmtShortDate(firstDate)} – ${fmtShortDate(lastDate)}`
+
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
+          {!open && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              {subtitle}
+              {count > 1 && upcomingInGroup < count && ` · ${upcomingInGroup} upcoming`}
+            </div>
+          )}
+        </div>
+        <span className="text-gray-400 dark:text-gray-500 text-sm ml-4 shrink-0">{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {sessions.map((s) => (
+            <SessionCard
+              key={s.id}
+              session={s}
+              players={players}
+              expanded={expandedId === s.id}
+              onToggleExpand={() => onToggleExpand(s.id)}
+              onEdit={() => onEdit(s)}
+              onDuplicate={() => onDuplicate(s)}
+              onDelete={() => onDelete(s.id)}
+              onSignupAdded={(su) => onSignupAdded(s.id, su)}
+              onSignupRemoved={(suId) => onSignupRemoved(s.id, suId)}
+              onSignupPaidToggled={(suId, paid) => onSignupPaidToggled(s.id, suId, paid)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── SessionCard ───────────────────────────────────────────────────────────────
 
 function SessionCard({
   session, players, expanded, onToggleExpand, onEdit, onDuplicate, onDelete,
-  onSignupAdded, onSignupRemoved, onSignupPaidToggled, dimmed, seriesLabel,
+  onSignupAdded, onSignupRemoved, onSignupPaidToggled,
 }: {
   session:         TrainingSession
   players:         PlayerOption[]
@@ -563,8 +667,6 @@ function SessionCard({
   onSignupAdded:       (signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (signupId: string) => void
   onSignupPaidToggled: (signupId: string, paid: boolean) => void
-  dimmed:              boolean
-  seriesLabel:         string | null
 }) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
@@ -572,7 +674,7 @@ function SessionCard({
   const isFull    = openSlots <= 0
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
+    <div className={`px-4 py-3 ${isPast(session.session_date) ? "opacity-60" : ""}`}>
       <div className="flex items-start justify-between gap-4">
         <button
           type="button"
@@ -590,11 +692,6 @@ function SessionCard({
               </span>
             )}
           </div>
-
-          {/* Title */}
-          <p className="text-sm text-gray-800 dark:text-gray-200 font-medium mt-0.5">
-            {session.title}
-          </p>
 
           {/* Meta row */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
@@ -615,29 +712,18 @@ function SessionCard({
               {describeRules(session.eligibility_rules)}
             </p>
           )}
-
-          {/* Series badge */}
-          {seriesLabel && (
-            <p className="text-xs text-purple-600 dark:text-purple-400 mt-0.5">
-              ⟳ {seriesLabel}
-            </p>
-          )}
         </button>
 
         <div className="flex items-center gap-3 shrink-0 text-xs">
-          {!dimmed && (
-            <button onClick={onEdit} className="text-blue-600 dark:text-blue-400 hover:underline">
-              Edit
-            </button>
-          )}
+          <button onClick={onEdit} className="text-blue-600 dark:text-blue-400 hover:underline">
+            Edit
+          </button>
           <button onClick={onDuplicate} className="text-gray-500 dark:text-gray-400 hover:underline">
             Duplicate
           </button>
-          {!dimmed && (
-            <button onClick={onDelete} className="text-red-500 hover:underline">
-              Delete
-            </button>
-          )}
+          <button onClick={onDelete} className="text-red-500 hover:underline">
+            Delete
+          </button>
         </div>
       </div>
 
