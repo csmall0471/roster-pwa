@@ -70,7 +70,6 @@ function mapsLink(location: string) {
   return `https://maps.google.com/?q=${encodeURIComponent(location)}`
 }
 
-// Group by series_id (or by session id for standalones)
 function groupBySeries(sessions: TrainingSessionForParent[]) {
   const map = new Map<string, TrainingSessionForParent[]>()
   for (const s of sessions) {
@@ -201,6 +200,21 @@ function SeriesGroup({
     ? fmtDate(firstDate)
     : `${count} sessions · ${fmtShortDate(firstDate)} – ${fmtShortDate(lastDate)}`
 
+  // All eligible players across the entire series (deduplicated)
+  const allPlayers = useMemo(() => {
+    const map = new Map<string, { player_id: string; first_name: string; last_name: string }>()
+    for (const s of sessions) {
+      for (const p of s.players) {
+        if (!map.has(p.player_id)) {
+          map.set(p.player_id, { player_id: p.player_id, first_name: p.first_name, last_name: p.last_name })
+        }
+      }
+    }
+    return Array.from(map.values())
+  }, [sessions])
+
+  const ineligiblePlayers = sessions[0].ineligiblePlayers
+
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
       <button
@@ -217,189 +231,93 @@ function SeriesGroup({
       </button>
 
       {open && (
-        <div className="divide-y divide-gray-100 dark:divide-gray-800">
-          {sessions.map((s) => (
-            <SessionCard
-              key={s.id}
-              session={s}
-              seriesSessions={sessions}
-              onSignup={(playerId, signupId) => onSignup(s.id, playerId, signupId)}
-              onCancel={(playerId) => onCancel(s.id, playerId)}
-              onBulkSignup={onBulkSignup}
-            />
-          ))}
+        <div>
+          {/* Per-player signup/status rows at the top */}
+          {allPlayers.length > 0 && (
+            <div className="divide-y divide-gray-100 dark:divide-gray-800 border-b border-gray-200 dark:border-gray-700">
+              {allPlayers.map((player) => (
+                <SeriesPlayerRow
+                  key={player.player_id}
+                  playerId={player.player_id}
+                  firstName={player.first_name}
+                  lastName={player.last_name}
+                  sessions={sessions}
+                  onSignup={(sid, signupId) => onSignup(sid, player.player_id, signupId)}
+                  onCancel={(sid) => onCancel(sid, player.player_id)}
+                  onBulkSignup={(results) => onBulkSignup(player.player_id, results)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Date list — info only, no signup buttons */}
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {sessions.map((s) => (
+              <SimpleDateCard key={s.id} session={s} />
+            ))}
+          </div>
+
+          {ineligiblePlayers.length > 0 && (
+            <div className="border-t border-gray-100 dark:border-gray-800">
+              <IneligibleDropdown players={ineligiblePlayers} />
+            </div>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-// ── SessionCard ───────────────────────────────────────────────────────────────
+// ── SeriesPlayerRow ───────────────────────────────────────────────────────────
 
-function SessionCard({
-  session, seriesSessions, onSignup, onCancel, onBulkSignup,
-}: {
-  session:      TrainingSessionForParent
-  seriesSessions: TrainingSessionForParent[]
-  onSignup:     (playerId: string, signupId: string) => void
-  onCancel:     (playerId: string) => void
-  onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
-}) {
-  const time      = fmtTime(session.session_time)
-  const endTime   = fmtTime(session.session_end_time)
-  const openSlots = session.max_players - session.total_signups
-  const isFull    = openSlots <= 0
-
-  return (
-    <div className="bg-white dark:bg-gray-900">
-      <div className="px-5 py-4">
-        {/* Date is the primary label inside an expanded series */}
-        <div className="text-sm font-semibold text-gray-900 dark:text-white">
-          {fmtDate(session.session_date)}
-        </div>
-
-        {time && (
-          <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-            {time}{endTime ? ` – ${endTime}` : ""}
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2">
-          {session.location && (
-            <a
-              href={mapsLink(session.location)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              {session.location} ↗
-            </a>
-          )}
-          <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
-            {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
-          </span>
-          {session.payment_amount && (
-            <span className="text-xs text-gray-500 dark:text-gray-400">{session.payment_amount}</span>
-          )}
-        </div>
-
-        {session.description && (
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{session.description}</p>
-        )}
-        {session.notes && (
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 italic">{session.notes}</p>
-        )}
-      </div>
-
-      <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
-        {session.players.map((player) => (
-          <PlayerRow
-            key={player.player_id}
-            player={player}
-            session={session}
-            seriesSessions={seriesSessions}
-            isFull={isFull}
-            paymentMethods={session.payment_methods}
-            paymentAmount={session.payment_amount}
-            onSignup={(signupId) => onSignup(player.player_id, signupId)}
-            onCancel={() => onCancel(player.player_id)}
-            onBulkSignup={(results) => onBulkSignup(player.player_id, results)}
-          />
-        ))}
-
-        {session.signedUpPlayers.length > 0 && (
-          <div className="px-5 py-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              <span className="font-medium">Signed up:</span>{" "}
-              {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
-            </p>
-          </div>
-        )}
-
-        {session.ineligiblePlayers.length > 0 && (
-          <IneligibleDropdown players={session.ineligiblePlayers} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── IneligibleDropdown ────────────────────────────────────────────────────────
-
-function IneligibleDropdown({ players }: { players: IneligiblePlayer[] }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="px-5 py-3">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-      >
-        <span>{open ? "▾" : "▸"}</span>
-        {players.length} player{players.length !== 1 ? "s" : ""} not eligible
-      </button>
-      {open && (
-        <ul className="mt-2 space-y-1 pl-4">
-          {players.map((p) => (
-            <li key={p.player_id} className="text-xs text-gray-500 dark:text-gray-400">
-              <span className="font-medium text-gray-700 dark:text-gray-300">
-                {p.first_name} {p.last_name}
-              </span>
-              {" — "}{p.reason}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-// ── PlayerRow ─────────────────────────────────────────────────────────────────
-
-function PlayerRow({
-  player, session, seriesSessions, isFull, paymentMethods, paymentAmount,
+function SeriesPlayerRow({
+  playerId, firstName, lastName, sessions,
   onSignup, onCancel, onBulkSignup,
 }: {
-  player:          EligiblePlayer
-  session:         TrainingSessionForParent
-  seriesSessions:  TrainingSessionForParent[]
-  isFull:          boolean
-  paymentMethods:  PaymentMethod[]
-  paymentAmount:   string | null
-  onSignup:        (signupId: string) => void
-  onCancel:        () => void
-  onBulkSignup:    (results: Array<{ sessionId: string; signupId: string }>) => void
+  playerId:     string
+  firstName:    string
+  lastName:     string
+  sessions:     TrainingSessionForParent[]
+  onSignup:     (sessionId: string, signupId: string) => void
+  onCancel:     (sessionId: string) => void
+  onBulkSignup: (results: Array<{ sessionId: string; signupId: string }>) => void
 }) {
-  const isRegistered    = !!player.signup_id
-  const isInSeries      = seriesSessions.length > 1
-  const name            = `${player.first_name} ${player.last_name}`
-  const needsPaymentChoice = paymentMethods.length > 0
+  const name = `${firstName} ${lastName}`
 
-  // Sessions in this series where the player is eligible, not yet registered, and not full
-  const unregisteredSessions = useMemo(() =>
-    isInSeries
-      ? seriesSessions.filter((s) =>
-          s.players.some((p) => p.player_id === player.player_id && !p.signup_id) &&
-          s.total_signups < s.max_players
-        )
-      : [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [seriesSessions, player.signup_id, isInSeries, player.player_id]
+  // Sessions where this player is eligible
+  const eligibleSessions = sessions.filter((s) =>
+    s.players.some((p) => p.player_id === playerId)
   )
 
-  const hasMultipleToChoose = unregisteredSessions.length > 1
-  const needsForm           = needsPaymentChoice || hasMultipleToChoose
+  // Sessions they're already registered for
+  const registeredSessions = eligibleSessions.filter((s) =>
+    s.players.some((p) => p.player_id === playerId && p.signup_id)
+  )
 
-  const [showForm, setShowForm]         = useState(false)
-  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set())
-  const [selectedMethod, setMethod]     = useState<string | null>(null)
+  // Sessions available to sign up for (eligible, not registered, not full)
+  const unregisteredSessions = eligibleSessions.filter((s) =>
+    s.players.some((p) => p.player_id === playerId && !p.signup_id) &&
+    s.total_signups < s.max_players
+  )
+
+  const hasUnregistered = unregisteredSessions.length > 0
+
+  const firstSession       = eligibleSessions[0]
+  const paymentMethods     = firstSession?.payment_methods ?? []
+  const paymentAmount      = firstSession?.payment_amount ?? null
+  const needsPaymentChoice = paymentMethods.length > 0
+  const needsForm          = needsPaymentChoice || unregisteredSessions.length > 1
+
+  const [showForm, setShowForm]           = useState(false)
+  const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
+  const [selectedMethod, setMethod]       = useState<string | null>(null)
   const [reminderEmail, setReminderEmail] = useState(true)
-  const [reminderSms, setReminderSms]   = useState(false)
-  const [error, setError]               = useState<string | null>(null)
-  const [pending, start]                = useTransition()
+  const [reminderSms, setReminderSms]     = useState(false)
+  const [error, setError]                 = useState<string | null>(null)
+  const [pending, start]                  = useTransition()
 
-  function handleOpenForm(preselect?: string) {
-    // Pre-select only the clicked session (if provided), none for "add more"
-    setSelectedIds(preselect ? new Set([preselect]) : new Set())
+  function handleOpenForm() {
+    setSelectedIds(new Set(unregisteredSessions.map((s) => s.id)))
     setShowForm(true)
   }
 
@@ -415,20 +333,14 @@ function PlayerRow({
   function handleSubmit() {
     setError(null)
     start(async () => {
-      if (!isInSeries) {
-        // Standalone session
-        const result = await signUpForTraining(
-          session.id, player.player_id, selectedMethod, reminderEmail, reminderSms
-        )
+      const ids = [...selectedIds]
+      if (ids.length === 0) return
+      if (ids.length === 1) {
+        const result = await signUpForTraining(ids[0], playerId, selectedMethod, reminderEmail, reminderSms)
         if (result.error) { setError(result.error); return }
-        onSignup(result.signupId!)
+        onSignup(ids[0], result.signupId!)
       } else {
-        // Series: bulk signup for all selected sessions
-        const ids = [...selectedIds]
-        if (ids.length === 0) return
-        const result = await bulkSignUpForTraining(
-          ids, player.player_id, selectedMethod, reminderEmail, reminderSms
-        )
+        const result = await bulkSignUpForTraining(ids, playerId, selectedMethod, reminderEmail, reminderSms)
         if (result.error) { setError(result.error); return }
         onBulkSignup(result.results)
       }
@@ -437,99 +349,83 @@ function PlayerRow({
   }
 
   function handleDirectSignup() {
-    // Bypass form for simple cases (no payment choice, single session)
     setError(null)
     start(async () => {
-      const result = await signUpForTraining(
-        session.id, player.player_id, null, reminderEmail, reminderSms
-      )
+      const sessionId = unregisteredSessions[0].id
+      const result = await signUpForTraining(sessionId, playerId, null, reminderEmail, reminderSms)
       if (result.error) { setError(result.error); return }
-      onSignup(result.signupId!)
+      onSignup(sessionId, result.signupId!)
     })
   }
 
-  function handleCancel() {
-    if (!player.signup_id) return
-    if (!confirm(`Cancel ${name}'s registration?`)) return
+  function handleCancel(sessionId: string) {
+    const playerData = sessions
+      .find((s) => s.id === sessionId)
+      ?.players.find((p) => p.player_id === playerId)
+    if (!playerData?.signup_id) return
+    if (!confirm(`Cancel ${name}'s registration for this session?`)) return
     setError(null)
     start(async () => {
-      const result = await cancelTrainingSignup(player.signup_id!)
+      const result = await cancelTrainingSignup(playerData.signup_id!)
       if (result.error) { setError(result.error); return }
-      onCancel()
+      onCancel(sessionId)
     })
   }
-
-  // How many series sessions is this player registered for?
-  const registeredCount = isInSeries
-    ? seriesSessions.filter((s) =>
-        s.players.some((p) => p.player_id === player.player_id && p.signup_id)
-      ).length
-    : null
-
-  const chosenMethod = paymentMethods.find((m) => m.label === player.payment_method)
-
-  // Determine what action button to show
-  const showSignupButton = !isRegistered && (!isFull || unregisteredSessions.length > 0)
 
   return (
-    <div className="px-5 py-3">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
+    <div className="px-5 py-3 bg-white dark:bg-gray-900">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
 
-        <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
-          {isRegistered ? (
-            <>
-              <span className={`text-xs font-semibold ${player.paid ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
-                ✓ Registered{player.payment_method ? ` · ${player.payment_method}` : ""}
-                {registeredCount !== null && ` (${registeredCount}/${seriesSessions.length})`}
-                {player.paid ? " · Paid" : " · Unpaid"}
-              </span>
-              {chosenMethod?.link && paymentAmount && (
-                <a
-                  href={chosenMethod.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  Pay {paymentAmount} →
-                </a>
-              )}
-              <button
-                onClick={handleCancel}
-                disabled={pending}
-                className="text-xs text-red-500 hover:underline disabled:opacity-50"
-              >
-                {pending ? "…" : "Cancel"}
-              </button>
-            </>
-          ) : isFull && unregisteredSessions.length === 0 ? (
-            <span className="text-xs text-gray-400 dark:text-gray-500">Session full</span>
-          ) : !showForm && showSignupButton ? (
-            <button
-              onClick={() => needsForm ? handleOpenForm(session.id) : handleDirectSignup()}
-              disabled={pending}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {pending ? "Signing up…" : isFull ? "Sign up for other dates" : "Sign up"}
-            </button>
-          ) : null}
-
-          {/* Add more sessions after already registered */}
-          {isRegistered && unregisteredSessions.length > 0 && !showForm && (
-            <button
-              onClick={() => handleOpenForm()}
-              disabled={pending}
-              className="text-xs text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
-            >
-              + {unregisteredSessions.length} more
-            </button>
+          {registeredSessions.length > 0 && (
+            <div className="mt-1.5 space-y-1">
+              {registeredSessions.map((s) => {
+                const playerData = s.players.find((p) => p.player_id === playerId)!
+                const chosenMethod = paymentMethods.find((m) => m.label === playerData.payment_method)
+                return (
+                  <div key={s.id} className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{fmtShortDate(s.session_date)}</span>
+                    <span className={`text-xs font-medium ${playerData.paid ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+                      ✓ Registered{playerData.paid ? " · Paid" : ""}
+                    </span>
+                    {chosenMethod?.link && paymentAmount && (
+                      <a
+                        href={chosenMethod.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Pay {paymentAmount} →
+                      </a>
+                    )}
+                    <button
+                      onClick={() => handleCancel(s.id)}
+                      disabled={pending}
+                      className="text-xs text-red-500 hover:underline disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
+
+        {!showForm && hasUnregistered && (
+          <button
+            onClick={() => needsForm ? handleOpenForm() : handleDirectSignup()}
+            disabled={pending}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shrink-0"
+          >
+            {pending ? "Signing up…" : registeredSessions.length > 0 ? "+ more sessions" : "Sign up"}
+          </button>
+        )}
       </div>
 
       {showForm && (
         <div className="mt-3 space-y-3 pl-1">
-          {/* Payment choice */}
           {needsPaymentChoice && (
             <div className="space-y-1.5">
               <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
@@ -540,7 +436,7 @@ function PlayerRow({
                   <label key={pm.label} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
                     <input
                       type="radio"
-                      name={`pay-${player.player_id}-${session.id}`}
+                      name={`pay-${playerId}`}
                       checked={selectedMethod === pm.label}
                       onChange={() => setMethod(pm.label)}
                       className="accent-blue-600"
@@ -552,8 +448,7 @@ function PlayerRow({
             </div>
           )}
 
-          {/* Multi-session selector */}
-          {hasMultipleToChoose && (
+          {unregisteredSessions.length > 1 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Select sessions:</p>
@@ -594,7 +489,6 @@ function PlayerRow({
             </div>
           )}
 
-          {/* Reminder preferences — at least one required */}
           <div className="flex flex-wrap gap-4">
             <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
               <input
@@ -624,13 +518,13 @@ function PlayerRow({
               disabled={
                 pending ||
                 (needsPaymentChoice && !selectedMethod) ||
-                (hasMultipleToChoose && selectedIds.size === 0)
+                (unregisteredSessions.length > 1 && selectedIds.size === 0)
               }
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {pending
                 ? "Signing up…"
-                : hasMultipleToChoose
+                : unregisteredSessions.length > 1
                   ? `Confirm (${selectedIds.size} session${selectedIds.size !== 1 ? "s" : ""})`
                   : "Confirm"}
             </button>
@@ -645,6 +539,87 @@ function PlayerRow({
       )}
 
       {!showForm && error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  )
+}
+
+// ── SimpleDateCard ────────────────────────────────────────────────────────────
+
+function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
+  const time      = fmtTime(session.session_time)
+  const endTime   = fmtTime(session.session_end_time)
+  const openSlots = session.max_players - session.total_signups
+  const isFull    = openSlots <= 0
+
+  return (
+    <div className="px-5 py-3 bg-white dark:bg-gray-900">
+      <div className="text-sm font-medium text-gray-900 dark:text-white">
+        {fmtDate(session.session_date)}
+      </div>
+      {time && (
+        <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+          {time}{endTime ? ` – ${endTime}` : ""}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+        {session.location && (
+          <a
+            href={mapsLink(session.location)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            {session.location} ↗
+          </a>
+        )}
+        <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+          {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
+        </span>
+        {session.payment_amount && (
+          <span className="text-xs text-gray-500 dark:text-gray-400">{session.payment_amount}</span>
+        )}
+      </div>
+      {session.description && (
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{session.description}</p>
+      )}
+      {session.notes && (
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 italic">{session.notes}</p>
+      )}
+      {session.signedUpPlayers.length > 0 && (
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <span className="font-medium">Signed up:</span>{" "}
+          {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ── IneligibleDropdown ────────────────────────────────────────────────────────
+
+function IneligibleDropdown({ players }: { players: IneligiblePlayer[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="px-5 py-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        {players.length} player{players.length !== 1 ? "s" : ""} not eligible
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-1 pl-4">
+          {players.map((p) => (
+            <li key={p.player_id} className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="font-medium text-gray-700 dark:text-gray-300">
+                {p.first_name} {p.last_name}
+              </span>
+              {" — "}{p.reason}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
