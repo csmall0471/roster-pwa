@@ -397,9 +397,9 @@ function PlayerRow({
   const [error, setError]               = useState<string | null>(null)
   const [pending, start]                = useTransition()
 
-  function handleOpenForm() {
-    // Pre-select all available unregistered sessions
-    setSelectedIds(new Set(unregisteredSessions.map((s) => s.id)))
+  function handleOpenForm(preselect?: string) {
+    // Pre-select only the clicked session (if provided), none for "add more"
+    setSelectedIds(preselect ? new Set([preselect]) : new Set())
     setShowForm(true)
   }
 
@@ -506,7 +506,7 @@ function PlayerRow({
             <span className="text-xs text-gray-400 dark:text-gray-500">Session full</span>
           ) : !showForm && showSignupButton ? (
             <button
-              onClick={() => needsForm ? handleOpenForm() : handleDirectSignup()}
+              onClick={() => needsForm ? handleOpenForm(session.id) : handleDirectSignup()}
               disabled={pending}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
@@ -517,7 +517,7 @@ function PlayerRow({
           {/* Add more sessions after already registered */}
           {isRegistered && unregisteredSessions.length > 0 && !showForm && (
             <button
-              onClick={handleOpenForm}
+              onClick={() => handleOpenForm()}
               disabled={pending}
               className="text-xs text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
             >
@@ -555,9 +555,26 @@ function PlayerRow({
           {/* Multi-session selector */}
           {hasMultipleToChoose && (
             <div className="space-y-2">
-              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-                Select sessions:
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Select sessions:</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(new Set(unregisteredSessions.map((s) => s.id)))}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Select all
+                  </button>
+                  <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Deselect all
+                  </button>
+                </div>
+              </div>
               {unregisteredSessions.map((s) => {
                 const t = fmtTime(s.session_time)
                 return (
