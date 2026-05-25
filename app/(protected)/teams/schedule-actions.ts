@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { notifyCoachSignupChange } from "@/lib/notifications";
+import { notifyCoachSignupChange, sendSnackConfirmation } from "@/lib/notifications";
 
 // ── Admin: game management ────────────────────────────────────────────────────
 
@@ -75,14 +75,14 @@ export async function claimSnackSlot(
 
   const { data: parentLink } = await supabase
     .from("parent_auth")
-    .select("parent_id, parents(first_name, last_name)")
+    .select("parent_id, parents(first_name, last_name, email)")
     .eq("auth_user_id", user.id)
     .maybeSingle();
   if (!parentLink) return { error: "Not a parent account" };
 
   const { data: game } = await supabase
     .from("games")
-    .select("id, game_date, opponent, team_id, teams(name, snack_slots_per_game)")
+    .select("id, game_date, game_time, opponent, location, is_home, team_id, teams(name, snack_slots_per_game)")
     .eq("id", gameId)
     .single();
   if (!game) return { error: "Game not found" };
@@ -114,14 +114,32 @@ export async function claimSnackSlot(
   });
   if (error) return { error: error.message };
 
-  const parent = parentLink.parents as any;
+  const parent     = parentLink.parents as any;
+  const gameTeam   = game.teams as any;
+  const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent";
+
   notifyCoachSignupChange({
     type: "signup",
-    parentName: parent ? `${parent.first_name} ${parent.last_name}` : "A parent",
-    teamName: (game.teams as any)?.name ?? "your team",
+    parentName,
+    teamName: gameTeam?.name ?? "your team",
     gameDate: game.game_date,
     opponent: game.opponent,
-  }).catch((err) => console.error("[notify] claimSnackSlot:", err));
+  }).catch((err) => console.error("[notify] claimSnackSlot coach:", err));
+
+  if (parent?.email) {
+    sendSnackConfirmation({
+      type: "signup",
+      parentEmail: parent.email,
+      parentFirstName: parent.first_name ?? "there",
+      teamName: gameTeam?.name ?? "your team",
+      opponent: game.opponent,
+      isHome: game.is_home,
+      gameDate: game.game_date,
+      gameTime: game.game_time,
+      location: game.location,
+      teamId: game.team_id,
+    }).catch((err) => console.error("[notify] claimSnackSlot parent:", err));
+  }
 
   revalidatePath("/parent");
   revalidatePath(`/parent/team/${game.team_id}`);
@@ -137,8 +155,8 @@ export async function cancelSnackSlot(signupId: string) {
     .from("snack_signups")
     .select(`
       parent_id,
-      parents(first_name, last_name),
-      games(game_date, opponent, team_id, teams(name))
+      parents(first_name, last_name, email),
+      games(game_date, game_time, opponent, location, is_home, team_id, teams(name))
     `)
     .eq("id", signupId)
     .single();
@@ -147,15 +165,33 @@ export async function cancelSnackSlot(signupId: string) {
   if (error) return { error: error.message };
 
   if (signup) {
-    const parent = signup.parents as any;
-    const game   = signup.games as any;
+    const parent     = signup.parents as any;
+    const game       = signup.games as any;
+    const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent";
+
     notifyCoachSignupChange({
       type: "cancel",
-      parentName: parent ? `${parent.first_name} ${parent.last_name}` : "A parent",
+      parentName,
       teamName: game?.teams?.name ?? "your team",
       gameDate: game?.game_date,
       opponent: game?.opponent ?? null,
-    }).catch((err) => console.error("[notify] cancelSnackSlot:", err));
+    }).catch((err) => console.error("[notify] cancelSnackSlot coach:", err));
+
+    if (parent?.email && game?.game_date) {
+      sendSnackConfirmation({
+        type: "cancel",
+        parentEmail: parent.email,
+        parentFirstName: parent.first_name ?? "there",
+        teamName: game?.teams?.name ?? "your team",
+        opponent: game?.opponent ?? null,
+        isHome: game?.is_home ?? true,
+        gameDate: game.game_date,
+        gameTime: game?.game_time ?? null,
+        location: game?.location ?? null,
+        teamId: game.team_id,
+      }).catch((err) => console.error("[notify] cancelSnackSlot parent:", err));
+    }
+
     const teamId = game?.team_id;
     revalidatePath("/parent");
     if (teamId) revalidatePath(`/parent/team/${teamId}`);

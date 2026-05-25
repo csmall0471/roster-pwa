@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
+import { notifyCoachTrainingChange, sendTrainingConfirmation } from "@/lib/notifications"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -74,14 +75,14 @@ export async function signUpForTraining(
 
   const { data: parentLink } = await supabase
     .from("parent_auth")
-    .select("parent_id")
+    .select("parent_id, parents(first_name, last_name, email)")
     .eq("auth_user_id", user.id)
     .maybeSingle()
   if (!parentLink) return { signupId: null, error: "Not a parent account" }
 
   const { data: session } = await supabase
     .from("training_sessions")
-    .select("id, max_players")
+    .select("id, max_players, title, session_date, session_time, location")
     .eq("id", sessionId)
     .single()
   if (!session) return { signupId: null, error: "Session not found" }
@@ -106,6 +107,32 @@ export async function signUpForTraining(
     .single()
   if (error) return { signupId: null, error: error.message }
 
+  const parent = parentLink.parents as any
+  const { data: playerRow } = await supabase.from("players").select("first_name, last_name").eq("id", playerId).single()
+  const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
+  const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent"
+
+  notifyCoachTrainingChange({
+    type: "signup",
+    parentName,
+    playerName,
+    sessionTitle: session.title,
+    sessionDate:  session.session_date,
+  }).catch((err) => console.error("[notify] signUpForTraining coach:", err))
+
+  if (parent?.email) {
+    sendTrainingConfirmation({
+      type:           "signup",
+      parentEmail:    parent.email,
+      parentFirstName: parent.first_name ?? "there",
+      playerName,
+      sessionTitle:   session.title,
+      sessionDate:    session.session_date,
+      sessionTime:    session.session_time,
+      location:       session.location,
+    }).catch((err) => console.error("[notify] signUpForTraining parent:", err))
+  }
+
   revalidatePath("/parent/training")
   return { signupId: row.id as string, error: null }
 }
@@ -123,17 +150,24 @@ export async function bulkSignUpForTraining(
 
   const { data: parentLink } = await supabase
     .from("parent_auth")
-    .select("parent_id")
+    .select("parent_id, parents(first_name, last_name, email)")
     .eq("auth_user_id", user.id)
     .maybeSingle()
   if (!parentLink) return { results: [], error: "Not a parent account" }
 
+  const { data: playerRow } = await supabase
+    .from("players")
+    .select("first_name, last_name")
+    .eq("id", playerId)
+    .single()
+
   const results: Array<{ sessionId: string; signupId: string }> = []
+  const signedSessions: Array<{ title: string; session_date: string; session_time: string | null; location: string | null }> = []
 
   for (const sessionId of sessionIds) {
     const { data: session } = await supabase
       .from("training_sessions")
-      .select("max_players")
+      .select("max_players, title, session_date, session_time, location")
       .eq("id", sessionId)
       .single()
     if (!session) continue
@@ -156,7 +190,44 @@ export async function bulkSignUpForTraining(
       })
       .select("id")
       .single()
-    if (!error && row) results.push({ sessionId, signupId: row.id as string })
+    if (!error && row) {
+      results.push({ sessionId, signupId: row.id as string })
+      signedSessions.push(session)
+    }
+  }
+
+  if (results.length > 0) {
+    const parent     = parentLink.parents as any
+    const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
+    const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent"
+    const title      = signedSessions[0].title
+
+    notifyCoachTrainingChange({
+      type:         "signup",
+      parentName,
+      playerName,
+      sessionTitle: `${title} (${results.length} session${results.length !== 1 ? "s" : ""})`,
+      sessionDate:  signedSessions[0].session_date,
+    }).catch((err) => console.error("[notify] bulkSignUp coach:", err))
+
+    if (parent?.email) {
+      const appUrl      = process.env.APP_URL ?? "https://cssports-az.com"
+      const sessionLines = signedSessions.map((s) => {
+        const d = new Date(s.session_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+        const t = s.session_time ? (() => { const [h, m] = s.session_time!.split(":").map(Number); return ` ${h % 12 || 12}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}` })() : ""
+        return `  • ${d}${t}`
+      }).join("\n")
+
+      import("resend").then(({ Resend }) => {
+        const resend = new Resend(process.env.RESEND_API_KEY)
+        return resend.emails.send({
+          from:    process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+          to:      parent.email,
+          subject: `Registered for ${results.length} ${title} session${results.length !== 1 ? "s" : ""} — ${playerName}`,
+          text:    `Hi ${parent.first_name},\n\n${playerName} is now registered for ${results.length} ${title} session${results.length !== 1 ? "s" : ""}:\n\n${sessionLines}\n\nTo cancel any session:\n${appUrl}/parent/training\n\nSee you there!\n— Coach Connor`,
+        })
+      }).catch((err) => console.error("[notify] bulkSignUp parent:", err))
+    }
   }
 
   revalidatePath("/parent/training")
@@ -215,8 +286,49 @@ export async function markTrainingSignupPaid(signupId: string, paid: boolean) {
 
 export async function cancelTrainingSignup(signupId: string) {
   const supabase = await createClient()
+
+  const { data: signup } = await supabase
+    .from("training_signups")
+    .select(`
+      parents(first_name, last_name, email),
+      players(first_name, last_name),
+      training_sessions(title, session_date, session_time, location)
+    `)
+    .eq("id", signupId)
+    .single()
+
   const { error } = await supabase.from("training_signups").delete().eq("id", signupId)
   if (error) return { error: error.message }
+
+  if (signup) {
+    const parent     = signup.parents as any
+    const player     = signup.players as any
+    const session    = signup.training_sessions as any
+    const playerName = player  ? `${player.first_name} ${player.last_name}`  : "your player"
+    const parentName = parent  ? `${parent.first_name} ${parent.last_name}`  : "A parent"
+
+    notifyCoachTrainingChange({
+      type:         "cancel",
+      parentName,
+      playerName,
+      sessionTitle: session?.title ?? "Training",
+      sessionDate:  session?.session_date ?? "",
+    }).catch((err) => console.error("[notify] cancelTrainingSignup coach:", err))
+
+    if (parent?.email && session?.session_date) {
+      sendTrainingConfirmation({
+        type:            "cancel",
+        parentEmail:     parent.email,
+        parentFirstName: parent.first_name ?? "there",
+        playerName,
+        sessionTitle:    session.title,
+        sessionDate:     session.session_date,
+        sessionTime:     session.session_time ?? null,
+        location:        session.location ?? null,
+      }).catch((err) => console.error("[notify] cancelTrainingSignup parent:", err))
+    }
+  }
+
   revalidatePath("/parent/training")
   return { error: null }
 }

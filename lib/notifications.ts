@@ -23,6 +23,14 @@ export type SignupChangePayload = {
   opponent: string | null;
 };
 
+export type TrainingSignupChangePayload = {
+  type: "signup" | "cancel";
+  parentName: string;
+  playerName: string;
+  sessionTitle: string;
+  sessionDate: string;
+};
+
 export type ReminderPayload = {
   parentEmail: string | null;
   parentPhone: string | null;
@@ -35,6 +43,30 @@ export type ReminderPayload = {
   isHome: boolean;
   reminderEmail: boolean;
   reminderSms: boolean;
+};
+
+export type SnackConfirmationPayload = {
+  type: "signup" | "cancel";
+  parentEmail: string;
+  parentFirstName: string;
+  teamName: string;
+  opponent: string | null;
+  isHome: boolean;
+  gameDate: string;
+  gameTime: string | null;
+  location: string | null;
+  teamId: string;
+};
+
+export type TrainingConfirmationPayload = {
+  type: "signup" | "cancel";
+  parentEmail: string;
+  parentFirstName: string;
+  playerName: string;
+  sessionTitle: string;
+  sessionDate: string;
+  sessionTime: string | null;
+  location: string | null;
 };
 
 function fmtDate(iso: string) {
@@ -51,22 +83,70 @@ function fmtTime(t: string | null) {
   return ` at ${h12}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-// ── Coach signup/cancel notification ─────────────────────────────────────────
+async function resendSend(params: { to: string; subject: string; text: string }) {
+  const { Resend } = await import("resend");
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  return resend.emails.send({
+    from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+    ...params,
+  });
+}
+
+// ── Coach snack signup/cancel notification ────────────────────────────────────
 
 export async function notifyCoachSignupChange(payload: SignupChangePayload): Promise<void> {
   const action = payload.type === "signup" ? "signed up for" : "cancelled";
   const vs = payload.opponent ? ` vs ${payload.opponent}` : "";
   const subject = `Snack update: ${payload.parentName} ${action} snacks`;
   const text = `${payload.parentName} ${action} bringing snacks for ${payload.teamName}${vs} on ${fmtDate(payload.gameDate)}.`;
+  await resendSend({ to: process.env.NOTIFY_EMAIL ?? "csmall0471@gmail.com", subject, text });
+}
 
-  const { Resend } = await import("resend");
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  await resend.emails.send({
-    from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
-    to: process.env.NOTIFY_EMAIL ?? "csmall0471@gmail.com",
-    subject,
-    text,
-  });
+// ── Coach training signup/cancel notification ─────────────────────────────────
+
+export async function notifyCoachTrainingChange(payload: TrainingSignupChangePayload): Promise<void> {
+  const action = payload.type === "signup" ? "registered" : "cancelled";
+  const prep   = payload.type === "signup" ? "for" : "from";
+  const subject = `Training update: ${payload.playerName} ${action} ${prep} ${payload.sessionTitle}`;
+  const text    = `${payload.parentName} ${action} ${payload.playerName} ${prep} ${payload.sessionTitle} on ${fmtDate(payload.sessionDate)}.`;
+  await resendSend({ to: process.env.NOTIFY_EMAIL ?? "csmall0471@gmail.com", subject, text });
+}
+
+// ── Parent snack confirmation ─────────────────────────────────────────────────
+
+export async function sendSnackConfirmation(payload: SnackConfirmationPayload): Promise<void> {
+  const appUrl    = process.env.APP_URL ?? "https://cssports-az.com";
+  const vs        = payload.opponent ? `${payload.isHome ? "vs" : "@"} ${payload.opponent}` : "your game";
+  const dateStr   = `${fmtDate(payload.gameDate)}${fmtTime(payload.gameTime)}`;
+  const loc       = payload.location ? `\nLocation: ${payload.location}` : "";
+  const manageUrl = `${appUrl}/parent/team/${payload.teamId}?tab=schedule`;
+
+  const subject = payload.type === "signup"
+    ? `Signed up to bring snacks — ${payload.teamName}`
+    : `Snack signup cancelled — ${payload.teamName}`;
+  const text = payload.type === "signup"
+    ? `Hi ${payload.parentFirstName},\n\nYou're signed up to bring snacks for ${payload.teamName} ${vs} on ${dateStr}.${loc}\n\nTo cancel:\n${manageUrl}\n\nThank you!\n— Coach Connor`
+    : `Hi ${payload.parentFirstName},\n\nYour snack signup for ${payload.teamName} ${vs} on ${dateStr} has been cancelled.\n\nSign up again at:\n${manageUrl}\n\nThank you!\n— Coach Connor`;
+
+  await resendSend({ to: payload.parentEmail, subject, text });
+}
+
+// ── Parent training confirmation ──────────────────────────────────────────────
+
+export async function sendTrainingConfirmation(payload: TrainingConfirmationPayload): Promise<void> {
+  const appUrl    = process.env.APP_URL ?? "https://cssports-az.com";
+  const dateStr   = `${fmtDate(payload.sessionDate)}${fmtTime(payload.sessionTime)}`;
+  const loc       = payload.location ? `\nLocation: ${payload.location}` : "";
+  const manageUrl = `${appUrl}/parent/training`;
+
+  const subject = payload.type === "signup"
+    ? `Registered for ${payload.sessionTitle} — ${payload.playerName}`
+    : `Training registration cancelled — ${payload.sessionTitle}`;
+  const text = payload.type === "signup"
+    ? `Hi ${payload.parentFirstName},\n\n${payload.playerName} is now registered for ${payload.sessionTitle} on ${dateStr}.${loc}\n\nTo cancel:\n${manageUrl}\n\nSee you there!\n— Coach Connor`
+    : `Hi ${payload.parentFirstName},\n\n${payload.playerName}'s registration for ${payload.sessionTitle} on ${dateStr} has been cancelled.\n\nSign up again at:\n${manageUrl}\n\nSee you there!\n— Coach Connor`;
+
+  await resendSend({ to: payload.parentEmail, subject, text });
 }
 
 // ── Parent day-before reminder ────────────────────────────────────────────────
@@ -84,15 +164,7 @@ export async function sendSnackReminder(payload: ReminderPayload): Promise<void>
   if (payload.reminderEmail && payload.parentEmail) {
     const subject = `Reminder: You're bringing snacks tomorrow — ${payload.teamName}`;
     const text = `Hi ${payload.parentName},\n\nJust a reminder that you signed up to bring snacks for ${payload.teamName} ${vs} on ${dateStr}.${locationLine}\n\nThank you!\n— Coach Connor`;
-
-    const { Resend } = await import("resend");
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
-      to: payload.parentEmail,
-      subject,
-      text,
-    });
+    await resendSend({ to: payload.parentEmail, subject, text });
   }
 
   // ── SMS via Twilio ──
@@ -122,15 +194,7 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
   if (payload.reminderEmail && payload.parentEmail) {
     const subject = `Reminder: Training session tomorrow — ${payload.title}`;
     const text = `Hi ${payload.parentName},\n\nJust a reminder that ${payload.playerName} is registered for ${payload.title} tomorrow (${dateStr}).${locationLine}\n\nSee you there!\n— Coach Connor`;
-
-    const { Resend } = await import("resend");
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
-      to: payload.parentEmail,
-      subject,
-      text,
-    });
+    await resendSend({ to: payload.parentEmail, subject, text });
   }
 
   // ── SMS via Twilio ──
