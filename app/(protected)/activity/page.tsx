@@ -1,4 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
+import ActivityControls from "./_components/ActivityControls"
+
+const TZ = "America/Phoenix"
 
 const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   // Auth
@@ -62,6 +65,7 @@ function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
 
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleString("en-US", {
+    timeZone: TZ,
     month: "short", day: "numeric", year: "numeric",
     hour: "numeric", minute: "2-digit", hour12: true,
   })
@@ -70,25 +74,26 @@ function fmtTime(iso: string) {
 export default async function ActivityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ event?: string; limit?: string }>
+  searchParams: Promise<{ event?: string; parent_id?: string; limit?: string }>
 }) {
-  const { event: filterEvent, limit: limitParam } = await searchParams
+  const { event: filterEvent, parent_id: filterParentId, limit: limitParam } = await searchParams
   const limit = Math.min(parseInt(limitParam ?? "100") || 100, 500)
 
   const supabase = await createClient()
 
-  let query = supabase
-    .from("user_activity")
-    .select(`
-      id, event, metadata, created_at,
-      parents(id, first_name, last_name, phone)
-    `)
-    .order("created_at", { ascending: false })
-    .limit(limit)
-
-  if (filterEvent) query = query.eq("event", filterEvent)
-
-  const { data: rows } = await query
+  const [{ data: rows }, { data: allParents }] = await Promise.all([
+    (() => {
+      let q = supabase
+        .from("user_activity")
+        .select(`id, event, metadata, created_at, parents(id, first_name, last_name, phone)`)
+        .order("created_at", { ascending: false })
+        .limit(limit)
+      if (filterEvent)    q = q.eq("event", filterEvent)
+      if (filterParentId) q = q.eq("parent_id", filterParentId)
+      return q
+    })(),
+    supabase.from("parents").select("id, first_name, last_name").order("first_name"),
+  ])
 
   // Summary counts
   const counts: Record<string, number> = {}
@@ -99,18 +104,23 @@ export default async function ActivityPage({
   }
 
   const eventKeys = Object.keys(EVENT_LABELS)
+  const parents = allParents ?? []
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900 dark:text-white">Activity Log</h1>
-        <p className="text-sm text-gray-400 dark:text-gray-500">Last {limit} events</p>
+        <ActivityControls
+          parents={parents}
+          currentParentId={filterParentId ?? null}
+          currentEvent={filterEvent ?? null}
+        />
       </div>
 
       {/* Summary chips */}
       <div className="flex flex-wrap gap-2">
         <a
-          href="/activity"
+          href={filterParentId ? `/activity?parent_id=${filterParentId}` : "/activity"}
           className={`text-xs rounded-full px-3 py-1 border transition-colors ${
             !filterEvent
               ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-transparent"
@@ -120,12 +130,15 @@ export default async function ActivityPage({
           All ({rows?.length ?? 0})
         </a>
         {eventKeys.map((ev) => {
-          const cfg = EVENT_LABELS[ev]
+          const cfg   = EVENT_LABELS[ev]
           const count = counts[ev] ?? 0
+          const params = new URLSearchParams()
+          params.set("event", ev)
+          if (filterParentId) params.set("parent_id", filterParentId)
           return (
             <a
               key={ev}
-              href={`/activity?event=${ev}`}
+              href={`/activity?${params.toString()}`}
               className={`text-xs rounded-full px-3 py-1 border transition-colors ${
                 filterEvent === ev
                   ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-transparent"
@@ -164,12 +177,20 @@ export default async function ActivityPage({
                     </td>
                     <td className="px-4 py-2.5">
                       {parent ? (
-                        <span className="text-xs text-gray-800 dark:text-gray-200 font-medium">
-                          {parent.first_name} {parent.last_name}
+                        <button
+                          onClick={undefined}
+                          className="text-left"
+                        >
+                          <a
+                            href={`/activity?parent_id=${parent.id}${filterEvent ? `&event=${filterEvent}` : ""}`}
+                            className="text-xs text-gray-800 dark:text-gray-200 font-medium hover:underline"
+                          >
+                            {parent.first_name} {parent.last_name}
+                          </a>
                           {parent.phone && (
-                            <span className="ml-1.5 font-normal text-gray-400 dark:text-gray-500">{parent.phone}</span>
+                            <span className="ml-1.5 text-xs font-normal text-gray-400 dark:text-gray-500">{parent.phone}</span>
                           )}
-                        </span>
+                        </button>
                       ) : (
                         <span className="text-xs text-gray-400">—</span>
                       )}
