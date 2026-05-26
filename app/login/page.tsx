@@ -58,7 +58,7 @@ export default function LoginPage() {
     });
     setLoading(false);
     if (authError) setError(authError.message);
-    else window.location.href = "/";
+    else window.location.href = "/parent/dashboard";
   }
 
   return (
