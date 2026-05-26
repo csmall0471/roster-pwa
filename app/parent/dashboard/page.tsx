@@ -133,6 +133,8 @@ export default async function DashboardPage() {
   function TeamCard({ team, pids }: { team: any; pids: string[] }) {
     const nextGame = nextGameByTeam.get(team.id);
     const isSignedUp = nextGame ? signedUpGameIds.has(nextGame.id) : false;
+    const isActive = !team.season_start || team.season_start <= today;
+    const isUpcoming = team.season_start && team.season_start > today;
 
     return (
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -141,9 +143,21 @@ export default async function DashboardPage() {
           className="flex items-center justify-between px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
         >
           <div>
-            <p className="font-semibold text-gray-900 dark:text-white">
-              {sportEmoji(team.sport)} {team.name}
-            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-semibold text-gray-900 dark:text-white">
+                {sportEmoji(team.sport)} {team.name}
+              </p>
+              {isActive && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">
+                  Active
+                </span>
+              )}
+              {isUpcoming && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400">
+                  Upcoming
+                </span>
+              )}
+            </div>
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
               {[team.organization, team.sport, team.age_group, team.season].filter(Boolean).join(" · ")}
             </p>
