@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { logActivity } from "@/lib/activity";
 
 export async function updatePlayerInfo(
   playerId: string,
@@ -18,7 +19,10 @@ export async function updatePlayerInfo(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  const { data: rows } = await supabase.rpc("get_my_player_ids");
+  const [{ data: rows }, { data: parentLink }] = await Promise.all([
+    supabase.rpc("get_my_player_ids"),
+    supabase.from("parent_auth").select("parent_id").eq("auth_user_id", user.id).maybeSingle(),
+  ]);
   const myIds = new Set((rows ?? []).map((r: { player_id: string }) => r.player_id));
   if (!myIds.has(playerId)) return { error: "Not your player" };
 
@@ -35,6 +39,7 @@ export async function updatePlayerInfo(
     .eq("id", playerId);
 
   if (error) return { error: error.message };
+  if (parentLink?.parent_id) logActivity(parentLink.parent_id, "player_info_updated", { player_id: playerId }).catch(() => {});
   revalidatePath(`/parent/player/${playerId}`);
   revalidatePath("/parent");
   return { error: null };
@@ -85,17 +90,18 @@ export async function updateAnyParent(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  const { error } = await supabase
-    .from("parents")
-    .update({
+  const [{ error }, { data: parentLink }] = await Promise.all([
+    supabase.from("parents").update({
       first_name: data.first_name.trim(),
       last_name: data.last_name.trim(),
       email: data.email.trim(),
       phone: data.phone?.trim() || null,
-    })
-    .eq("id", parentId);
+    }).eq("id", parentId),
+    supabase.from("parent_auth").select("parent_id").eq("auth_user_id", user.id).maybeSingle(),
+  ]);
 
   if (error) return { error: error.message };
+  if (parentLink?.parent_id) logActivity(parentLink.parent_id, "guardian_updated", { updated_parent_id: parentId }).catch(() => {});
   revalidatePath("/parent", "layout");
   return { error: null };
 }
@@ -113,15 +119,19 @@ export async function addCoparent(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated", parentId: null };
 
-  const { data: newId, error } = await supabase.rpc("add_coparent", {
-    p_player_id:  playerId,
-    p_first_name: data.first_name.trim(),
-    p_last_name:  data.last_name.trim(),
-    p_email:      data.email.trim(),
-    p_phone:      data.phone?.trim() || null,
-  });
+  const [{ data: newId, error }, { data: parentLink }] = await Promise.all([
+    supabase.rpc("add_coparent", {
+      p_player_id:  playerId,
+      p_first_name: data.first_name.trim(),
+      p_last_name:  data.last_name.trim(),
+      p_email:      data.email.trim(),
+      p_phone:      data.phone?.trim() || null,
+    }),
+    supabase.from("parent_auth").select("parent_id").eq("auth_user_id", user.id).maybeSingle(),
+  ]);
 
   if (error) return { error: error.message, parentId: null };
+  if (parentLink?.parent_id) logActivity(parentLink.parent_id, "guardian_added", { player_id: playerId }).catch(() => {});
   revalidatePath("/parent", "layout");
   return { error: null, parentId: newId as string };
 }

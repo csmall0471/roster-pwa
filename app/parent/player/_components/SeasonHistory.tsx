@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { track } from "@vercel/analytics";
+import { logClientActivity } from "@/app/actions/log-activity";
 
 type SeasonRow = {
   jersey_number: number | null;
@@ -63,7 +64,7 @@ export default function SeasonHistory({
 
       {hidden > 0 && (
         <button
-          onClick={() => { if (!expanded) track("past_seasons_expanded"); setExpanded((v) => !v); }}
+          onClick={() => { if (!expanded) { track("past_seasons_expanded"); logClientActivity("past_seasons_expanded").catch(() => {}); } setExpanded((v) => !v); }}
           className="w-full px-4 py-2.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-center"
         >
           {expanded ? "Show less" : `Show ${hidden} more season${hidden !== 1 ? "s" : ""}`}
