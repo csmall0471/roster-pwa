@@ -39,6 +39,12 @@ export default async function ParentLayout({ children }: { children: React.React
       <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
         <div className="max-w-2xl mx-auto px-4 flex gap-1">
           <Link
+            href="/parent/dashboard"
+            className="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+          >
+            Dashboard
+          </Link>
+          <Link
             href="/parent"
             className="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
@@ -49,12 +55,6 @@ export default async function ParentLayout({ children }: { children: React.React
             className="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
             Training
-          </Link>
-          <Link
-            href="/parent/skills"
-            className="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-          >
-            Skills
           </Link>
         </div>
       </nav>
