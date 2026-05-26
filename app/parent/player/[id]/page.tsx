@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
 import SeasonHistory from "../_components/SeasonHistory";
 import PhotoCardGallery from "../_components/PhotoCardGallery";
+import PlayerInfoForm from "./_components/PlayerInfoForm";
+import ParentInfoForm from "./_components/ParentInfoForm";
 
 function calcAge(dob: string) {
   const birth = new Date(dob + "T00:00:00");
@@ -25,7 +27,6 @@ export default async function ParentPlayerPage({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Verify this player is actually one of their kids
   const { data: parentLink } = await supabase
     .from("parent_auth")
     .select("parent_id")
@@ -33,17 +34,16 @@ export default async function ParentPlayerPage({
     .maybeSingle();
 
   if (!parentLink) redirect("/login");
+  const parentId = parentLink.parent_id;
 
   const { data: myKidRows } = await supabase.rpc("get_my_player_ids");
   const myKidIds = new Set((myKidRows ?? []).map((r: { player_id: string }) => r.player_id));
-  const ownership = myKidIds.has(id) ? { player_id: id } : null;
+  if (!myKidIds.has(id)) notFound();
 
-  if (!ownership) notFound();
-
-  const [{ data: player }, { data: photos }, { data: seasons }] = await Promise.all([
+  const [{ data: player }, { data: photos }, { data: seasons }, { data: parentRecord }] = await Promise.all([
     supabase
       .from("players")
-      .select("id, first_name, last_name, date_of_birth, shirt_size, notes")
+      .select("id, first_name, last_name, date_of_birth, shirt_size, grade, notes")
       .eq("id", id)
       .single(),
     supabase
@@ -55,9 +55,17 @@ export default async function ParentPlayerPage({
       .select(`jersey_number, status, teams(id, name, sport, season, age_group, organization, season_start, season_end)`)
       .eq("player_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("parents")
+      .select("id, first_name, last_name, email, phone")
+      .eq("id", parentId)
+      .single(),
   ]);
 
   if (!player) notFound();
+
+  // How many kids this parent has (for "applies to all kids" context)
+  const kidCount = myKidIds.size;
 
   const sortedPhotos = [...(photos ?? [])].sort((a, b) => {
     if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
@@ -68,13 +76,13 @@ export default async function ParentPlayerPage({
   const primary = sortedPhotos.find((p: PlayerPhoto) => p.is_primary);
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl space-y-6">
       <Link href="/parent" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
         ← My Kids
       </Link>
 
       {/* Header */}
-      <div className="flex items-start gap-5 mt-4 mb-6">
+      <div className="flex items-start gap-5">
         <div className="shrink-0">
           {primary ? (
             <Image
@@ -97,10 +105,8 @@ export default async function ParentPlayerPage({
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {[
               player.date_of_birth ? `Age ${calcAge(player.date_of_birth)}` : null,
+              player.grade ? `${player.grade} grade` : null,
               player.shirt_size ? `Size ${player.shirt_size}` : null,
-              player.date_of_birth
-                ? `b. ${new Date(player.date_of_birth + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-                : null,
             ].filter(Boolean).join("  ·  ")}
           </p>
           {player.notes && (
@@ -109,9 +115,35 @@ export default async function ParentPlayerPage({
         </div>
       </div>
 
+      {/* Editable player info */}
+      <PlayerInfoForm
+        playerId={player.id}
+        initialData={{
+          first_name: player.first_name,
+          last_name: player.last_name,
+          date_of_birth: player.date_of_birth ?? null,
+          shirt_size: player.shirt_size ?? null,
+          grade: player.grade ?? null,
+          notes: player.notes ?? null,
+        }}
+      />
+
+      {/* Editable parent info */}
+      {parentRecord && (
+        <ParentInfoForm
+          initialData={{
+            first_name: parentRecord.first_name,
+            last_name: parentRecord.last_name,
+            email: parentRecord.email,
+            phone: parentRecord.phone ?? null,
+          }}
+          kidCount={kidCount}
+        />
+      )}
+
       {/* Season history */}
       {seasons && seasons.length > 0 && (
-        <section className="mb-6">
+        <section>
           <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
             Season history
           </h2>
