@@ -11,6 +11,8 @@ export type SnackGameRow = {
   location: string | null;
   is_home: boolean;
   notes: string | null;
+  event_type?: string;
+  title?: string | null;
   signups: Array<{
     id: string;
     parent_id: string;
@@ -189,11 +191,15 @@ function GameRow({
             {time && <span className="text-xs text-gray-400 dark:text-gray-500">{time}</span>}
           </div>
           <div className="flex flex-wrap items-center gap-x-2 mt-0.5">
-            {game.opponent && (
+            {game.event_type && game.event_type !== "game" ? (
+              <span className="text-xs rounded-full px-2 py-0.5 font-medium bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
+                {game.event_type === "practice" ? "Practice" : game.title ?? "Event"}
+              </span>
+            ) : game.opponent ? (
               <span className="text-sm text-gray-600 dark:text-gray-400">
                 {game.is_home ? "vs" : "@"} {game.opponent}
               </span>
-            )}
+            ) : null}
             {game.location && (
               <a
                 href={mapsLink(game.location)}

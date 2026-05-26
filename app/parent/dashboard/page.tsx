@@ -84,11 +84,15 @@ export default async function DashboardPage() {
 
   // Split into active (started) vs future (not yet started), sort each by season_start
   const allEntries = [...teamMap.values()];
+  const twoWeeksOut = new Date();
+  twoWeeksOut.setDate(twoWeeksOut.getDate() + 14);
+  const twoWeeksStr = twoWeeksOut.toISOString().split("T")[0];
+
   const activeEntries = allEntries
-    .filter(({ team }) => !team.season_start || team.season_start <= today)
+    .filter(({ team }) => !team.season_start || team.season_start <= twoWeeksStr)
     .sort((a, b) => (a.team.season_start ?? "").localeCompare(b.team.season_start ?? ""));
   const futureEntries = allEntries
-    .filter(({ team }) => team.season_start && team.season_start > today)
+    .filter(({ team }) => team.season_start && team.season_start > twoWeeksStr)
     .sort((a, b) => (a.team.season_start ?? "").localeCompare(b.team.season_start ?? ""));
 
   const activeTeamIds = activeEntries.map(({ team }) => team.id);

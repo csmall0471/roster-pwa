@@ -6,17 +6,18 @@ import { notifyCoachSignupChange, sendSnackConfirmation } from "@/lib/notificati
 
 // ── Admin: game management ────────────────────────────────────────────────────
 
-export async function createGame(
-  teamId: string,
-  data: {
-    game_date: string;
-    game_time: string | null;
-    opponent: string | null;
-    location: string | null;
-    is_home: boolean;
-    notes: string | null;
-  }
-) {
+type GameData = {
+  game_date: string;
+  game_time: string | null;
+  event_type: string;
+  title: string | null;
+  opponent: string | null;
+  location: string | null;
+  is_home: boolean;
+  notes: string | null;
+};
+
+export async function createGame(teamId: string, data: GameData) {
   const supabase = await createClient();
   const { error } = await supabase.from("games").insert({ team_id: teamId, ...data });
   if (error) return { error: error.message };
@@ -24,18 +25,19 @@ export async function createGame(
   return { error: null };
 }
 
-export async function updateGame(
-  gameId: string,
+export async function importEvents(
   teamId: string,
-  data: {
-    game_date: string;
-    game_time: string | null;
-    opponent: string | null;
-    location: string | null;
-    is_home: boolean;
-    notes: string | null;
-  }
-) {
+  events: GameData[]
+): Promise<{ error: string | null; count: number }> {
+  const supabase = await createClient();
+  const rows = events.map((e) => ({ team_id: teamId, ...e }));
+  const { error } = await supabase.from("games").insert(rows);
+  if (error) return { error: error.message, count: 0 };
+  revalidatePath(`/teams/${teamId}`);
+  return { error: null, count: events.length };
+}
+
+export async function updateGame(gameId: string, teamId: string, data: GameData) {
   const supabase = await createClient();
   const { error } = await supabase.from("games").update(data).eq("id", gameId);
   if (error) return { error: error.message };

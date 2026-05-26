@@ -106,7 +106,7 @@ export default async function TeamDetailPage({
       .order("created_at", { ascending: false }),
     supabase
       .from("games")
-      .select(`id, game_date, game_time, opponent, location, is_home, notes,
+      .select(`id, game_date, game_time, opponent, location, is_home, notes, event_type, title,
                snack_signups(id, parent_id, slot_number, parents(first_name, last_name))`)
       .eq("team_id", id)
       .order("game_date", { ascending: true }),
@@ -256,6 +256,8 @@ export default async function TeamDetailPage({
           teamId={id}
           initialGames={(gamesRaw ?? []).map((g) => ({
             ...g,
+            event_type: (g as any).event_type ?? "game",
+            title: (g as any).title ?? null,
             signups: (g as any).snack_signups ?? [],
           })) as GameRow[]}
           snackEnabled={t.snack_signup_enabled ?? false}
