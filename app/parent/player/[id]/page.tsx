@@ -19,7 +19,7 @@ function calcAge(dob: string) {
 
 function fmtDob(dob: string) {
   return new Date(dob + "T00:00:00").toLocaleDateString("en-US", {
-    month: "long", day: "numeric", year: "numeric",
+    month: "short", day: "numeric", year: "numeric",
   });
 }
 
@@ -133,7 +133,7 @@ export default async function ParentPlayerPage({
           </p>
           {player.date_of_birth && (
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-              b. {fmtDob(player.date_of_birth)}
+              Birthday  {fmtDob(player.date_of_birth)}
             </p>
           )}
           {player.notes && (

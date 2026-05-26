@@ -156,17 +156,25 @@ export default async function DashboardPage() {
             const p = playerMap.get(pid);
             if (!p) return null;
             return (
-              <div key={pid} className="px-5 py-2.5 flex items-center gap-2 border-b border-gray-100 dark:border-gray-800">
+              <Link
+                key={pid}
+                href={`/parent/player/${pid}`}
+                className="px-5 py-2.5 flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
                 <span className="text-sm">👤</span>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{p.first_name} {p.last_name}</span>
-              </div>
+                <span className="text-sm font-medium text-blue-600 dark:text-blue-400">{p.first_name} {p.last_name}</span>
+                <span className="text-gray-400 dark:text-gray-500 text-xs ml-auto">→</span>
+              </Link>
             );
           })}
 
-          <div className="px-5 py-3 flex items-start gap-3 border-b border-gray-100 dark:border-gray-800">
+          <Link
+            href={`/parent/team/${team.id}?tab=schedule`}
+            className="px-5 py-3 flex items-start gap-3 border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
             <span className="text-base mt-0.5">📅</span>
             {nextGame ? (
-              <div>
+              <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
                   {fmtDate(nextGame.game_date)}{fmtTime(nextGame.game_time)}
                 </p>
@@ -176,9 +184,10 @@ export default async function DashboardPage() {
                 </p>
               </div>
             ) : (
-              <p className="text-sm text-gray-400 dark:text-gray-500">No upcoming games scheduled</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 flex-1">No upcoming games scheduled</p>
             )}
-          </div>
+            <span className="text-gray-400 dark:text-gray-500 text-xs mt-0.5 shrink-0">→</span>
+          </Link>
 
           {team.snack_signup_enabled && nextGame && (
             <div className="px-5 py-3 flex items-center gap-3 border-b border-gray-100 dark:border-gray-800">

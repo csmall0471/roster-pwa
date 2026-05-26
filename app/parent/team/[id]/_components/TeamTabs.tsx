@@ -94,9 +94,9 @@ export default function TeamTabs({
   const mySet = new Set(myKidIds);
 
   const tabCls = (name: string) =>
-    `px-4 py-2 text-sm -mb-px cursor-pointer ${
+    `px-4 py-2 text-sm -mb-px cursor-pointer transition-colors ${
       tab === name
-        ? "border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 font-medium"
+        ? "border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/40 rounded-t-md"
         : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
     }`;
 
