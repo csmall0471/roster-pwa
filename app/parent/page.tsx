@@ -2,8 +2,20 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
-import SnackDashboard, { type SnackDashGame } from "./_components/SnackDashboard";
 import PastTeamsExpander, { type PastTeamEntry } from "./_components/PastTeamsExpander";
+
+function sportEmoji(sport: string | null): string {
+  const s = (sport ?? "").toLowerCase();
+  if (s.includes("basketball")) return "🏀";
+  if (s.includes("football")) return "🏈";
+  if (s.includes("soccer")) return "⚽";
+  if (s.includes("baseball")) return "⚾";
+  if (s.includes("softball")) return "🥎";
+  if (s.includes("volleyball")) return "🏐";
+  if (s.includes("tennis")) return "🎾";
+  if (s.includes("lacrosse")) return "🥍";
+  return "🏅";
+}
 
 function formatDateRange(start: string | null, end: string | null) {
   const fmt = (d: string) =>
@@ -27,8 +39,6 @@ export default async function ParentHomePage() {
 
   if (!parentLink) redirect("/login");
 
-  const parentId = parentLink.parent_id;
-
   // Step 1: get player IDs for this parent
   const { data: ppRows } = await supabase.rpc("get_my_player_ids");
   const playerIds = (ppRows ?? []).map((r: { player_id: string }) => r.player_id);
@@ -44,9 +54,8 @@ export default async function ParentHomePage() {
     );
   }
 
-  // Step 2: fetch players, roster, photos, and upcoming snack games in parallel
-  const today = new Date().toISOString().split("T")[0];
-  const [{ data: players }, { data: rosterRows }, { data: photoRows }, { data: snackGamesRaw }] = await Promise.all([
+  // Step 2: fetch players, roster, and photos in parallel
+  const [{ data: players }, { data: rosterRows }, { data: photoRows }] = await Promise.all([
     supabase
       .from("players")
       .select("id, first_name, last_name, date_of_birth")
@@ -61,41 +70,12 @@ export default async function ParentHomePage() {
       .select("player_id, public_url")
       .eq("is_primary", true)
       .in("player_id", playerIds),
-    supabase
-      .from("games")
-      .select(`
-        id, game_date, game_time, opponent, is_home, team_id,
-        teams!inner(name, snack_signup_enabled, snack_slots_per_game),
-        snack_signups(id, parent_id, parents(first_name, last_name))
-      `)
-      .gte("game_date", today)
-      .order("game_date", { ascending: true })
-      .limit(10),
   ]);
 
   const primaryPhotos: Record<string, string> = {};
   for (const row of photoRows ?? []) {
     primaryPhotos[row.player_id] = row.public_url;
   }
-
-  // Build the team IDs this parent's kids are on (for filtering snack games)
-  const myTeamIds = new Set(
-    (rosterRows ?? []).map((r: any) => r.teams?.id).filter(Boolean) as string[]
-  );
-
-  const snackGames: SnackDashGame[] = (snackGamesRaw ?? [])
-    .filter((g: any) => myTeamIds.has(g.team_id) && g.teams?.snack_signup_enabled === true)
-    .map((g: any) => ({
-      id: g.id,
-      game_date: g.game_date,
-      game_time: g.game_time,
-      opponent: g.opponent,
-      is_home: g.is_home,
-      team_id: g.team_id,
-      team_name: g.teams?.name ?? "",
-      slots_per_game: g.teams?.snack_slots_per_game ?? 1,
-      signups: g.snack_signups ?? [],
-    }));
 
   const rosterByPlayer: Record<string, any[]> = {};
   for (const row of rosterRows ?? []) {
@@ -116,11 +96,7 @@ export default async function ParentHomePage() {
     <div>
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">My Kids</h1>
 
-      {parentId && snackGames.length > 0 && (
-        <SnackDashboard initialGames={snackGames} parentId={parentId} />
-      )}
-
-      <div className="space-y-6 mt-6">
+      <div className="space-y-6">
         {(players ?? []).map((player) => {
           const photo = primaryPhotos[player.id];
           const teamEntries = rosterByPlayer[player.id] ?? [];
@@ -178,7 +154,7 @@ export default async function ParentHomePage() {
                       return (
                         <Link key={i} href={`/parent/team/${t.id}`} className="px-5 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                           <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">{t.name}</p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">{sportEmoji(t.sport)} {t.name}</p>
                             {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
                             {dateRange && <p className="text-xs text-gray-400 dark:text-gray-500">{dateRange}</p>}
                           </div>
