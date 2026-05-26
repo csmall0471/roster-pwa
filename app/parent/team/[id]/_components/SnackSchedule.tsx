@@ -57,7 +57,9 @@ export default function SnackSchedule({
   teamName: string;
   snackEnabled?: boolean;
 }) {
-  const [games, setGames] = useState(initialGames);
+  const [games, setGames] = useState(
+    initialGames.filter((g) => !g.event_type || g.event_type === "game")
+  );
 
   const upcoming = games.filter((g) => !isPast(g.game_date));
   const past     = games.filter((g) =>  isPast(g.game_date));

@@ -109,7 +109,9 @@ export default function TeamTabs({
         </button>
         <button onClick={() => setTab("schedule")} className={tabCls("schedule")}>
           {snackEnabled ? "Schedule & Snacks" : "Schedule"}
-          {games.length > 0 ? ` (${games.length})` : ""}
+          {games.filter((g) => !g.event_type || g.event_type === "game").length > 0
+            ? ` (${games.filter((g) => !g.event_type || g.event_type === "game").length})`
+            : ""}
         </button>
       </div>
 

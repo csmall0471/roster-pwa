@@ -46,7 +46,7 @@ export default async function ParentPlayerPage({
   const myKidIds = new Set((myKidRows ?? []).map((r: { player_id: string }) => r.player_id));
   if (!myKidIds.has(id)) notFound();
 
-  const [{ data: player }, { data: photos }, { data: seasons }, { data: linkedParentRows }] = await Promise.all([
+  const [{ data: player }, { data: photos }, { data: seasons }, { data: guardianRows }] = await Promise.all([
     supabase
       .from("players")
       .select("id, first_name, last_name, date_of_birth, shirt_size, grade, notes")
@@ -61,24 +61,18 @@ export default async function ParentPlayerPage({
       .select(`jersey_number, status, teams(id, name, sport, season, age_group, organization, season_start, season_end)`)
       .eq("player_id", id)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("player_parents")
-      .select("parent_id, parents(id, first_name, last_name, email, phone)")
-      .eq("player_id", id),
+    supabase.rpc("get_player_guardians", { p_player_id: id }),
   ]);
 
   if (!player) notFound();
 
-  const guardians = (linkedParentRows ?? [])
-    .map((row: any) => row.parents)
-    .filter(Boolean)
-    .map((p: any) => ({
-      id: p.id as string,
-      first_name: p.first_name as string,
-      last_name: p.last_name as string,
-      email: p.email as string,
-      phone: (p.phone ?? null) as string | null,
-    }));
+  const guardians = (guardianRows ?? []).map((p: any) => ({
+    id: p.id as string,
+    first_name: p.first_name as string,
+    last_name: p.last_name as string,
+    email: p.email as string,
+    phone: (p.phone ?? null) as string | null,
+  }));
 
   // Put the logged-in parent first
   guardians.sort((a: any, b: any) => {
