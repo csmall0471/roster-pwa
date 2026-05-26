@@ -348,10 +348,10 @@ function SeriesGroup({
         className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-3">
-            <span className="text-sm font-semibold text-gray-900 dark:text-white flex-1 min-w-0">{title}</span>
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
             {firstSession.eligibility_label && (
-              <span className="text-xs text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">{firstSession.eligibility_label}</span>
+              <span className="text-xs text-blue-600 dark:text-blue-400">{firstSession.eligibility_label}</span>
             )}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
