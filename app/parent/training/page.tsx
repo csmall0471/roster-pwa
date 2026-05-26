@@ -39,7 +39,8 @@ export default async function ParentTrainingPage() {
     supabase
       .from("training_sessions")
       .select(`
-        id, title, description, location, session_date, session_time,
+        id, title, description, location, location_address, image_url,
+        session_date, session_time,
         session_end_time, max_players, payment_amount, payment_methods,
         notes, eligibility_rules, series_id,
         training_signups(id, player_id, payment_method, paid)
@@ -118,6 +119,8 @@ export default async function ParentTrainingPage() {
         title:             s.title,
         description:       s.description,
         location:          s.location,
+        location_address:  s.location_address ?? null,
+        image_url:         s.image_url        ?? null,
         session_date:      s.session_date,
         session_time:      s.session_time,
         session_end_time:  s.session_end_time,

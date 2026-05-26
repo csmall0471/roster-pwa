@@ -32,6 +32,8 @@ export type TrainingSessionForParent = {
   title:             string
   description:       string | null
   location:          string | null
+  location_address:  string | null
+  image_url:         string | null
   session_date:      string
   session_time:      string | null
   session_end_time:  string | null
@@ -200,6 +202,14 @@ function SeriesGroup({
     ? fmtDate(firstDate)
     : `${count} sessions · ${fmtShortDate(firstDate)} – ${fmtShortDate(lastDate)}`
 
+  const firstSession = sessions[0]
+  const uniqueTimes  = [...new Set(sessions.map((s) => {
+    const t = fmtTime(s.session_time)
+    const e = fmtTime(s.session_end_time)
+    return t ? (e ? `${t} – ${e}` : t) : null
+  }).filter(Boolean))]
+  const locationLabel = firstSession.location ?? null
+
   // All eligible players across the entire series (deduplicated)
   const allPlayers = useMemo(() => {
     const map = new Map<string, { player_id: string; first_name: string; last_name: string }>()
@@ -221,18 +231,20 @@ function SeriesGroup({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
-        <div>
+        <div className="min-w-0 flex-1">
           <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
-          {!open && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{subtitle}</div>
-          )}
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
+            <div>{subtitle}</div>
+            {uniqueTimes.length > 0 && <div>{uniqueTimes.join(" / ")}</div>}
+            {locationLabel && <div>{locationLabel}</div>}
+          </div>
         </div>
         <span className="text-gray-400 dark:text-gray-500 text-sm ml-4 shrink-0">{open ? "▾" : "▸"}</span>
       </button>
 
       {open && (
         <div>
-          {/* Per-player signup/status rows at the top */}
+          {/* Per-player signup/status rows */}
           {allPlayers.length > 0 && (
             <div className="divide-y divide-gray-100 dark:divide-gray-800 border-b border-gray-200 dark:border-gray-700">
               {allPlayers.map((player) => (
@@ -250,18 +262,19 @@ function SeriesGroup({
             </div>
           )}
 
-          {/* Date list — info only, no signup buttons */}
+          {/* Ineligible players right below eligible */}
+          {ineligiblePlayers.length > 0 && (
+            <div className="border-b border-gray-100 dark:border-gray-800">
+              <IneligibleDropdown players={ineligiblePlayers} />
+            </div>
+          )}
+
+          {/* Date list — info only */}
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {sessions.map((s) => (
               <SimpleDateCard key={s.id} session={s} />
             ))}
           </div>
-
-          {ineligiblePlayers.length > 0 && (
-            <div className="border-t border-gray-100 dark:border-gray-800">
-              <IneligibleDropdown players={ineligiblePlayers} />
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -550,9 +563,18 @@ function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
   const endTime   = fmtTime(session.session_end_time)
   const openSlots = session.max_players - session.total_signups
   const isFull    = openSlots <= 0
+  const mapTarget = session.location_address || session.location
 
   return (
     <div className="px-5 py-3 bg-white dark:bg-gray-900">
+      {session.image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={session.image_url}
+          alt=""
+          className="w-full h-40 object-cover rounded-lg mb-3"
+        />
+      )}
       <div className="text-sm font-medium text-gray-900 dark:text-white">
         {fmtDate(session.session_date)}
       </div>
@@ -564,7 +586,7 @@ function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
         {session.location && (
           <a
-            href={mapsLink(session.location)}
+            href={mapsLink(mapTarget!)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-blue-600 dark:text-blue-400 hover:underline"

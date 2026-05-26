@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useTransition, useMemo } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { createTrainingSession, updateTrainingSession, deleteTrainingSession, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid } from "../actions"
-import type { SessionData, PaymentMethod } from "../actions"
+import type { SessionData, PaymentMethod, RepeatDayConfig } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
 import RuleBuilder, { type TeamOption } from "./RuleBuilder"
@@ -16,6 +17,8 @@ export type TrainingSession = {
   title:             string
   description:       string | null
   location:          string | null
+  location_address:  string | null
+  image_url:         string | null
   session_date:      string
   session_time:      string | null
   session_end_time:  string | null
@@ -35,10 +38,24 @@ export type TrainingSession = {
   }>
 }
 
+const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+const DAY_NAMES  = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+const PRESET_PAYMENTS: PaymentMethod[] = [
+  { label: "Venmo",       link: "https://www.venmo.com/u/Connor-Small-1" },
+  { label: "Apple Pay",   link: "tel:6232563187" },
+  { label: "Zelle",       link: "tel:6232563187" },
+  { label: "Cash / Check", link: null },
+]
+
+type DayTime = { time: string; end_time: string }
+
 type FormState = {
   title:             string
   description:       string
   location:          string
+  location_address:  string
+  image_url:         string
   session_date:      string
   session_time:      string
   session_end_time:  string
@@ -49,15 +66,17 @@ type FormState = {
   eligibility_rules: EligibilityRules
   repeat_weekly:     boolean
   repeat_weeks:      string
+  repeat_days:       number[]
+  day_times:         Record<number, DayTime>
   series_id:         string
 }
 
 const EMPTY_FORM: FormState = {
-  title: "", description: "", location: "", session_date: "",
-  session_time: "", session_end_time: "", max_players: "10",
+  title: "", description: "", location: "", location_address: "", image_url: "",
+  session_date: "", session_time: "", session_end_time: "", max_players: "10",
   payment_amount: "", payment_methods: [], notes: "",
   eligibility_rules: null, repeat_weekly: false, repeat_weeks: "4",
-  series_id: "",
+  repeat_days: [], day_times: {}, series_id: "",
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -66,6 +85,39 @@ function addWeeks(dateStr: string, weeks: number): string {
   const d = new Date(dateStr + "T00:00:00")
   d.setDate(d.getDate() + weeks * 7)
   return d.toISOString().split("T")[0]
+}
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00")
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split("T")[0]
+}
+
+function generateSessionDates(
+  startDate: string,
+  repeatWeeks: number,
+  dayConfigs: RepeatDayConfig[],
+): Array<{ date: string; time: string | null; endTime: string | null }> {
+  if (dayConfigs.length === 0) {
+    return Array.from({ length: repeatWeeks }, (_, i) => ({
+      date:    i === 0 ? startDate : addWeeks(startDate, i),
+      time:    null,
+      endTime: null,
+    }))
+  }
+  const startDay = new Date(startDate + "T00:00:00").getDay()
+  const rows: Array<{ date: string; time: string | null; endTime: string | null }> = []
+  for (const cfg of dayConfigs) {
+    const offset = (cfg.day - startDay + 7) % 7
+    for (let week = 0; week < repeatWeeks; week++) {
+      rows.push({
+        date:    addDays(startDate, offset + week * 7),
+        time:    cfg.session_time,
+        endTime: cfg.session_end_time,
+      })
+    }
+  }
+  return rows.sort((a, b) => a.date.localeCompare(b.date))
 }
 
 function fmtDate(iso: string) {
@@ -110,13 +162,46 @@ export default function SessionList({
   teams:           TeamOption[]
   players:         PlayerOption[]
 }) {
-  const [sessions, setSessions] = useState(initialSessions)
-  const [adding, setAdding]     = useState(false)
-  const [editingId, setEditId]  = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [form, setForm]         = useState<FormState>(EMPTY_FORM)
-  const [error, setError]       = useState<string | null>(null)
-  const [pending, start]        = useTransition()
+  const [sessions, setSessions]       = useState(initialSessions)
+  const [adding, setAdding]           = useState(false)
+  const [editingId, setEditId]        = useState<string | null>(null)
+  const [expandedId, setExpandedId]   = useState<string | null>(null)
+  const [form, setForm]               = useState<FormState>(EMPTY_FORM)
+  const [error, setError]             = useState<string | null>(null)
+  const [pending, start]              = useTransition()
+  const [imageUploading, setImgUpload] = useState(false)
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImgUpload(true)
+    const supabase = createClient()
+    const ext  = file.name.split(".").pop() ?? "jpg"
+    const path = `sessions/${Date.now()}.${ext}`
+    const { error: upErr } = await supabase.storage.from("training-images").upload(path, file)
+    if (!upErr) {
+      const { data: urlData } = supabase.storage.from("training-images").getPublicUrl(path)
+      setForm((f) => ({ ...f, image_url: urlData.publicUrl }))
+    }
+    setImgUpload(false)
+  }
+
+  function toggleDay(day: number) {
+    setForm((f) => {
+      if (f.repeat_days.includes(day)) {
+        const newDays  = f.repeat_days.filter((d) => d !== day)
+        const newTimes = { ...f.day_times }
+        delete newTimes[day]
+        return { ...f, repeat_days: newDays, day_times: newTimes }
+      } else {
+        return {
+          ...f,
+          repeat_days: [...f.repeat_days, day].sort((a, b) => a - b),
+          day_times:   { ...f.day_times, [day]: { time: f.session_time, end_time: f.session_end_time } },
+        }
+      }
+    })
+  }
 
   const upcomingCount = sessions.filter((s) => !isPast(s.session_date)).length
   const pastCount     = sessions.filter((s) =>  isPast(s.session_date)).length
@@ -170,6 +255,8 @@ export default function SessionList({
       title:             s.title,
       description:       s.description      ?? "",
       location:          s.location         ?? "",
+      location_address:  s.location_address ?? "",
+      image_url:         s.image_url        ?? "",
       session_date:      clearDate ? "" : s.session_date,
       session_time:      s.session_time     ?? "",
       session_end_time:  s.session_end_time ?? "",
@@ -180,6 +267,8 @@ export default function SessionList({
       eligibility_rules: s.eligibility_rules,
       repeat_weekly:     false,
       repeat_weeks:      "4",
+      repeat_days:       [],
+      day_times:         {},
       series_id:         s.series_id        ?? "",
     }
   }
@@ -209,6 +298,8 @@ export default function SessionList({
       title:             form.title,
       description:       form.description       || null,
       location:          form.location          || null,
+      location_address:  form.location_address  || null,
+      image_url:         form.image_url         || null,
       session_date:      form.session_date,
       session_time:      form.session_time      || null,
       session_end_time:  form.session_end_time  || null,
@@ -221,13 +312,22 @@ export default function SessionList({
     }
   }
 
+  function buildDayConfigs(): RepeatDayConfig[] {
+    if (!form.repeat_weekly || form.repeat_days.length === 0) return []
+    return form.repeat_days.map((day) => ({
+      day,
+      session_time:     form.day_times[day]?.time     || form.session_time     || null,
+      session_end_time: form.day_times[day]?.end_time || form.session_end_time || null,
+    }))
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.title || !form.session_date) return
     setError(null)
-    const data = toData()
-
+    const data      = toData()
     const repeatWeeks = form.repeat_weekly ? Math.max(1, parseInt(form.repeat_weeks) || 1) : 1
+    const dayConfigs  = buildDayConfigs()
 
     start(async () => {
       if (editingId) {
@@ -237,14 +337,17 @@ export default function SessionList({
           prev.map((s) => s.id === editingId ? { ...s, ...data } : s)
         )
       } else {
-        const result = await createTrainingSession(data, repeatWeeks)
+        const result = await createTrainingSession(data, repeatWeeks, dayConfigs)
         if (result.error) { setError(result.error); return }
-        const newRows = Array.from({ length: repeatWeeks }, (_, i) => ({
-          id:           result.ids[i] ?? crypto.randomUUID(),
+        const dates  = generateSessionDates(data.session_date, repeatWeeks, dayConfigs)
+        const newRows = dates.map(({ date, time, endTime }, i) => ({
+          id:               result.ids[i] ?? crypto.randomUUID(),
           ...data,
-          series_id:    result.seriesId,
-          session_date: i === 0 ? data.session_date : addWeeks(data.session_date, i),
-          signups:      [] as TrainingSession["signups"],
+          series_id:        result.seriesId,
+          session_date:     date,
+          session_time:     time     ?? data.session_time,
+          session_end_time: endTime  ?? data.session_end_time,
+          signups:          [] as TrainingSession["signups"],
         }))
         setSessions((prev) =>
           [...prev, ...newRows].sort((a, b) => a.session_date.localeCompare(b.session_date))
@@ -347,37 +450,111 @@ export default function SessionList({
 
           {/* Repeat weekly (only on create) */}
           {!editingId && (
-            <div className="flex items-center gap-4 flex-wrap">
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={form.repeat_weekly}
-                  onChange={(e) => setForm((f) => ({ ...f, repeat_weekly: e.target.checked }))}
-                  className="accent-blue-600"
-                />
-                Repeat weekly
-              </label>
-              {form.repeat_weekly && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-400">for</span>
+            <div className="space-y-3">
+              <div className="flex items-center gap-4 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
                   <input
-                    type="number" min={2} max={52}
-                    value={form.repeat_weeks}
-                    onChange={(e) => setForm((f) => ({ ...f, repeat_weeks: e.target.value }))}
-                    className="w-16 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    type="checkbox"
+                    checked={form.repeat_weekly}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      const updates: Partial<FormState> = { repeat_weekly: checked }
+                      if (checked && form.session_date && form.repeat_days.length === 0) {
+                        const day = new Date(form.session_date + "T00:00:00").getDay()
+                        updates.repeat_days = [day]
+                        updates.day_times   = { [day]: { time: form.session_time, end_time: form.session_end_time } }
+                      }
+                      setForm((f) => ({ ...f, ...updates }))
+                    }}
+                    className="accent-blue-600"
                   />
-                  <span className="text-xs text-gray-500 dark:text-gray-400">weeks</span>
+                  Repeat weekly
+                </label>
+                {form.repeat_weekly && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">for</span>
+                    <input
+                      type="number" min={2} max={52}
+                      value={form.repeat_weeks}
+                      onChange={(e) => setForm((f) => ({ ...f, repeat_weeks: e.target.value }))}
+                      className="w-16 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-gray-500 dark:text-gray-400">weeks</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Day-of-week toggles */}
+              {form.repeat_weekly && (
+                <div className="space-y-2">
+                  <div className="flex gap-1.5 flex-wrap">
+                    {DAY_LABELS.map((label, day) => (
+                      <button
+                        key={day} type="button"
+                        onClick={() => toggleDay(day)}
+                        className={`w-9 h-9 rounded-lg text-xs font-semibold transition-colors ${
+                          form.repeat_days.includes(day)
+                            ? "bg-blue-600 text-white"
+                            : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Per-day times when 2+ days selected */}
+                  {form.repeat_days.length >= 2 && (
+                    <div className="space-y-2 pl-1">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Times per day</p>
+                      {form.repeat_days.map((day) => (
+                        <div key={day} className="flex items-center gap-2">
+                          <span className="text-xs font-medium text-gray-700 dark:text-gray-300 w-24 shrink-0">
+                            {DAY_NAMES[day]}
+                          </span>
+                          <input
+                            type="time"
+                            value={form.day_times[day]?.time ?? ""}
+                            onChange={(e) => setForm((f) => ({
+                              ...f,
+                              day_times: { ...f.day_times, [day]: { ...f.day_times[day], time: e.target.value } },
+                            }))}
+                            className="w-32 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <span className="text-xs text-gray-400">–</span>
+                          <input
+                            type="time"
+                            value={form.day_times[day]?.end_time ?? ""}
+                            onChange={(e) => setForm((f) => ({
+                              ...f,
+                              day_times: { ...f.day_times, [day]: { ...f.day_times[day], end_time: e.target.value } },
+                            }))}
+                            className="w-32 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
 
           <div>
-            <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Location</label>
+            <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Location name</label>
             <input
               type="text" placeholder="e.g. Dobson Park"
               value={form.location}
               onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Location address</label>
+            <input
+              type="text" placeholder="e.g. 100 E Dobson Rd, Mesa, AZ"
+              value={form.location_address}
+              onChange={(e) => setForm((f) => ({ ...f, location_address: e.target.value }))}
               className={inputCls}
             />
           </div>
@@ -411,7 +588,7 @@ export default function SessionList({
               {form.payment_methods.map((pm, i) => (
                 <div key={i} className="flex items-center gap-2">
                   <input
-                    type="text" placeholder="Label (e.g. Venmo)"
+                    type="text" placeholder="Label"
                     value={pm.label}
                     onChange={(e) => {
                       const updated = [...form.payment_methods]
@@ -439,20 +616,31 @@ export default function SessionList({
                   </button>
                 </div>
               ))}
-              <div className="flex gap-3">
+              {/* Quick-add presets */}
+              <div className="flex flex-wrap gap-2 pt-0.5">
+                {PRESET_PAYMENTS.map((preset) => {
+                  const alreadyAdded = form.payment_methods.some((pm) => pm.label === preset.label)
+                  return (
+                    <button
+                      key={preset.label} type="button"
+                      disabled={alreadyAdded}
+                      onClick={() => setForm((f) => ({ ...f, payment_methods: [...f.payment_methods, preset] }))}
+                      className={`text-xs rounded-full px-3 py-1 border transition-colors ${
+                        alreadyAdded
+                          ? "border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-default"
+                          : "border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
+                      }`}
+                    >
+                      + {preset.label}
+                    </button>
+                  )
+                })}
                 <button
                   type="button"
                   onClick={() => setForm((f) => ({ ...f, payment_methods: [...f.payment_methods, { label: "", link: null }] }))}
-                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                  className="text-xs text-gray-400 dark:text-gray-500 hover:underline"
                 >
-                  + Add method
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, payment_methods: [...f.payment_methods, { label: "Cash / Check", link: null }] }))}
-                  className="text-xs text-gray-500 dark:text-gray-400 hover:underline"
-                >
-                  + Cash / Check
+                  + Custom
                 </button>
               </div>
             </div>
@@ -477,6 +665,34 @@ export default function SessionList({
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               className={inputCls}
             />
+          </div>
+
+          {/* Image */}
+          <div>
+            <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Photo</label>
+            {form.image_url ? (
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={form.image_url} alt="" className="h-20 w-32 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, image_url: "" }))}
+                  className="text-xs text-red-500 hover:underline"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <label className="cursor-pointer inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 px-4 py-2 text-sm text-gray-500 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                {imageUploading ? "Uploading…" : "Upload photo"}
+                <input
+                  type="file" accept="image/*"
+                  className="hidden"
+                  disabled={imageUploading}
+                  onChange={handleImageUpload}
+                />
+              </label>
+            )}
           </div>
 
           {/* Series — only shown for single sessions (recurring auto-creates a series) */}
@@ -504,13 +720,15 @@ export default function SessionList({
               disabled={pending || !form.title || !form.session_date}
               className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {pending
-                ? "Saving…"
-                : editingId
-                  ? "Save changes"
-                  : form.repeat_weekly
-                    ? `Create ${form.repeat_weeks || 1} sessions`
-                    : "Create session"}
+              {(() => {
+                if (pending) return "Saving…"
+                if (editingId) return "Save changes"
+                if (!form.repeat_weekly) return "Create session"
+                const weeks = parseInt(form.repeat_weeks) || 1
+                const days  = form.repeat_days.length || 1
+                const total = weeks * days
+                return `Create ${total} session${total !== 1 ? "s" : ""}`
+              })()}
             </button>
             <button type="button" onClick={closeForm}
               className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
@@ -609,6 +827,17 @@ function AdminSeriesGroup({
     ? fmtDate(firstDate)
     : `${count} sessions · ${fmtShortDate(firstDate)} – ${fmtShortDate(lastDate)}`
 
+  // Gather meta for subtitle: unique times, location, eligibility
+  const firstSession  = sessions[0]
+  const uniqueTimes   = [...new Set(sessions.map((s) => {
+    const t = fmtTime(s.session_time)
+    const e = fmtTime(s.session_end_time)
+    return t ? (e ? `${t} – ${e}` : t) : null
+  }).filter(Boolean))]
+  const locationMeta  = firstSession.location
+    ? firstSession.location + (firstSession.location_address ? `, ${firstSession.location_address}` : "")
+    : null
+
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
       <button
@@ -618,12 +847,17 @@ function AdminSeriesGroup({
       >
         <div className="min-w-0 flex-1">
           <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
-          {!open && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
+            <div>
               {subtitle}
               {count > 1 && upcomingInGroup < count && ` · ${upcomingInGroup} upcoming`}
             </div>
-          )}
+            {uniqueTimes.length > 0 && <div>{uniqueTimes.join(" / ")}</div>}
+            {locationMeta && <div>{locationMeta}</div>}
+            {firstSession.eligibility_rules && (
+              <div className="text-blue-600 dark:text-blue-400">{describeRules(firstSession.eligibility_rules)}</div>
+            )}
+          </div>
         </div>
         <span className="text-gray-400 dark:text-gray-500 text-sm ml-4 shrink-0">{open ? "▾" : "▸"}</span>
       </button>
@@ -696,7 +930,10 @@ function SessionCard({
           {/* Meta row */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
             {session.location && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">{session.location}</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {session.location}
+                {session.location_address && ` · ${session.location_address}`}
+              </span>
             )}
             <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
               {session.signups.length}/{session.max_players} signed up

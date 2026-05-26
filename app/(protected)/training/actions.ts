@@ -11,6 +11,8 @@ export type SessionData = {
   title:             string
   description:       string | null
   location:          string | null
+  location_address:  string | null
+  image_url:         string | null
   session_date:      string
   session_time:      string | null
   session_end_time:  string | null
@@ -22,21 +24,59 @@ export type SessionData = {
   series_id:         string | null
 }
 
+export type RepeatDayConfig = {
+  day:              number       // 0=Sun, 1=Mon, …, 6=Sat
+  session_time:     string | null
+  session_end_time: string | null
+}
+
 function addWeeks(dateStr: string, weeks: number): string {
   const d = new Date(dateStr + "T00:00:00")
   d.setDate(d.getDate() + weeks * 7)
   return d.toISOString().split("T")[0]
 }
 
-export async function createTrainingSession(data: SessionData, repeatWeeks = 1) {
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00")
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split("T")[0]
+}
+
+export async function createTrainingSession(
+  data: SessionData,
+  repeatWeeks = 1,
+  dayConfigs: RepeatDayConfig[] = [],
+) {
   const supabase = await createClient()
-  // Recurring batches always get a fresh series_id; single sessions use whatever was passed
-  const seriesId = repeatWeeks > 1 ? crypto.randomUUID() : data.series_id
-  const rows = Array.from({ length: repeatWeeks }, (_, i) => ({
-    ...data,
-    series_id:    seriesId,
-    session_date: i === 0 ? data.session_date : addWeeks(data.session_date, i),
-  }))
+  const totalSessions = dayConfigs.length > 0 ? repeatWeeks * dayConfigs.length : repeatWeeks
+  const seriesId = totalSessions > 1 ? crypto.randomUUID() : data.series_id
+
+  let rows: (typeof data & { series_id: string | null })[]
+
+  if (dayConfigs.length === 0) {
+    rows = Array.from({ length: repeatWeeks }, (_, i) => ({
+      ...data,
+      series_id:    seriesId,
+      session_date: i === 0 ? data.session_date : addWeeks(data.session_date, i),
+    }))
+  } else {
+    const startDay = new Date(data.session_date + "T00:00:00").getDay()
+    const unsorted: typeof rows = []
+    for (const cfg of dayConfigs) {
+      const offset = (cfg.day - startDay + 7) % 7
+      for (let week = 0; week < repeatWeeks; week++) {
+        unsorted.push({
+          ...data,
+          series_id:        seriesId,
+          session_date:     addDays(data.session_date, offset + week * 7),
+          session_time:     cfg.session_time,
+          session_end_time: cfg.session_end_time,
+        })
+      }
+    }
+    rows = unsorted.sort((a, b) => a.session_date.localeCompare(b.session_date))
+  }
+
   const { data: inserted, error } = await supabase
     .from("training_sessions")
     .insert(rows)
