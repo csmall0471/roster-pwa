@@ -232,7 +232,7 @@ export default async function DashboardPage() {
         <section className="mb-8">
           {futureEntries.length > 0 && (
             <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-              Active
+              Active Seasons
             </h2>
           )}
           <div className="space-y-4">
