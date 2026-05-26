@@ -130,7 +130,7 @@ export async function signUpForTraining(
 
   const { data: session } = await supabase
     .from("training_sessions")
-    .select("id, max_players, title, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
+    .select("id, max_players, title, description, notes, image_url, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
     .eq("id", sessionId)
     .single()
   if (!session) return { signupId: null, error: "Session not found" }
@@ -158,7 +158,6 @@ export async function signUpForTraining(
   const parent = parentLink.parents as any
   const { data: playerRow } = await supabase.from("players").select("first_name, last_name").eq("id", playerId).single()
   const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
-  const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent"
 
   if (parent?.email) {
     sendTrainingConfirmation({
@@ -173,6 +172,9 @@ export async function signUpForTraining(
       location:        session.location,
       paymentAmount:   (session as any).payment_amount ?? null,
       paymentMethods:  (session as any).payment_methods ?? [],
+      imageUrl:        (session as any).image_url ?? null,
+      description:     (session as any).description ?? null,
+      notes:           (session as any).notes ?? null,
     }).catch((err) => console.error("[notify] signUpForTraining parent:", err))
   }
 
@@ -209,12 +211,13 @@ export async function bulkSignUpForTraining(
     title: string; session_date: string; session_time: string | null
     session_end_time: string | null; location: string | null
     payment_amount: string | null; payment_methods: PaymentMethod[]
+    image_url: string | null; description: string | null; notes: string | null
   }> = []
 
   for (const sessionId of sessionIds) {
     const { data: session } = await supabase
       .from("training_sessions")
-      .select("max_players, title, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
+      .select("max_players, title, description, notes, image_url, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
       .eq("id", sessionId)
       .single()
     if (!session) continue
@@ -247,6 +250,9 @@ export async function bulkSignUpForTraining(
         location:         session.location,
         payment_amount:   (session as any).payment_amount ?? null,
         payment_methods:  (session as any).payment_methods ?? [],
+        image_url:        (session as any).image_url ?? null,
+        description:      (session as any).description ?? null,
+        notes:            (session as any).notes ?? null,
       })
     }
   }
@@ -254,7 +260,6 @@ export async function bulkSignUpForTraining(
   if (results.length > 0) {
     const parent     = parentLink.parents as any
     const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
-    const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent"
     const first      = signedSessions[0]
 
     if (parent?.email) {
@@ -270,6 +275,9 @@ export async function bulkSignUpForTraining(
         location:        first.location,
         paymentAmount:   first.payment_amount,
         paymentMethods:  first.payment_methods,
+        imageUrl:        first.image_url,
+        description:     first.description,
+        notes:           first.notes,
         bulkDates: signedSessions.map(s => ({
           date:    s.session_date,
           time:    s.session_time,

@@ -82,6 +82,9 @@ export type TrainingConfirmationPayload = {
   paymentMethods?: PaymentMethod[]
   hasPaid?: boolean   // for cancel: true if the signup was already paid
   bulkDates?: Array<{ date: string; time: string | null; endTime?: string | null }>
+  imageUrl?: string | null
+  description?: string | null
+  notes?: string | null
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -350,7 +353,20 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       btn("Manage Registrations", manageUrl, "#6b7280"),
     ].join("\n")
 
-    htmlBody = [introHtml, detailsHtml, payHtml, cancelHtml].filter(Boolean).join("\n")
+    const mediaHtml = [
+      payload.imageUrl
+        ? `<img src="${payload.imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin-bottom:20px;">`
+        : "",
+      payload.description
+        ? `<p style="margin:0 0 12px;font-size:14px;color:#374151;line-height:1.6;">${esc(payload.description)}</p>`
+        : "",
+    ].filter(Boolean).join("\n")
+
+    const notesHtml = payload.notes
+      ? `<p style="margin:-16px 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
+      : ""
+
+    htmlBody = [mediaHtml, introHtml, detailsHtml, notesHtml, payHtml, cancelHtml].filter(Boolean).join("\n")
   } else {
     const rows = [
       infoRow("Date", fmtDate(dates[0].date)),
@@ -376,7 +392,9 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const html = buildEmailHtml({
     htmlBody,
     teamName: payload.sessionTitle,
-    organization: isSignup ? "Registration Confirmed" : "Registration Cancelled",
+    organization: isSignup
+      ? `Registration Confirmed · ${payload.playerName}`
+      : `Registration Cancelled · ${payload.playerName}`,
     headerColor: "#ea580c",
   })
 
@@ -490,7 +508,7 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
     const html = buildEmailHtml({
       htmlBody,
       teamName: payload.title,
-      organization: "Training Reminder",
+      organization: `Training Reminder · ${payload.playerName}`,
       headerColor: "#ea580c",
     })
 
