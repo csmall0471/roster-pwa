@@ -302,7 +302,7 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
 
   const { data: session } = await supabase
     .from("training_sessions")
-    .select("max_players")
+    .select("max_players, title, description, notes, image_url, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
     .eq("id", sessionId)
     .single()
   if (!session) return { signupId: null, error: "Session not found" }
@@ -313,12 +313,10 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
     .eq("session_id", sessionId)
   if ((count ?? 0) >= session.max_players) return { signupId: null, error: "Session is full" }
 
-  const { data: parentRow } = await supabase
-    .from("player_parents")
-    .select("parent_id")
-    .eq("player_id", playerId)
-    .limit(1)
-    .maybeSingle()
+  const [{ data: parentRow }, { data: playerRow }] = await Promise.all([
+    supabase.from("player_parents").select("parent_id, parents(first_name, last_name, email)").eq("player_id", playerId).limit(1).maybeSingle(),
+    supabase.from("players").select("first_name, last_name").eq("id", playerId).single(),
+  ])
 
   const { data: row, error } = await supabase
     .from("training_signups")
@@ -326,6 +324,31 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
     .select("id")
     .single()
   if (error) return { signupId: null, error: error.message }
+
+  const parent = (parentRow as any)?.parents
+  const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
+  if (parent?.email) {
+    sendTrainingConfirmation({
+      type:            "signup",
+      parentEmail:     parent.email,
+      parentFirstName: parent.first_name ?? "there",
+      playerName,
+      sessionTitle:    session.title,
+      sessionDate:     session.session_date,
+      sessionTime:     (session as any).session_time ?? null,
+      sessionEndTime:  (session as any).session_end_time ?? null,
+      location:        session.location ?? null,
+      paymentAmount:   (session as any).payment_amount ?? null,
+      paymentMethods:  (session as any).payment_methods ?? [],
+      imageUrl:        (session as any).image_url ?? null,
+      description:     (session as any).description ?? null,
+      notes:           (session as any).notes ?? null,
+    }).catch((err) => console.error("[notify] adminAddTrainingSignup parent:", err))
+  }
+
+  if (parentRow?.parent_id) {
+    logActivity(parentRow.parent_id, "training_signup", { session_id: sessionId, session_title: session.title, session_date: session.session_date, player_id: playerId, by_admin: true }).catch(() => {})
+  }
 
   revalidatePath("/training")
   return { signupId: row.id as string, error: null }
@@ -352,17 +375,15 @@ export async function adminBulkUpdateSessions(sessionIds: string[], data: BulkSe
 export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerId: string) {
   const supabase = await createClient()
 
-  const { data: parentRow } = await supabase
-    .from("player_parents")
-    .select("parent_id")
-    .eq("player_id", playerId)
-    .limit(1)
-    .maybeSingle()
+  const [{ data: parentRow }, { data: playerRow }] = await Promise.all([
+    supabase.from("player_parents").select("parent_id, parents(first_name, last_name, email)").eq("player_id", playerId).limit(1).maybeSingle(),
+    supabase.from("players").select("first_name, last_name").eq("id", playerId).single(),
+  ])
 
   const parentId = parentRow?.parent_id ?? null
 
   const [{ data: sessions }, { data: existingSignups }] = await Promise.all([
-    supabase.from("training_sessions").select("id, max_players").in("id", sessionIds),
+    supabase.from("training_sessions").select("id, max_players, title, description, notes, image_url, session_date, session_time, session_end_time, location, payment_amount, payment_methods").in("id", sessionIds),
     supabase.from("training_signups").select("session_id, player_id").in("session_id", sessionIds),
   ])
 
@@ -374,6 +395,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
   }
 
   const added: Array<{ sessionId: string; signupId: string }> = []
+  const signedSessions: typeof sessions = []
   for (const session of sessions ?? []) {
     if (alreadyIn.has(session.id)) continue
     if ((countBySession.get(session.id) ?? 0) >= session.max_players) continue
@@ -382,7 +404,42 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
       .insert({ session_id: session.id, player_id: playerId, parent_id: parentId })
       .select("id")
       .single()
-    if (!error && row) added.push({ sessionId: session.id, signupId: row.id as string })
+    if (!error && row) {
+      added.push({ sessionId: session.id, signupId: row.id as string })
+      signedSessions?.push(session)
+    }
+  }
+
+  if (added.length > 0) {
+    const parent = (parentRow as any)?.parents
+    const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
+    const first = signedSessions![0]
+    if (parent?.email && first) {
+      sendTrainingConfirmation({
+        type:            "signup",
+        parentEmail:     parent.email,
+        parentFirstName: parent.first_name ?? "there",
+        playerName,
+        sessionTitle:    first.title,
+        sessionDate:     first.session_date,
+        sessionTime:     (first as any).session_time ?? null,
+        sessionEndTime:  (first as any).session_end_time ?? null,
+        location:        (first as any).location ?? null,
+        paymentAmount:   (first as any).payment_amount ?? null,
+        paymentMethods:  (first as any).payment_methods ?? [],
+        imageUrl:        (first as any).image_url ?? null,
+        description:     (first as any).description ?? null,
+        notes:           (first as any).notes ?? null,
+        bulkDates:       signedSessions!.map((s) => ({
+          date:    s.session_date,
+          time:    (s as any).session_time ?? null,
+          endTime: (s as any).session_end_time ?? null,
+        })),
+      }).catch((err) => console.error("[notify] adminBulkAddPlayerToSessions parent:", err))
+    }
+    if (parentId) {
+      logActivity(parentId, "training_signup", { session_ids: added.map((r) => r.sessionId), count: added.length, player_id: playerId, bulk: true, by_admin: true }).catch(() => {})
+    }
   }
 
   revalidatePath("/training")
