@@ -74,6 +74,16 @@ function mapsLink(location: string) {
   return `https://maps.google.com/?q=${encodeURIComponent(location)}`
 }
 
+const DAY_PLURAL = ["Sundays","Mondays","Tuesdays","Wednesdays","Thursdays","Fridays","Saturdays"]
+
+function getDurationMins(start: string | null, end: string | null): number | null {
+  if (!start || !end) return null
+  const [sh, sm] = start.split(":").map(Number)
+  const [eh, em] = end.split(":").map(Number)
+  const d = (eh * 60 + em) - (sh * 60 + sm)
+  return d > 0 ? d : null
+}
+
 function groupBySeries(sessions: TrainingSessionForParent[]) {
   const map = new Map<string, TrainingSessionForParent[]>()
   for (const s of sessions) {
@@ -195,22 +205,40 @@ function SeriesGroup({
   onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
 }) {
   const [open, setOpen] = useState(false)
-  const title     = sessions[0].title
-  const count     = sessions.length
-  const firstDate = sessions[0].session_date
-  const lastDate  = sessions[sessions.length - 1].session_date
+  const title        = sessions[0].title
+  const count        = sessions.length
+  const firstDate    = sessions[0].session_date
+  const lastDate     = sessions[sessions.length - 1].session_date
+  const firstSession = sessions[0]
 
   const subtitle = count === 1
     ? fmtDate(firstDate)
     : `${count} sessions · ${fmtShortDate(firstDate)} – ${fmtShortDate(lastDate)}`
 
-  const firstSession = sessions[0]
-  const uniqueTimes  = [...new Set(sessions.map((s) => {
-    const t = fmtTime(s.session_time)
-    const e = fmtTime(s.session_end_time)
-    return t ? (e ? `${t} – ${e}` : t) : null
-  }).filter(Boolean))]
-  const locationLabel = firstSession.location ?? null
+  const dayTimesDisplay = (() => {
+    if (count === 1) {
+      const t = fmtTime(firstSession.session_time)
+      const e = fmtTime(firstSession.session_end_time)
+      return t ? (e ? `${t} – ${e}` : t) : null
+    }
+    const map = new Map<number, string>()
+    for (const s of sessions) {
+      const day = new Date(s.session_date + "T00:00:00").getDay()
+      if (!map.has(day)) {
+        const t = fmtTime(s.session_time)
+        const e = fmtTime(s.session_end_time)
+        if (t) map.set(day, e ? `${t} – ${e}` : t)
+      }
+    }
+    if (map.size === 0) return null
+    return [...map.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([day, t]) => `${DAY_PLURAL[day]} ${t}`)
+      .join(" / ")
+  })()
+
+  const costLabel  = firstSession.payment_amount ? `${firstSession.payment_amount}/session` : null
+  const metaItems  = [firstSession.location, costLabel].filter(Boolean)
 
   // All eligible players across the entire series (deduplicated)
   const allPlayers = useMemo(() => {
@@ -234,14 +262,16 @@ function SeriesGroup({
         className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
         <div className="min-w-0 flex-1">
-          <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
+          <div className="flex items-start gap-3">
+            <span className="text-sm font-semibold text-gray-900 dark:text-white flex-1 min-w-0">{title}</span>
+            {firstSession.eligibility_label && (
+              <span className="text-xs text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">{firstSession.eligibility_label}</span>
+            )}
+          </div>
           <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
             <div>{subtitle}</div>
-            {uniqueTimes.length > 0 && <div>{uniqueTimes.join(" / ")}</div>}
-            {locationLabel && <div>{locationLabel}</div>}
-            {firstSession.eligibility_label && (
-              <div className="text-blue-600 dark:text-blue-400">{firstSession.eligibility_label}</div>
-            )}
+            {dayTimesDisplay && <div>{dayTimesDisplay}</div>}
+            {metaItems.length > 0 && <div>{metaItems.join(" · ")}</div>}
           </div>
         </div>
         <span className="text-gray-400 dark:text-gray-500 text-sm ml-4 shrink-0">{open ? "▾" : "▸"}</span>
@@ -249,6 +279,22 @@ function SeriesGroup({
 
       {open && (
         <div>
+          {/* Series-level image, description, notes — shown once */}
+          {(firstSession.image_url || firstSession.description || firstSession.notes) && (
+            <div className="px-5 py-4 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
+              {firstSession.image_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={firstSession.image_url} alt="" className="w-full h-48 object-cover rounded-lg mb-3" />
+              )}
+              {firstSession.description && (
+                <p className="text-sm text-gray-600 dark:text-gray-400">{firstSession.description}</p>
+              )}
+              {firstSession.notes && (
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5 italic">{firstSession.notes}</p>
+              )}
+            </div>
+          )}
+
           {/* Per-player signup/status rows */}
           {allPlayers.length > 0 && (
             <div className="divide-y divide-gray-100 dark:divide-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -319,6 +365,11 @@ function SeriesPlayerRow({
   )
 
   const hasUnregistered = unregisteredSessions.length > 0
+
+  const uniqueDays = useMemo(() =>
+    [...new Set(unregisteredSessions.map(s => new Date(s.session_date + "T00:00:00").getDay()))].sort((a, b) => a - b),
+    [unregisteredSessions]
+  )
 
   const firstSession       = eligibleSessions[0]
   const paymentMethods     = firstSession?.payment_methods ?? []
@@ -468,15 +519,28 @@ function SeriesPlayerRow({
 
           {unregisteredSessions.length > 1 && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-1">
                 <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Select sessions:</p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap items-center">
+                  {uniqueDays.length >= 2 && uniqueDays.map((day) => (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setSelectedIds(new Set(
+                        unregisteredSessions.filter(s => new Date(s.session_date + "T00:00:00").getDay() === day).map(s => s.id)
+                      ))}
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {DAY_PLURAL[day]}
+                    </button>
+                  ))}
+                  {uniqueDays.length >= 2 && <span className="text-xs text-gray-300 dark:text-gray-600">·</span>}
                   <button
                     type="button"
                     onClick={() => setSelectedIds(new Set(unregisteredSessions.map((s) => s.id)))}
                     className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                   >
-                    Select all
+                    All
                   </button>
                   <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
                   <button
@@ -484,12 +548,16 @@ function SeriesPlayerRow({
                     onClick={() => setSelectedIds(new Set())}
                     className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                   >
-                    Deselect all
+                    None
                   </button>
                 </div>
               </div>
               {unregisteredSessions.map((s) => {
-                const t = fmtTime(s.session_time)
+                const t   = fmtTime(s.session_time)
+                const e   = fmtTime(s.session_end_time)
+                const dur = getDurationMins(s.session_time, s.session_end_time)
+                const timeStr = t ? (e ? `${t} – ${e}` : t) : ""
+                const durStr  = dur && !e ? ` (${dur} min)` : dur ? ` · ${dur} min` : ""
                 return (
                   <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer">
                     <input
@@ -499,7 +567,7 @@ function SeriesPlayerRow({
                       className="accent-blue-600 shrink-0"
                     />
                     <span className="text-gray-700 dark:text-gray-300">
-                      {fmtDate(s.session_date)}{t ? ` · ${t}` : ""}
+                      {fmtDate(s.session_date)}{timeStr ? ` · ${timeStr}${durStr}` : ""}
                     </span>
                   </label>
                 )
@@ -572,14 +640,6 @@ function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
 
   return (
     <div className="px-5 py-3 bg-white dark:bg-gray-900">
-      {session.image_url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={session.image_url}
-          alt=""
-          className="w-full h-40 object-cover rounded-lg mb-3"
-        />
-      )}
       <div className="text-sm font-medium text-gray-900 dark:text-white">
         {fmtDate(session.session_date)}
       </div>
@@ -602,16 +662,7 @@ function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
         <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
           {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
         </span>
-        {session.payment_amount && (
-          <span className="text-xs text-gray-500 dark:text-gray-400">{session.payment_amount}</span>
-        )}
       </div>
-      {session.description && (
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{session.description}</p>
-      )}
-      {session.notes && (
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 italic">{session.notes}</p>
-      )}
       {session.signedUpPlayers.length > 0 && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
           <span className="font-medium">Signed up:</span>{" "}

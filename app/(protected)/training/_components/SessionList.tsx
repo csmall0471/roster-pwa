@@ -38,8 +38,9 @@ export type TrainingSession = {
   }>
 }
 
-const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
-const DAY_NAMES  = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+const DAY_LABELS  = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+const DAY_NAMES   = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+const DAY_PLURAL  = ["Sundays","Mondays","Tuesdays","Wednesdays","Thursdays","Fridays","Saturdays"]
 
 const PRESET_PAYMENTS: PaymentMethod[] = [
   { label: "Venmo",       link: "https://www.venmo.com/u/Connor-Small-1" },
@@ -915,16 +916,36 @@ function AdminSeriesGroup({
     ? fmtDate(firstDate)
     : `${count} sessions · ${fmtShortDate(firstDate)} – ${fmtShortDate(lastDate)}`
 
-  // Gather meta for subtitle: unique times, location, eligibility
-  const firstSession  = sessions[0]
-  const uniqueTimes   = [...new Set(sessions.map((s) => {
-    const t = fmtTime(s.session_time)
-    const e = fmtTime(s.session_end_time)
-    return t ? (e ? `${t} – ${e}` : t) : null
-  }).filter(Boolean))]
-  const locationMeta  = firstSession.location
+  // Gather meta for subtitle: day-named times, location, cost, eligibility
+  const firstSession = sessions[0]
+
+  const dayTimesDisplay = (() => {
+    if (count === 1) {
+      const t = fmtTime(firstSession.session_time)
+      const e = fmtTime(firstSession.session_end_time)
+      return t ? (e ? `${t} – ${e}` : t) : null
+    }
+    const map = new Map<number, string>()
+    for (const s of sessions) {
+      const day = new Date(s.session_date + "T00:00:00").getDay()
+      if (!map.has(day)) {
+        const t = fmtTime(s.session_time)
+        const e = fmtTime(s.session_end_time)
+        if (t) map.set(day, e ? `${t} – ${e}` : t)
+      }
+    }
+    if (map.size === 0) return null
+    return [...map.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([day, t]) => `${DAY_PLURAL[day]} ${t}`)
+      .join(" / ")
+  })()
+
+  const locationLabel    = firstSession.location
     ? firstSession.location + (firstSession.location_address ? `, ${firstSession.location_address}` : "")
     : null
+  const costLabel        = firstSession.payment_amount ? `${firstSession.payment_amount}/session` : null
+  const locationCostMeta = [locationLabel, costLabel].filter(Boolean).join(" · ")
 
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -935,17 +956,19 @@ function AdminSeriesGroup({
           onClick={() => setOpen((v) => !v)}
           className="flex-1 min-w-0 text-left"
         >
-          <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
+          <div className="flex items-start gap-3">
+            <span className="text-sm font-semibold text-gray-900 dark:text-white flex-1 min-w-0">{title}</span>
+            {firstSession.eligibility_rules && (
+              <span className="text-xs text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">{describeRules(firstSession.eligibility_rules)}</span>
+            )}
+          </div>
           <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
             <div>
               {subtitle}
               {count > 1 && upcomingInGroup < count && ` · ${upcomingInGroup} upcoming`}
             </div>
-            {uniqueTimes.length > 0 && <div>{uniqueTimes.join(" / ")}</div>}
-            {locationMeta && <div>{locationMeta}</div>}
-            {firstSession.eligibility_rules && (
-              <div className="text-blue-600 dark:text-blue-400">{describeRules(firstSession.eligibility_rules)}</div>
-            )}
+            {dayTimesDisplay && <div>{dayTimesDisplay}</div>}
+            {locationCostMeta && <div>{locationCostMeta}</div>}
           </div>
         </button>
         {/* Series-level actions */}
@@ -1049,12 +1072,6 @@ function SessionCard({
             )}
           </div>
 
-          {/* Eligibility summary */}
-          {session.eligibility_rules && (
-            <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
-              {describeRules(session.eligibility_rules)}
-            </p>
-          )}
         </button>
 
         <div className="flex items-center gap-3 shrink-0 text-xs">

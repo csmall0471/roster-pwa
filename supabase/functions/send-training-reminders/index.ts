@@ -129,7 +129,7 @@ Deno.serve(async (_req) => {
       players(first_name, last_name),
       training_sessions!inner(
         title, session_date, session_time, session_end_time,
-        location, payment_amount, payment_methods
+        location, payment_amount, payment_methods, image_url, notes
       )
     `)
     .eq("training_sessions.session_date", tomorrowStr);
@@ -195,15 +195,24 @@ Deno.serve(async (_req) => {
           ? `${divider()}<p style="margin:0;font-size:14px;color:#16a34a;font-weight:600;">Payment confirmed — you're all set!</p>`
           : "";
 
+      const imageUrl = session?.image_url ?? null;
+      const notes    = session?.notes ?? null;
+
       const htmlBody = [
+        imageUrl ? `<img src="${imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin-bottom:20px;">` : "",
         `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(parent.first_name)},</p>`,
         `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(playerName)}</strong> has training tomorrow — <strong>${esc(session?.title ?? "")}</strong>!</p>`,
         infoTable(rows),
+        notes ? `<p style="margin:-16px 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(notes)}</p>` : "",
         payHtml,
         divider(),
         `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel?</p>`,
         btn("Cancel Registration", manageUrl, "#6b7280"),
       ].filter(Boolean).join("\n");
+
+      const fromName  = Deno.env.get("EMAIL_FROM_NAME") ?? "CS Sports";
+      const fromEmail = Deno.env.get("EMAIL_FROM") ?? "roster@cssports-az.com";
+      const from      = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
 
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -212,7 +221,7 @@ Deno.serve(async (_req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from:    Deno.env.get("EMAIL_FROM") ?? "roster@cssports-az.com",
+          from,
           to:      [parent.email],
           subject: `Reminder: Training session tomorrow — ${session?.title}`,
           text,

@@ -21,6 +21,8 @@ export type TrainingReminderPayload = {
   paymentAmount?: string | null
   paymentMethods?: PaymentMethod[]
   hasPaid?:       boolean
+  imageUrl?:      string | null
+  notes?:         string | null
 }
 
 export type SignupChangePayload = {
@@ -173,6 +175,12 @@ function buildIcs(events: Array<{
 
 // ── Resend helper ─────────────────────────────────────────────────────────────
 
+function buildFrom(): string {
+  const name  = process.env.EMAIL_FROM_NAME ?? "CS Sports"
+  const email = process.env.EMAIL_FROM ?? "onboarding@resend.dev"
+  return name ? `${name} <${email}>` : email
+}
+
 async function resendSend(params: {
   to: string
   subject: string
@@ -183,7 +191,7 @@ async function resendSend(params: {
   const { Resend } = await import("resend")
   const resend = new Resend(process.env.RESEND_API_KEY)
   return resend.emails.send({
-    from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+    from: buildFrom(),
     to: params.to,
     subject: params.subject,
     text: params.text,
@@ -447,9 +455,15 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
         : ""
 
     const htmlBody = [
+      payload.imageUrl
+        ? `<img src="${payload.imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin-bottom:20px;">`
+        : "",
       `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentName)},</p>`,
       `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(payload.playerName)}</strong> has training tomorrow — <strong>${esc(payload.title)}</strong>!</p>`,
       infoTable(rows),
+      payload.notes
+        ? `<p style="margin:-16px 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
+        : "",
       payHtml,
       divider(),
       `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel?</p>`,
