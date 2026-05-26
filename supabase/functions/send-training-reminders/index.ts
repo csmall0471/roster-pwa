@@ -59,6 +59,16 @@ function infoRow(label: string, value: string): string {
   </tr>`;
 }
 
+function locationMapRow(location: string): string {
+  const encoded = encodeURIComponent(location);
+  const appleUrl = `https://maps.apple.com/?q=${encoded}`;
+  const googleUrl = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+  return `<tr>
+    <td style="padding:5px 16px 5px 0;font-size:14px;color:#6b7280;white-space:nowrap;font-weight:500;vertical-align:top;">Location</td>
+    <td style="padding:5px 0;font-size:14px;color:#111827;vertical-align:top;">${esc(location)}<br><span style="font-size:12px;"><a href="${appleUrl}" style="color:#2563eb;text-decoration:none;">Apple Maps →</a>&nbsp;&nbsp;<a href="${googleUrl}" style="color:#2563eb;text-decoration:none;">Google Maps →</a></span></td>
+  </tr>`;
+}
+
 function infoTable(rows: string): string {
   return `<table cellpadding="0" cellspacing="0" style="margin:20px 0 24px;">${rows}</table>`;
 }
@@ -196,7 +206,7 @@ Deno.serve(async (_req) => {
       const rows = [
         infoRow("Date", fmtDate(session?.session_date)),
         session?.session_time ? infoRow("Time", timeDisplay) : "",
-        session?.location ? infoRow("Location", session.location) : "",
+        session?.location ? locationMapRow(session.location) : "",
       ].filter(Boolean).join("\n");
 
       const payHtml = !hasPaid && paymentAmount
@@ -214,11 +224,11 @@ Deno.serve(async (_req) => {
       const notes    = session?.notes ?? null;
 
       const htmlBody = [
-        imageUrl ? `<img src="${imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin-bottom:20px;">` : "",
         `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(parent.first_name)},</p>`,
         `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(playerName)}</strong> has training tomorrow — <strong>${esc(session?.title ?? "")}</strong>!</p>`,
         infoTable(rows),
-        notes ? `<p style="margin:-16px 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(notes)}</p>` : "",
+        imageUrl ? `<img src="${imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin:16px 0;">` : "",
+        notes ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(notes)}</p>` : "",
         payHtml,
         divider(),
         `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel?</p>`,

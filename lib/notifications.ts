@@ -200,6 +200,16 @@ function emailPayMethodHtml(method: PaymentMethod, paymentAmount?: string | null
   return btn(method.label, url)
 }
 
+function locationMapRow(location: string): string {
+  const encoded = encodeURIComponent(location)
+  const appleUrl = `https://maps.apple.com/?q=${encoded}`
+  const googleUrl = `https://www.google.com/maps/search/?api=1&query=${encoded}`
+  return `<tr>
+    <td style="padding:5px 16px 5px 0;font-size:14px;color:#6b7280;white-space:nowrap;font-weight:500;vertical-align:top;">Location</td>
+    <td style="padding:5px 0;font-size:14px;color:#111827;vertical-align:top;">${esc(location)}<br><span style="font-size:12px;"><a href="${appleUrl}" style="color:#2563eb;text-decoration:none;">Apple Maps →</a>&nbsp;&nbsp;<a href="${googleUrl}" style="color:#2563eb;text-decoration:none;">Google Maps →</a></span></td>
+  </tr>`
+}
+
 async function resendSend(params: {
   to: string
   subject: string
@@ -330,13 +340,13 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       detailsHtml = `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Sessions (${dates.length}):</p>
 <ul style="margin:0 0 8px;padding-left:20px;font-size:14px;color:#374151;line-height:1.75;">${items}</ul>`
       if (payload.location) {
-        detailsHtml += infoTable(infoRow("Location", payload.location))
+        detailsHtml += infoTable(locationMapRow(payload.location))
       }
     } else {
       const rows = [
         infoRow("Date", fmtDate(dates[0].date)),
         dates[0].time ? infoRow("Time", fmtTimeRange(dates[0].time, dates[0].endTime).replace(" at ", "").trim()) : "",
-        payload.location ? infoRow("Location", payload.location) : "",
+        payload.location ? locationMapRow(payload.location) : "",
       ].filter(Boolean).join("\n")
       detailsHtml = infoTable(rows)
     }
@@ -356,20 +366,19 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       btn("Manage Registrations", manageUrl, "#6b7280"),
     ].join("\n")
 
-    const mediaHtml = [
-      payload.imageUrl
-        ? `<img src="${payload.imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin-bottom:20px;">`
-        : "",
-      payload.description
-        ? `<p style="margin:0 0 12px;font-size:14px;color:#374151;line-height:1.6;">${esc(payload.description)}</p>`
-        : "",
-    ].filter(Boolean).join("\n")
-
-    const notesHtml = payload.notes
-      ? `<p style="margin:-16px 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
+    const imageHtml = payload.imageUrl
+      ? `<img src="${payload.imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin:16px 0;">`
       : ""
 
-    htmlBody = [mediaHtml, introHtml, detailsHtml, notesHtml, payHtml, cancelHtml].filter(Boolean).join("\n")
+    const descriptionHtml = payload.description
+      ? `<p style="margin:0 0 12px;font-size:14px;color:#374151;line-height:1.6;">${esc(payload.description)}</p>`
+      : ""
+
+    const notesHtml = payload.notes
+      ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
+      : ""
+
+    htmlBody = [introHtml, detailsHtml, imageHtml, descriptionHtml, notesHtml, payHtml, cancelHtml].filter(Boolean).join("\n")
   } else {
     let cancelDetailsHtml: string
     if (dates.length > 1) {
@@ -378,12 +387,12 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       ).join("\n")
       cancelDetailsHtml = `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Sessions cancelled (${dates.length}):</p>
 <ul style="margin:0 0 8px;padding-left:20px;font-size:14px;color:#374151;line-height:1.75;">${items}</ul>`
-      if (payload.location) cancelDetailsHtml += infoTable(infoRow("Location", payload.location))
+      if (payload.location) cancelDetailsHtml += infoTable(locationMapRow(payload.location))
     } else {
       const rows = [
         infoRow("Date", fmtDate(dates[0].date)),
         dates[0].time ? infoRow("Time", fmtTimeRange(dates[0].time, dates[0].endTime).replace(" at ", "").trim()) : "",
-        payload.location ? infoRow("Location", payload.location) : "",
+        payload.location ? locationMapRow(payload.location) : "",
       ].filter(Boolean).join("\n")
       cancelDetailsHtml = infoTable(rows)
     }
@@ -504,14 +513,14 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
         : ""
 
     const htmlBody = [
-      payload.imageUrl
-        ? `<img src="${payload.imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin-bottom:20px;">`
-        : "",
       `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentName)},</p>`,
       `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(payload.playerName)}</strong> has training tomorrow — <strong>${esc(payload.title)}</strong>!</p>`,
       infoTable(rows),
+      payload.imageUrl
+        ? `<img src="${payload.imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin:16px 0;">`
+        : "",
       payload.notes
-        ? `<p style="margin:-16px 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
+        ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
         : "",
       payHtml,
       divider(),

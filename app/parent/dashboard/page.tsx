@@ -117,15 +117,20 @@ export default async function DashboardPage() {
     if (!nextGameByTeam.has(g.team_id)) nextGameByTeam.set(g.team_id, g);
   }
 
-  const upcomingGameIds = [...nextGameByTeam.values()].map((g) => g.id);
-  const { data: mySnackSignups } = upcomingGameIds.length > 0
+  const { data: mySnackSignups } = activeTeamIds.length > 0
     ? await supabase
         .from("snack_signups")
         .select("game_id")
         .eq("parent_id", parentId)
-        .in("game_id", upcomingGameIds)
     : { data: null };
   const signedUpGameIds = new Set((mySnackSignups ?? []).map((s: any) => s.game_id));
+
+  // Map all upcoming games by team (already sorted ascending from query)
+  const gamesByTeam = new Map<string, any[]>();
+  for (const g of upcomingGames ?? []) {
+    if (!gamesByTeam.has(g.team_id)) gamesByTeam.set(g.team_id, []);
+    gamesByTeam.get(g.team_id)!.push(g);
+  }
 
   // Build combined calendar (games + training sessions)
   type CalEvent = { date: string; time: string | null; emoji: string; label: string; sublabel: string | null; href: string }
@@ -180,7 +185,8 @@ export default async function DashboardPage() {
 
   function TeamCard({ team, pids }: { team: any; pids: string[] }) {
     const nextGame = nextGameByTeam.get(team.id);
-    const isSignedUp = nextGame ? signedUpGameIds.has(nextGame.id) : false;
+    const snackGame = (gamesByTeam.get(team.id) ?? []).find((g) => signedUpGameIds.has(g.id));
+    const isSignedUp = !!snackGame;
     const isActive = !team.season_start || team.season_start <= today;
     const isUpcoming = team.season_start && team.season_start > today;
 
@@ -256,7 +262,7 @@ export default async function DashboardPage() {
               <span className="text-base">🍎</span>
               {isSignedUp ? (
                 <Link href={`/parent/team/${team.id}?tab=schedule`} className="text-sm text-green-600 dark:text-green-400 font-medium hover:underline">
-                  Snacks: {fmtDate(nextGame.game_date)} ✓ →
+                  Snacks: {fmtDate(snackGame.game_date)} ✓ →
                 </Link>
               ) : (
                 <Link href={`/parent/team/${team.id}?tab=schedule`} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
