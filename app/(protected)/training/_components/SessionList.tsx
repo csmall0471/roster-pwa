@@ -2,8 +2,8 @@
 
 import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions } from "../actions"
-import type { SessionData, PaymentMethod, RepeatDayConfig } from "../actions"
+import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions, adminBulkUpdateSessions } from "../actions"
+import type { SessionData, PaymentMethod, RepeatDayConfig, BulkSessionUpdateData } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
 import RuleBuilder, { type TeamOption } from "./RuleBuilder"
@@ -161,6 +161,38 @@ function fmtTime(t: string | null) {
 
 function isPast(dateStr: string) {
   return new Date(dateStr + "T23:59:59") < new Date()
+}
+
+type BulkFormState = {
+  title:             string
+  description:       string
+  location:          string
+  location_address:  string
+  image_url:         string
+  session_time:      string
+  session_end_time:  string
+  max_players:       string
+  payment_amount:    string
+  payment_methods:   PaymentMethod[]
+  notes:             string
+  eligibility_rules: EligibilityRules
+}
+
+function toBulkData(f: BulkFormState): BulkSessionUpdateData {
+  return {
+    title:             f.title,
+    description:       f.description       || null,
+    location:          f.location          || null,
+    location_address:  f.location_address  || null,
+    image_url:         f.image_url         || null,
+    session_time:      f.session_time      || null,
+    session_end_time:  f.session_end_time  || null,
+    max_players:       Math.max(1, parseInt(f.max_players) || 10),
+    payment_amount:    f.payment_amount    || null,
+    payment_methods:   f.payment_methods,
+    eligibility_rules: f.eligibility_rules,
+    notes:             f.notes             || null,
+  }
 }
 
 // ── SessionList ───────────────────────────────────────────────────────────────
@@ -828,6 +860,7 @@ export default function SessionList({
               key={g[0].series_id ?? g[0].id}
               sessions={g}
               players={players}
+              teams={teams}
               expandedId={expandedId}
               onToggleExpand={(id) => setExpandedId((v) => v === id ? null : id)}
               onEdit={openEdit}
@@ -838,6 +871,7 @@ export default function SessionList({
               onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
               onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
               onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
+              onBulkUpdated={(ids, data) => setSessions((prev) => prev.map((s) => ids.includes(s.id) ? { ...s, ...data } : s))}
             />
           ))}
         </div>
@@ -855,6 +889,7 @@ export default function SessionList({
                 key={g[0].series_id ?? g[0].id}
                 sessions={g}
                 players={players}
+                teams={teams}
                 expandedId={expandedId}
                 onToggleExpand={(id) => setExpandedId((v) => v === id ? null : id)}
                 onEdit={openEdit}
@@ -865,6 +900,7 @@ export default function SessionList({
                 onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
                 onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
                 onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
+                onBulkUpdated={(ids, data) => setSessions((prev) => prev.map((s) => ids.includes(s.id) ? { ...s, ...data } : s))}
               />
             ))}
           </div>
@@ -887,12 +923,13 @@ export default function SessionList({
 // ── AdminSeriesGroup ──────────────────────────────────────────────────────────
 
 function AdminSeriesGroup({
-  sessions, players, expandedId, onToggleExpand, onEdit, onDuplicate, onDelete,
+  sessions, players, teams, expandedId, onToggleExpand, onEdit, onDuplicate, onDelete,
   onDuplicateSeries, onDeleteSeries,
-  onSignupAdded, onSignupRemoved, onSignupPaidToggled,
+  onSignupAdded, onSignupRemoved, onSignupPaidToggled, onBulkUpdated,
 }: {
   sessions:        TrainingSession[]
   players:         PlayerOption[]
+  teams:           TeamOption[]
   expandedId:      string | null
   onToggleExpand:  (id: string) => void
   onEdit:          (s: TrainingSession) => void
@@ -903,9 +940,11 @@ function AdminSeriesGroup({
   onSignupAdded:       (sessionId: string, signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (sessionId: string, signupId: string) => void
   onSignupPaidToggled: (sessionId: string, signupId: string, paid: boolean) => void
+  onBulkUpdated:       (sessionIds: string[], data: BulkSessionUpdateData) => void
 }) {
   // Standalone sessions start open so they're immediately visible
-  const [open, setOpen] = useState(sessions.length === 1)
+  const [open, setOpen]               = useState(sessions.length === 1)
+  const [showBulkEdit, setShowBulkEdit] = useState(false)
   const title           = sessions[0].title
   const count           = sessions.length
   const firstDate       = sessions[0].session_date
@@ -973,6 +1012,15 @@ function AdminSeriesGroup({
         </button>
         {/* Series-level actions */}
         <div className="flex items-center gap-2 shrink-0 ml-3">
+          {sessions.length > 1 && (
+            <button
+              type="button"
+              onClick={() => { setShowBulkEdit((v) => !v); setOpen(true) }}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+            >
+              Edit all
+            </button>
+          )}
           <button
             type="button"
             onClick={onDuplicateSeries}
@@ -993,6 +1041,17 @@ function AdminSeriesGroup({
 
       {open && (
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {showBulkEdit && sessions.length > 1 && (
+            <BulkEditPanel
+              sessions={sessions}
+              teams={teams}
+              onClose={() => setShowBulkEdit(false)}
+              onUpdated={(data) => {
+                onBulkUpdated(sessions.map((s) => s.id), data)
+                setShowBulkEdit(false)
+              }}
+            />
+          )}
           {sessions.map((s) => (
             <SessionCard
               key={s.id}
@@ -1299,7 +1358,7 @@ function BulkAddPanel({
   }
 
   return (
-    <div className="px-4 py-3 bg-blue-50/40 dark:bg-blue-950/20">
+    <div className="px-4 py-3 bg-blue-50/40 dark:bg-blue-950/20 border-t border-blue-100 dark:border-blue-900">
       <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Add to all sessions</p>
       <div className="flex items-center gap-2">
         <select
@@ -1326,5 +1385,304 @@ function BulkAddPanel({
         </p>
       )}
     </div>
+  )
+}
+
+// ── BulkEditPanel ─────────────────────────────────────────────────────────────
+
+function BulkEditPanel({
+  sessions, teams, onClose, onUpdated,
+}: {
+  sessions:   TrainingSession[]
+  teams:      TeamOption[]
+  onClose:    () => void
+  onUpdated:  (data: BulkSessionUpdateData) => void
+}) {
+  const first = sessions[0]
+  const [form, setForm] = useState<BulkFormState>({
+    title:             first.title,
+    description:       first.description      ?? "",
+    location:          first.location         ?? "",
+    location_address:  first.location_address ?? "",
+    image_url:         first.image_url        ?? "",
+    session_time:      first.session_time     ?? "",
+    session_end_time:  first.session_end_time ?? "",
+    max_players:       String(first.max_players),
+    payment_amount:    first.payment_amount   ?? "",
+    payment_methods:   first.payment_methods  ?? [],
+    notes:             first.notes            ?? "",
+    eligibility_rules: first.eligibility_rules,
+  })
+  const [error, setError]   = useState<string | null>(null)
+  const [pending, start]    = useTransition()
+  const [imageUploading, setImgUpload] = useState(false)
+
+  const inputCls = "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImgUpload(true)
+    const supabase = createClient()
+    const ext  = file.name.split(".").pop() ?? "jpg"
+    const path = `sessions/${Date.now()}.${ext}`
+    const { error: upErr } = await supabase.storage.from("training-images").upload(path, file)
+    if (!upErr) {
+      const { data: urlData } = supabase.storage.from("training-images").getPublicUrl(path)
+      setForm((f) => ({ ...f, image_url: urlData.publicUrl }))
+    }
+    setImgUpload(false)
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!form.title) return
+    setError(null)
+    const data = toBulkData(form)
+    start(async () => {
+      const result = await adminBulkUpdateSessions(sessions.map((s) => s.id), data)
+      if (result.error) { setError(result.error); return }
+      onUpdated(data)
+    })
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="px-4 py-4 bg-amber-50/40 dark:bg-amber-950/20 border-b border-amber-100 dark:border-amber-900 space-y-3"
+    >
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+          Edit all {sessions.length} sessions
+        </p>
+        <button type="button" onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          Cancel
+        </button>
+      </div>
+
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Title *</label>
+        <input
+          type="text" required
+          value={form.title}
+          onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+          className={inputCls}
+        />
+      </div>
+
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Description</label>
+        <textarea
+          rows={2}
+          value={form.description}
+          onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+          className={`${inputCls} resize-none`}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Start time</label>
+          <input
+            type="time"
+            value={form.session_time}
+            onChange={(e) => setForm((f) => ({ ...f, session_time: e.target.value }))}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">End time</label>
+          <input
+            type="time"
+            value={form.session_end_time}
+            onChange={(e) => setForm((f) => ({ ...f, session_end_time: e.target.value }))}
+            className={inputCls}
+          />
+        </div>
+      </div>
+      {form.session_time && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-400 dark:text-gray-500">Duration:</span>
+          {DURATION_SHORTCUTS.map((mins) => (
+            <button
+              key={mins} type="button"
+              onClick={() => setForm((f) => ({ ...f, session_end_time: addMinutes(f.session_time, mins) }))}
+              className="text-xs rounded-full px-2.5 py-0.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              {mins} min
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Location name</label>
+        <input
+          type="text" placeholder="e.g. Dobson Park"
+          value={form.location}
+          onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+          className={inputCls}
+        />
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Location address</label>
+        <input
+          type="text" placeholder="e.g. 100 E Dobson Rd, Mesa, AZ"
+          value={form.location_address}
+          onChange={(e) => setForm((f) => ({ ...f, location_address: e.target.value }))}
+          className={inputCls}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Max players</label>
+          <input
+            type="number" min={1} max={100}
+            value={form.max_players}
+            onChange={(e) => setForm((f) => ({ ...f, max_players: e.target.value }))}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price</label>
+          <input
+            type="text" placeholder="e.g. $20"
+            value={form.payment_amount}
+            onChange={(e) => setForm((f) => ({ ...f, payment_amount: e.target.value }))}
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      {/* Payment methods */}
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Payment methods</label>
+        <div className="space-y-2">
+          {form.payment_methods.map((pm, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                type="text" placeholder="Label"
+                value={pm.label}
+                onChange={(e) => {
+                  const updated = [...form.payment_methods]
+                  updated[i] = { ...pm, label: e.target.value }
+                  setForm((f) => ({ ...f, payment_methods: updated }))
+                }}
+                className="w-32 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <input
+                type="url" placeholder="Link (optional)"
+                value={pm.link ?? ""}
+                onChange={(e) => {
+                  const updated = [...form.payment_methods]
+                  updated[i] = { ...pm, link: e.target.value || null }
+                  setForm((f) => ({ ...f, payment_methods: updated }))
+                }}
+                className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, payment_methods: f.payment_methods.filter((_, idx) => idx !== i) }))}
+                className="text-red-400 hover:text-red-600 text-base shrink-0"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {PRESET_PAYMENTS.map((preset) => {
+              const alreadyAdded = form.payment_methods.some((pm) => pm.label === preset.label)
+              return (
+                <button
+                  key={preset.label} type="button"
+                  disabled={alreadyAdded}
+                  onClick={() => setForm((f) => ({ ...f, payment_methods: [...f.payment_methods, preset] }))}
+                  className={`text-xs rounded-full px-3 py-1 border transition-colors ${
+                    alreadyAdded
+                      ? "border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-default"
+                      : "border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
+                  }`}
+                >
+                  + {preset.label}
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, payment_methods: [...f.payment_methods, { label: "", link: null }] }))}
+              className="text-xs text-gray-400 dark:text-gray-500 hover:underline"
+            >
+              + Custom
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Eligibility */}
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Eligibility</label>
+        <RuleBuilder
+          value={form.eligibility_rules}
+          onChange={(v) => setForm((f) => ({ ...f, eligibility_rules: v }))}
+          teams={teams}
+        />
+      </div>
+
+      {/* Notes */}
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Notes</label>
+        <input
+          type="text" placeholder="Optional"
+          value={form.notes}
+          onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+          className={inputCls}
+        />
+      </div>
+
+      {/* Image */}
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Photo</label>
+        {form.image_url ? (
+          <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={form.image_url} alt="" className="h-20 w-32 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, image_url: "" }))}
+              className="text-xs text-red-500 hover:underline"
+            >
+              Remove
+            </button>
+          </div>
+        ) : (
+          <label className="cursor-pointer inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 px-4 py-2 text-sm text-gray-500 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+            {imageUploading ? "Uploading…" : "Upload photo"}
+            <input
+              type="file" accept="image/*"
+              className="hidden"
+              disabled={imageUploading}
+              onChange={handleImageUpload}
+            />
+          </label>
+        )}
+      </div>
+
+      {error && <p className="text-xs text-red-500">{error}</p>}
+
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          type="submit"
+          disabled={pending || !form.title}
+          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {pending ? "Saving…" : `Update all ${sessions.length} sessions`}
+        </button>
+        <button type="button" onClick={onClose}
+          className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+          Cancel
+        </button>
+      </div>
+    </form>
   )
 }

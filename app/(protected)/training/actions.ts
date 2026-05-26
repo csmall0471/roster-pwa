@@ -333,6 +333,16 @@ export async function adminRemoveTrainingSignup(signupId: string) {
   return { error: null }
 }
 
+export type BulkSessionUpdateData = Omit<SessionData, "session_date" | "series_id">
+
+export async function adminBulkUpdateSessions(sessionIds: string[], data: BulkSessionUpdateData) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("training_sessions").update(data).in("id", sessionIds)
+  if (error) return { error: error.message }
+  revalidatePath("/training")
+  return { error: null }
+}
+
 export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerId: string) {
   const supabase = await createClient()
 
