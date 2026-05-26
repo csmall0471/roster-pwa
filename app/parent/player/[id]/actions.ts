@@ -71,3 +71,57 @@ export async function updateParentInfo(data: {
   revalidatePath("/parent", "layout");
   return { error: null };
 }
+
+export async function updateAnyParent(
+  parentId: string,
+  data: {
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string | null;
+  }
+): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("parents")
+    .update({
+      first_name: data.first_name.trim(),
+      last_name: data.last_name.trim(),
+      email: data.email.trim(),
+      phone: data.phone?.trim() || null,
+    })
+    .eq("id", parentId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/parent", "layout");
+  return { error: null };
+}
+
+export async function addCoparent(
+  playerId: string,
+  data: {
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string | null;
+  }
+): Promise<{ error: string | null; parentId: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated", parentId: null };
+
+  const { data: newId, error } = await supabase.rpc("add_coparent", {
+    p_player_id:  playerId,
+    p_first_name: data.first_name.trim(),
+    p_last_name:  data.last_name.trim(),
+    p_email:      data.email.trim(),
+    p_phone:      data.phone?.trim() || null,
+  });
+
+  if (error) return { error: error.message, parentId: null };
+  revalidatePath("/parent", "layout");
+  return { error: null, parentId: newId as string };
+}

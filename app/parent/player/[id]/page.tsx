@@ -6,7 +6,7 @@ import type { PlayerPhoto } from "@/lib/types";
 import SeasonHistory from "../_components/SeasonHistory";
 import PhotoCardGallery from "../_components/PhotoCardGallery";
 import PlayerInfoForm from "./_components/PlayerInfoForm";
-import ParentInfoForm from "./_components/ParentInfoForm";
+import GuardiansSection from "./_components/GuardiansSection";
 
 function calcAge(dob: string) {
   const birth = new Date(dob + "T00:00:00");
@@ -15,6 +15,12 @@ function calcAge(dob: string) {
   const m = today.getMonth() - birth.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
   return age;
+}
+
+function fmtDob(dob: string) {
+  return new Date(dob + "T00:00:00").toLocaleDateString("en-US", {
+    month: "long", day: "numeric", year: "numeric",
+  });
 }
 
 export default async function ParentPlayerPage({
@@ -34,13 +40,13 @@ export default async function ParentPlayerPage({
     .maybeSingle();
 
   if (!parentLink) redirect("/login");
-  const parentId = parentLink.parent_id;
+  const myParentId = parentLink.parent_id;
 
   const { data: myKidRows } = await supabase.rpc("get_my_player_ids");
   const myKidIds = new Set((myKidRows ?? []).map((r: { player_id: string }) => r.player_id));
   if (!myKidIds.has(id)) notFound();
 
-  const [{ data: player }, { data: photos }, { data: seasons }, { data: parentRecord }] = await Promise.all([
+  const [{ data: player }, { data: photos }, { data: seasons }, { data: linkedParentRows }] = await Promise.all([
     supabase
       .from("players")
       .select("id, first_name, last_name, date_of_birth, shirt_size, grade, notes")
@@ -56,15 +62,31 @@ export default async function ParentPlayerPage({
       .eq("player_id", id)
       .order("created_at", { ascending: false }),
     supabase
-      .from("parents")
-      .select("id, first_name, last_name, email, phone")
-      .eq("id", parentId)
-      .single(),
+      .from("player_parents")
+      .select("parent_id, parents(id, first_name, last_name, email, phone)")
+      .eq("player_id", id),
   ]);
 
   if (!player) notFound();
 
-  // How many kids this parent has (for "applies to all kids" context)
+  const guardians = (linkedParentRows ?? [])
+    .map((row: any) => row.parents)
+    .filter(Boolean)
+    .map((p: any) => ({
+      id: p.id as string,
+      first_name: p.first_name as string,
+      last_name: p.last_name as string,
+      email: p.email as string,
+      phone: (p.phone ?? null) as string | null,
+    }));
+
+  // Put the logged-in parent first
+  guardians.sort((a: any, b: any) => {
+    if (a.id === myParentId) return -1;
+    if (b.id === myParentId) return 1;
+    return 0;
+  });
+
   const kidCount = myKidIds.size;
 
   const sortedPhotos = [...(photos ?? [])].sort((a, b) => {
@@ -109,13 +131,18 @@ export default async function ParentPlayerPage({
               player.shirt_size ? `Size ${player.shirt_size}` : null,
             ].filter(Boolean).join("  ·  ")}
           </p>
+          {player.date_of_birth && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+              b. {fmtDob(player.date_of_birth)}
+            </p>
+          )}
           {player.notes && (
             <p className="text-sm text-gray-500 dark:text-gray-400 italic mt-1">{player.notes}</p>
           )}
         </div>
       </div>
 
-      {/* Editable player info */}
+      {/* Collapsible player info editor */}
       <PlayerInfoForm
         playerId={player.id}
         initialData={{
@@ -128,18 +155,13 @@ export default async function ParentPlayerPage({
         }}
       />
 
-      {/* Editable parent info */}
-      {parentRecord && (
-        <ParentInfoForm
-          initialData={{
-            first_name: parentRecord.first_name,
-            last_name: parentRecord.last_name,
-            email: parentRecord.email,
-            phone: parentRecord.phone ?? null,
-          }}
-          kidCount={kidCount}
-        />
-      )}
+      {/* Guardians */}
+      <GuardiansSection
+        playerId={player.id}
+        initialGuardians={guardians}
+        myParentId={myParentId}
+        kidCount={kidCount}
+      />
 
       {/* Season history */}
       {seasons && seasons.length > 0 && (
