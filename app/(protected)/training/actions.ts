@@ -333,6 +333,46 @@ export async function adminRemoveTrainingSignup(signupId: string) {
   return { error: null }
 }
 
+export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerId: string) {
+  const supabase = await createClient()
+
+  const { data: parentRow } = await supabase
+    .from("player_parents")
+    .select("parent_id")
+    .eq("player_id", playerId)
+    .limit(1)
+    .maybeSingle()
+
+  const parentId = parentRow?.parent_id ?? null
+
+  const [{ data: sessions }, { data: existingSignups }] = await Promise.all([
+    supabase.from("training_sessions").select("id, max_players").in("id", sessionIds),
+    supabase.from("training_signups").select("session_id, player_id").in("session_id", sessionIds),
+  ])
+
+  const countBySession = new Map<string, number>()
+  const alreadyIn = new Set<string>()
+  for (const su of existingSignups ?? []) {
+    countBySession.set(su.session_id, (countBySession.get(su.session_id) ?? 0) + 1)
+    if (su.player_id === playerId) alreadyIn.add(su.session_id)
+  }
+
+  const added: Array<{ sessionId: string; signupId: string }> = []
+  for (const session of sessions ?? []) {
+    if (alreadyIn.has(session.id)) continue
+    if ((countBySession.get(session.id) ?? 0) >= session.max_players) continue
+    const { data: row, error } = await supabase
+      .from("training_signups")
+      .insert({ session_id: session.id, player_id: playerId, parent_id: parentId })
+      .select("id")
+      .single()
+    if (!error && row) added.push({ sessionId: session.id, signupId: row.id as string })
+  }
+
+  revalidatePath("/training")
+  return { added, error: null }
+}
+
 export async function markTrainingSignupPaid(signupId: string, paid: boolean) {
   const supabase = await createClient()
   const { error } = await supabase.from("training_signups").update({ paid }).eq("id", signupId)

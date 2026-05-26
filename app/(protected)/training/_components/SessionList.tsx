@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid } from "../actions"
+import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions } from "../actions"
 import type { SessionData, PaymentMethod, RepeatDayConfig } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
@@ -1008,6 +1008,13 @@ function AdminSeriesGroup({
               onSignupPaidToggled={(suId, paid) => onSignupPaidToggled(s.id, suId, paid)}
             />
           ))}
+          {sessions.length > 1 && (
+            <BulkAddPanel
+              sessions={sessions}
+              players={players}
+              onSignupAdded={onSignupAdded}
+            />
+          )}
         </div>
       )}
     </div>
@@ -1236,6 +1243,88 @@ function SignupsPanel({
         <p className="text-xs text-amber-600 dark:text-amber-400">Session is full ({session.max_players}/{session.max_players})</p>
       )}
       {addError && <p className="text-xs text-red-500">{addError}</p>}
+    </div>
+  )
+}
+
+// ── BulkAddPanel ──────────────────────────────────────────────────────────────
+
+function BulkAddPanel({
+  sessions, players, onSignupAdded,
+}: {
+  sessions:      TrainingSession[]
+  players:       PlayerOption[]
+  onSignupAdded: (sessionId: string, signup: TrainingSession["signups"][0]) => void
+}) {
+  const [playerId, setPlayerId] = useState("")
+  const [status, setStatus]     = useState<string | null>(null)
+  const [pending, start]        = useTransition()
+
+  // Players already in every session are excluded from the dropdown
+  const fullyRegisteredIds = new Set(
+    players
+      .filter((p) => sessions.every((s) => s.signups.some((su) => su.player_id === p.id)))
+      .map((p) => p.id)
+  )
+  const available = players.filter((p) => !fullyRegisteredIds.has(p.id))
+
+  if (available.length === 0) return null
+
+  function handleBulkAdd() {
+    if (!playerId) return
+    setStatus(null)
+    start(async () => {
+      const result = await adminBulkAddPlayerToSessions(sessions.map((s) => s.id), playerId)
+      if (result.error) { setStatus(result.error); return }
+      const player = players.find((p) => p.id === playerId)
+      for (const r of result.added) {
+        onSignupAdded(r.sessionId, {
+          id:             r.signupId,
+          player_id:      playerId,
+          payment_method: null,
+          paid:           false,
+          players:        player ? { first_name: player.first_name, last_name: player.last_name } : null,
+          parents:        null,
+        })
+      }
+      const n       = result.added.length
+      const skipped = sessions.length - n
+      setStatus(
+        n === 0
+          ? "Already registered in all sessions or sessions full"
+          : `Added to ${n} session${n !== 1 ? "s" : ""}${skipped > 0 ? ` · ${skipped} skipped (already registered or full)` : ""}`
+      )
+      setPlayerId("")
+    })
+  }
+
+  return (
+    <div className="px-4 py-3 bg-blue-50/40 dark:bg-blue-950/20">
+      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Add to all sessions</p>
+      <div className="flex items-center gap-2">
+        <select
+          value={playerId}
+          onChange={(e) => { setPlayerId(e.target.value); setStatus(null) }}
+          className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="">Select player…</option>
+          {available.map((p) => (
+            <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
+          ))}
+        </select>
+        <button
+          onClick={handleBulkAdd}
+          disabled={!playerId || pending}
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shrink-0"
+        >
+          {pending ? "Adding…" : "Add to all"}
+        </button>
+      </div>
+      {status && (
+        <p className={`text-xs mt-1.5 ${status.startsWith("Added") ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+          {status}
+        </p>
+      )}
     </div>
   )
 }
