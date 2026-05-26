@@ -217,8 +217,8 @@ function GameRow({
         </div>
       </div>
 
-      {/* Snack section */}
-      {snackEnabled && !dimmed && (
+      {/* Snack section — only for games */}
+      {snackEnabled && !dimmed && (!game.event_type || game.event_type === "game") && (
         <div className="mt-2.5 pt-2.5 border-t border-gray-100 dark:border-gray-800">
           {/* Who's signed up */}
           {game.signups.length > 0 && (
