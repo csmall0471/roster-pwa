@@ -54,7 +54,7 @@ export default async function DashboardPage() {
 
   const today = new Date().toISOString().split("T")[0];
 
-  const [{ data: players }, { data: rosterRows }, { data: unpaidSignups }] = await Promise.all([
+  const [{ data: players }, { data: rosterRows }, { data: unpaidSignups }, { data: calendarSignups }] = await Promise.all([
     supabase
       .from("players")
       .select("id, first_name, last_name")
@@ -69,6 +69,11 @@ export default async function DashboardPage() {
       .select("id, player_id, training_sessions(id, title, session_date, payment_amount, payment_methods)")
       .in("player_id", playerIds)
       .eq("paid", false),
+    supabase
+      .from("training_signups")
+      .select("player_id, training_sessions!inner(id, title, session_date, session_time, location)")
+      .in("player_id", playerIds)
+      .gte("training_sessions.session_date", today),
   ]);
 
   // Build team → players map, filtering out past seasons
@@ -121,6 +126,49 @@ export default async function DashboardPage() {
         .in("game_id", upcomingGameIds)
     : { data: null };
   const signedUpGameIds = new Set((mySnackSignups ?? []).map((s: any) => s.game_id));
+
+  // Build combined calendar (games + training sessions)
+  type CalEvent = { date: string; time: string | null; emoji: string; label: string; sublabel: string | null; href: string }
+  const trainingPlayerNames = new Map<string, string[]>()
+  for (const row of calendarSignups ?? []) {
+    const sess = row.training_sessions as any
+    if (!sess) continue
+    const player = (players ?? []).find((p) => p.id === row.player_id)
+    if (!player) continue
+    if (!trainingPlayerNames.has(sess.id)) trainingPlayerNames.set(sess.id, [])
+    trainingPlayerNames.get(sess.id)!.push(`${player.first_name} ${player.last_name}`)
+  }
+  const seenSessions = new Set<string>()
+  const calEvents: CalEvent[] = []
+  for (const g of upcomingGames ?? []) {
+    const t = teamMap.get(g.team_id)?.team
+    calEvents.push({
+      date: g.game_date, time: g.game_time ?? null,
+      emoji: sportEmoji(t?.sport ?? null),
+      label: `${t?.name ?? "Game"}`,
+      sublabel: `${g.is_home ? "vs" : "@"} ${g.opponent ?? "TBD"}${g.location ? ` · ${g.location}` : ""}`,
+      href: `/parent/team/${g.team_id}?tab=schedule`,
+    })
+  }
+  for (const row of calendarSignups ?? []) {
+    const sess = row.training_sessions as any
+    if (!sess || seenSessions.has(sess.id)) continue
+    seenSessions.add(sess.id)
+    const names = trainingPlayerNames.get(sess.id)?.join(", ") ?? null
+    calEvents.push({
+      date: sess.session_date, time: sess.session_time ?? null,
+      emoji: "🏃",
+      label: sess.title,
+      sublabel: names,
+      href: "/parent/training",
+    })
+  }
+  calEvents.sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time ?? "").localeCompare(b.time ?? ""))
+  const calByDate = new Map<string, CalEvent[]>()
+  for (const e of calEvents) {
+    if (!calByDate.has(e.date)) calByDate.set(e.date, [])
+    calByDate.get(e.date)!.push(e)
+  }
 
   const unpaidWithAmount = (unpaidSignups ?? []).filter((s: any) => {
     const session = s.training_sessions;
@@ -207,7 +255,9 @@ export default async function DashboardPage() {
             <div className="px-5 py-3 flex items-center gap-3 border-b border-gray-100 dark:border-gray-800">
               <span className="text-base">🍎</span>
               {isSignedUp ? (
-                <span className="text-sm text-green-600 dark:text-green-400 font-medium">Snacks ✓ you&apos;re signed up</span>
+                <Link href={`/parent/team/${team.id}?tab=schedule`} className="text-sm text-green-600 dark:text-green-400 font-medium hover:underline">
+                  Snacks: {fmtDate(nextGame.game_date)} ✓ →
+                </Link>
               ) : (
                 <Link href={`/parent/team/${team.id}?tab=schedule`} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
                   Sign up to bring snacks →
@@ -265,6 +315,43 @@ export default async function DashboardPage() {
           <div className="space-y-4">
             {futureEntries.map(({ team, playerIds: pids }) => (
               <TeamCard key={team.id} team={team} pids={pids} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {calByDate.size > 0 && (
+        <section className="mb-8">
+          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+            Upcoming Events
+          </h2>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
+            {[...calByDate.entries()].map(([date, events]) => (
+              <div key={date}>
+                <div className="px-5 py-2 bg-gray-50 dark:bg-gray-800/60">
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    {new Date(date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                  </span>
+                </div>
+                {events.map((ev, j) => (
+                  <Link
+                    key={j}
+                    href={ev.href}
+                    className="px-5 py-3 flex items-start gap-3 border-t border-gray-50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    <span className="text-base mt-0.5">{ev.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        {ev.label}{ev.time ? fmtTime(ev.time) : ""}
+                      </p>
+                      {ev.sublabel && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{ev.sublabel}</p>
+                      )}
+                    </div>
+                    <span className="text-gray-400 dark:text-gray-500 text-xs mt-0.5 shrink-0">→</span>
+                  </Link>
+                ))}
+              </div>
             ))}
           </div>
         </section>
