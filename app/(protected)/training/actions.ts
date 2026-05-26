@@ -130,7 +130,7 @@ export async function signUpForTraining(
 
   const { data: session } = await supabase
     .from("training_sessions")
-    .select("id, max_players, title, session_date, session_time, location")
+    .select("id, max_players, title, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
     .eq("id", sessionId)
     .single()
   if (!session) return { signupId: null, error: "Session not found" }
@@ -170,14 +170,17 @@ export async function signUpForTraining(
 
   if (parent?.email) {
     sendTrainingConfirmation({
-      type:           "signup",
-      parentEmail:    parent.email,
+      type:            "signup",
+      parentEmail:     parent.email,
       parentFirstName: parent.first_name ?? "there",
       playerName,
-      sessionTitle:   session.title,
-      sessionDate:    session.session_date,
-      sessionTime:    session.session_time,
-      location:       session.location,
+      sessionTitle:    session.title,
+      sessionDate:     session.session_date,
+      sessionTime:     session.session_time,
+      sessionEndTime:  (session as any).session_end_time ?? null,
+      location:        session.location,
+      paymentAmount:   (session as any).payment_amount ?? null,
+      paymentMethods:  (session as any).payment_methods ?? [],
     }).catch((err) => console.error("[notify] signUpForTraining parent:", err))
   }
 
@@ -210,12 +213,16 @@ export async function bulkSignUpForTraining(
     .single()
 
   const results: Array<{ sessionId: string; signupId: string }> = []
-  const signedSessions: Array<{ title: string; session_date: string; session_time: string | null; location: string | null }> = []
+  const signedSessions: Array<{
+    title: string; session_date: string; session_time: string | null
+    session_end_time: string | null; location: string | null
+    payment_amount: string | null; payment_methods: PaymentMethod[]
+  }> = []
 
   for (const sessionId of sessionIds) {
     const { data: session } = await supabase
       .from("training_sessions")
-      .select("max_players, title, session_date, session_time, location")
+      .select("max_players, title, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
       .eq("id", sessionId)
       .single()
     if (!session) continue
@@ -240,7 +247,15 @@ export async function bulkSignUpForTraining(
       .single()
     if (!error && row) {
       results.push({ sessionId, signupId: row.id as string })
-      signedSessions.push(session)
+      signedSessions.push({
+        title:            session.title,
+        session_date:     session.session_date,
+        session_time:     session.session_time,
+        session_end_time: (session as any).session_end_time ?? null,
+        location:         session.location,
+        payment_amount:   (session as any).payment_amount ?? null,
+        payment_methods:  (session as any).payment_methods ?? [],
+      })
     }
   }
 
@@ -248,32 +263,34 @@ export async function bulkSignUpForTraining(
     const parent     = parentLink.parents as any
     const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
     const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent"
-    const title      = signedSessions[0].title
+    const first      = signedSessions[0]
 
     notifyCoachTrainingChange({
       type:         "signup",
       parentName,
       playerName,
-      sessionTitle: `${title} (${results.length} session${results.length !== 1 ? "s" : ""})`,
-      sessionDate:  signedSessions[0].session_date,
+      sessionTitle: `${first.title} (${results.length} session${results.length !== 1 ? "s" : ""})`,
+      sessionDate:  first.session_date,
     }).catch((err) => console.error("[notify] bulkSignUp coach:", err))
 
     if (parent?.email) {
-      const appUrl      = process.env.APP_URL ?? "https://cssports-az.com"
-      const sessionLines = signedSessions.map((s) => {
-        const d = new Date(s.session_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-        const t = s.session_time ? (() => { const [h, m] = s.session_time!.split(":").map(Number); return ` ${h % 12 || 12}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}` })() : ""
-        return `  • ${d}${t}`
-      }).join("\n")
-
-      import("resend").then(({ Resend }) => {
-        const resend = new Resend(process.env.RESEND_API_KEY)
-        return resend.emails.send({
-          from:    process.env.EMAIL_FROM ?? "onboarding@resend.dev",
-          to:      parent.email,
-          subject: `Registered for ${results.length} ${title} session${results.length !== 1 ? "s" : ""} — ${playerName}`,
-          text:    `Hi ${parent.first_name},\n\n${playerName} is now registered for ${results.length} ${title} session${results.length !== 1 ? "s" : ""}:\n\n${sessionLines}\n\nTo cancel any session:\n${appUrl}/parent/training\n\nSee you there!\n— Coach Connor`,
-        })
+      sendTrainingConfirmation({
+        type:            "signup",
+        parentEmail:     parent.email,
+        parentFirstName: parent.first_name ?? "there",
+        playerName,
+        sessionTitle:    first.title,
+        sessionDate:     first.session_date,
+        sessionTime:     first.session_time,
+        sessionEndTime:  first.session_end_time,
+        location:        first.location,
+        paymentAmount:   first.payment_amount,
+        paymentMethods:  first.payment_methods,
+        bulkDates: signedSessions.map(s => ({
+          date:    s.session_date,
+          time:    s.session_time,
+          endTime: s.session_end_time,
+        })),
       }).catch((err) => console.error("[notify] bulkSignUp parent:", err))
     }
   }
@@ -338,9 +355,10 @@ export async function cancelTrainingSignup(signupId: string) {
   const { data: signup } = await supabase
     .from("training_signups")
     .select(`
+      paid,
       parents(first_name, last_name, email),
       players(first_name, last_name),
-      training_sessions(title, session_date, session_time, location)
+      training_sessions(title, session_date, session_time, session_end_time, location)
     `)
     .eq("id", signupId)
     .single()
@@ -372,7 +390,9 @@ export async function cancelTrainingSignup(signupId: string) {
         sessionTitle:    session.title,
         sessionDate:     session.session_date,
         sessionTime:     session.session_time ?? null,
+        sessionEndTime:  session.session_end_time ?? null,
         location:        session.location ?? null,
+        hasPaid:         (signup as any).paid ?? false,
       }).catch((err) => console.error("[notify] cancelTrainingSignup parent:", err))
     }
   }
