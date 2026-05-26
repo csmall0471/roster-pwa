@@ -133,9 +133,15 @@ export default async function ParentHomePage() {
               </Link>
 
               {teamEntries.length > 0 && (() => {
-                const activeEntries = teamEntries.filter((e: any) => {
+                const currentEntries = teamEntries.filter((e: any) => {
+                  const start = e.teams?.season_start;
                   const end = e.teams?.season_end;
-                  return !end || end >= today;
+                  return (!start || start <= today) && (!end || end >= today);
+                });
+                const upcomingEntries = teamEntries.filter((e: any) => {
+                  const start = e.teams?.season_start;
+                  const end = e.teams?.season_end;
+                  return start && start > today && (!end || end >= today);
                 });
                 const pastEntries: PastTeamEntry[] = teamEntries
                   .filter((e: any) => {
@@ -152,17 +158,26 @@ export default async function ParentHomePage() {
                       jerseyNumber: e.jersey_number ?? null,
                     };
                   });
+                const allVisible = [...currentEntries, ...upcomingEntries];
                 return (
                   <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
-                    {activeEntries.map((entry: any, i: number) => {
+                    {allVisible.map((entry: any, i: number) => {
                       const t = entry.teams;
                       if (!t) return null;
                       const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
                       const dateRange = formatDateRange(t.season_start, t.season_end);
+                      const isUpcoming = t.season_start && t.season_start > today;
                       return (
                         <Link key={i} href={`/parent/team/${t.id}`} className="px-5 py-3 flex items-center justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                           <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">{sportEmoji(t.sport)} {t.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">{sportEmoji(t.sport)} {t.name}</p>
+                              {isUpcoming && (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400">
+                                  Upcoming
+                                </span>
+                              )}
+                            </div>
                             {meta && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{meta}</p>}
                             {dateRange && <p className="text-xs text-gray-400 dark:text-gray-500">{dateRange}</p>}
                           </div>
