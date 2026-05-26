@@ -995,10 +995,10 @@ function AdminSeriesGroup({
           onClick={() => setOpen((v) => !v)}
           className="flex-1 min-w-0 text-left"
         >
-          <div className="flex items-start gap-3">
-            <span className="text-sm font-semibold text-gray-900 dark:text-white flex-1 min-w-0">{title}</span>
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
             {firstSession.eligibility_rules && (
-              <span className="text-xs text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">{describeRules(firstSession.eligibility_rules)}</span>
+              <span className="text-xs text-blue-600 dark:text-blue-400">{describeRules(firstSession.eligibility_rules)}</span>
             )}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
