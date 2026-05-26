@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition, useMemo } from "react"
+import { useState, useTransition, useMemo, Fragment } from "react"
 import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining } from "@/app/(protected)/training/actions"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
 import { describeRules } from "@/lib/training-eligibility"
@@ -97,6 +97,49 @@ function groupBySeries(sessions: TrainingSessionForParent[]) {
   return map
 }
 
+// ── PayLink ───────────────────────────────────────────────────────────────────
+
+function PayLink({
+  method,
+  paymentAmount,
+  className = "text-xs text-blue-600 dark:text-blue-400 hover:underline",
+}: {
+  method: PaymentMethod
+  paymentAmount: string | null
+  className?: string
+}) {
+  const [copied, setCopied] = useState(false)
+  if (!method.link) return null
+
+  if (method.link.startsWith("tel:")) {
+    const phone = method.link.replace("tel:", "")
+    return (
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(phone)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        }}
+        className={className}
+      >
+        {copied ? "Copied!" : `${method.label}: ${phone}`}
+      </button>
+    )
+  }
+
+  let url = method.link
+  if (url.includes("venmo.com") && paymentAmount) {
+    const amt = paymentAmount.replace(/[^0-9.]/g, "")
+    if (amt) url = `${url}${url.includes("?") ? "&" : "?"}txn=pay&amount=${amt}&note=Training`
+  }
+
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className={className}>
+      Pay ${paymentAmount ?? ""} via {method.label} →
+    </a>
+  )
+}
+
 // ── TrainingList ──────────────────────────────────────────────────────────────
 
 export default function TrainingList({
@@ -169,6 +212,23 @@ export default function TrainingList({
     return total
   }, [sessions])
 
+  const unpaidPayLinks = useMemo(() => {
+    const seen = new Set<string>()
+    const links: PaymentMethod[] = []
+    for (const s of sessions) {
+      if (!s.payment_amount) continue
+      for (const p of s.players) {
+        if (!p.signup_id || p.paid) continue
+        const chosen = (s.payment_methods ?? []).find((m) => m.label === p.payment_method)
+        if (chosen?.link && !seen.has(chosen.label)) {
+          seen.add(chosen.label)
+          links.push(chosen)
+        }
+      }
+    }
+    return links
+  }, [sessions])
+
   return (
     <div className="space-y-3">
       {unpaidTotal > 0 && (
@@ -179,6 +239,18 @@ export default function TrainingList({
           <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
             Payment due for registered training sessions
           </p>
+          {unpaidPayLinks.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {unpaidPayLinks.map((m) => (
+                <PayLink
+                  key={m.label}
+                  method={m}
+                  paymentAmount={unpaidTotal.toFixed(2)}
+                  className="text-xs text-amber-700 dark:text-amber-300 font-medium hover:underline"
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
       {Array.from(grouped.values()).map((seriesSessions) => (
@@ -204,7 +276,9 @@ function SeriesGroup({
   onCancel:     (sessionId: string, playerId: string) => void
   onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]             = useState(false)
+  const [fullImg, setFullImg]       = useState<string | null>(null)
+  const [showBulkForm, setShowBulkForm] = useState(false)
   const title        = sessions[0].title
   const count        = sessions.length
   const firstDate    = sessions[0].session_date
@@ -255,6 +329,16 @@ function SeriesGroup({
 
   const ineligiblePlayers = sessions[0].ineligiblePlayers
 
+  const playersWithUnregistered = useMemo(() =>
+    allPlayers.filter((pl) =>
+      sessions.some((s) =>
+        s.players.some((p) => p.player_id === pl.player_id && !p.signup_id) &&
+        s.total_signups < s.max_players
+      )
+    ),
+    [allPlayers, sessions]
+  )
+
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
       <button
@@ -283,8 +367,14 @@ function SeriesGroup({
           {(firstSession.image_url || firstSession.description || firstSession.notes) && (
             <div className="px-5 py-4 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
               {firstSession.image_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={firstSession.image_url} alt="" className="w-full h-48 object-cover rounded-lg mb-3" />
+                <button
+                  type="button"
+                  onClick={() => setFullImg(firstSession.image_url!)}
+                  className="block w-full mb-3"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={firstSession.image_url} alt="" className="w-full h-48 object-cover rounded-lg cursor-zoom-in" />
+                </button>
               )}
               {firstSession.description && (
                 <p className="text-sm text-gray-600 dark:text-gray-400">{firstSession.description}</p>
@@ -297,19 +387,45 @@ function SeriesGroup({
 
           {/* Per-player signup/status rows */}
           {allPlayers.length > 0 && (
-            <div className="divide-y divide-gray-100 dark:divide-gray-800 border-b border-gray-200 dark:border-gray-700">
-              {allPlayers.map((player) => (
-                <SeriesPlayerRow
-                  key={player.player_id}
-                  playerId={player.player_id}
-                  firstName={player.first_name}
-                  lastName={player.last_name}
+            <div className="border-b border-gray-200 dark:border-gray-700">
+              {showBulkForm ? (
+                <BulkPlayerForm
                   sessions={sessions}
-                  onSignup={(sid, signupId) => onSignup(sid, player.player_id, signupId)}
-                  onCancel={(sid) => onCancel(sid, player.player_id)}
-                  onBulkSignup={(results) => onBulkSignup(player.player_id, results)}
+                  players={playersWithUnregistered}
+                  onSuccess={(playerId, results) => onBulkSignup(playerId, results)}
+                  onDone={() => setShowBulkForm(false)}
                 />
-              ))}
+              ) : (
+                <>
+                  {playersWithUnregistered.length >= 2 && (
+                    <div className="px-5 py-2.5 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center justify-between gap-3">
+                      <span className="text-xs text-blue-700 dark:text-blue-300">
+                        {playersWithUnregistered.length} players can sign up
+                      </span>
+                      <button
+                        onClick={() => setShowBulkForm(true)}
+                        className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                      >
+                        Register all →
+                      </button>
+                    </div>
+                  )}
+                  <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {allPlayers.map((player) => (
+                      <SeriesPlayerRow
+                        key={player.player_id}
+                        playerId={player.player_id}
+                        firstName={player.first_name}
+                        lastName={player.last_name}
+                        sessions={sessions}
+                        onSignup={(sid, signupId) => onSignup(sid, player.player_id, signupId)}
+                        onCancel={(sid) => onCancel(sid, player.player_id)}
+                        onBulkSignup={(results) => onBulkSignup(player.player_id, results)}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -326,6 +442,27 @@ function SeriesGroup({
               <SimpleDateCard key={s.id} session={s} />
             ))}
           </div>
+        </div>
+      )}
+      {fullImg && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setFullImg(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={fullImg}
+            alt=""
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-full max-h-full rounded-lg object-contain"
+          />
+          <button
+            className="absolute top-4 right-4 text-white text-3xl leading-none hover:opacity-80"
+            onClick={() => setFullImg(null)}
+            aria-label="Close"
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>
@@ -458,15 +595,8 @@ function SeriesPlayerRow({
                     <span className={`text-xs font-medium ${playerData.paid ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
                       ✓ Registered{playerData.paid ? " · Paid" : ""}
                     </span>
-                    {chosenMethod?.link && paymentAmount && (
-                      <a
-                        href={chosenMethod.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        Pay {paymentAmount} →
-                      </a>
+                    {!playerData.paid && chosenMethod && (
+                      <PayLink method={chosenMethod} paymentAmount={paymentAmount} />
                     )}
                     <button
                       onClick={() => handleCancel(s.id)}
@@ -522,17 +652,19 @@ function SeriesPlayerRow({
               <div className="flex items-center justify-between flex-wrap gap-1">
                 <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Select sessions:</p>
                 <div className="flex gap-2 flex-wrap items-center">
-                  {uniqueDays.length >= 2 && uniqueDays.map((day) => (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => setSelectedIds(new Set(
-                        unregisteredSessions.filter(s => new Date(s.session_date + "T00:00:00").getDay() === day).map(s => s.id)
-                      ))}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      {DAY_PLURAL[day]}
-                    </button>
+                  {uniqueDays.length >= 2 && uniqueDays.map((day, i) => (
+                    <Fragment key={day}>
+                      {i > 0 && <span className="text-xs text-gray-300 dark:text-gray-600">·</span>}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedIds(new Set(
+                          unregisteredSessions.filter(s => new Date(s.session_date + "T00:00:00").getDay() === day).map(s => s.id)
+                        ))}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        {DAY_PLURAL[day]} Only
+                      </button>
+                    </Fragment>
                   ))}
                   {uniqueDays.length >= 2 && <span className="text-xs text-gray-300 dark:text-gray-600">·</span>}
                   <button
@@ -669,6 +801,195 @@ function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
           {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
         </p>
       )}
+    </div>
+  )
+}
+
+// ── BulkPlayerForm ────────────────────────────────────────────────────────────
+
+function BulkPlayerForm({
+  sessions,
+  players,
+  onSuccess,
+  onDone,
+}: {
+  sessions: TrainingSessionForParent[]
+  players:  Array<{ player_id: string; first_name: string; last_name: string }>
+  onSuccess: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
+  onDone:    () => void
+}) {
+  const paymentMethods     = sessions[0]?.payment_methods ?? []
+  const paymentAmount      = sessions[0]?.payment_amount ?? null
+  const needsPaymentChoice = paymentMethods.length > 0
+
+  const availableSessions = useMemo(() =>
+    sessions.filter((s) =>
+      players.some((pl) =>
+        s.players.some((p) => p.player_id === pl.player_id && !p.signup_id) &&
+        s.total_signups < s.max_players
+      )
+    ),
+    [sessions, players]
+  )
+
+  const [selectedPlayers, setSelectedPlayers] = useState<Set<string>>(
+    () => new Set(players.map((p) => p.player_id))
+  )
+  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(
+    () => new Set(availableSessions.map((s) => s.id))
+  )
+  const [paymentMethod, setPaymentMethod]     = useState<string | null>(null)
+  const [reminderEmail, setReminderEmail]     = useState(true)
+  const [reminderSms, setReminderSms]         = useState(false)
+  const [errors, setErrors]                   = useState<string[]>([])
+  const [pending, start]                      = useTransition()
+
+  function handleSubmit() {
+    setErrors([])
+    start(async () => {
+      const errs: string[] = []
+      for (const playerId of selectedPlayers) {
+        const sessionIds = [...selectedSessions].filter((sid) => {
+          const s = sessions.find((s) => s.id === sid)
+          return s?.players.some((p) => p.player_id === playerId && !p.signup_id) && (s?.total_signups ?? 0) < (s?.max_players ?? 0)
+        })
+        if (sessionIds.length === 0) continue
+        const result = await bulkSignUpForTraining(sessionIds, playerId, paymentMethod, reminderEmail, reminderSms)
+        if (result.error) {
+          const pl = players.find((p) => p.player_id === playerId)
+          errs.push(`${pl?.first_name ?? "Player"}: ${result.error}`)
+        } else {
+          onSuccess(playerId, result.results)
+        }
+      }
+      setErrors(errs)
+      if (errs.length === 0) onDone()
+    })
+  }
+
+  const effectiveSessionCount = [...selectedSessions].filter((sid) =>
+    [...selectedPlayers].some((pid) => {
+      const s = sessions.find((s) => s.id === sid)
+      return s?.players.some((p) => p.player_id === pid && !p.signup_id)
+    })
+  ).length
+
+  return (
+    <div className="px-5 py-4 bg-white dark:bg-gray-900 space-y-4">
+      <div>
+        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Players:</p>
+        <div className="space-y-1.5">
+          {players.map((p) => (
+            <label key={p.player_id} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedPlayers.has(p.player_id)}
+                onChange={(e) => setSelectedPlayers((prev) => {
+                  const next = new Set(prev)
+                  if (e.target.checked) next.add(p.player_id)
+                  else next.delete(p.player_id)
+                  return next
+                })}
+                className="accent-blue-600 shrink-0"
+              />
+              <span className="text-gray-800 dark:text-gray-200">{p.first_name} {p.last_name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {availableSessions.length > 1 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Sessions:</p>
+            <div className="flex gap-2 items-center">
+              <button type="button" onClick={() => setSelectedSessions(new Set(availableSessions.map((s) => s.id)))} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">All</button>
+              <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
+              <button type="button" onClick={() => setSelectedSessions(new Set())} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">None</button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            {availableSessions.map((s) => {
+              const t = fmtTime(s.session_time)
+              const e = fmtTime(s.session_end_time)
+              const timeStr = t ? (e ? ` · ${t} – ${e}` : ` · ${t}`) : ""
+              return (
+                <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedSessions.has(s.id)}
+                    onChange={(ev) => setSelectedSessions((prev) => {
+                      const next = new Set(prev)
+                      if (ev.target.checked) next.add(s.id)
+                      else next.delete(s.id)
+                      return next
+                    })}
+                    className="accent-blue-600 shrink-0"
+                  />
+                  <span className="text-gray-700 dark:text-gray-300">{fmtDate(s.session_date)}{timeStr}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {needsPaymentChoice && (
+        <div>
+          <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
+            How will you pay{paymentAmount ? ` (${paymentAmount}/player per session)` : ""}?
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {paymentMethods.map((pm) => (
+              <label key={pm.label} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                <input
+                  type="radio"
+                  name="bulk-pay"
+                  checked={paymentMethod === pm.label}
+                  onChange={() => setPaymentMethod(pm.label)}
+                  className="accent-blue-600"
+                />
+                {pm.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-4">
+        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+          <input type="checkbox" checked={reminderEmail} onChange={(e) => setReminderEmail(e.target.checked)} className="accent-blue-600" />
+          Email reminder
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+          <input type="checkbox" checked={reminderSms} onChange={(e) => setReminderSms(e.target.checked)} className="accent-blue-600" />
+          Text reminder
+        </label>
+      </div>
+
+      {errors.map((err, i) => (
+        <p key={i} className="text-xs text-red-500">{err}</p>
+      ))}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={handleSubmit}
+          disabled={
+            pending ||
+            selectedPlayers.size === 0 ||
+            effectiveSessionCount === 0 ||
+            (needsPaymentChoice && !paymentMethod)
+          }
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {pending
+            ? "Signing up…"
+            : `Register ${selectedPlayers.size} player${selectedPlayers.size !== 1 ? "s" : ""}`}
+        </button>
+        <button onClick={onDone} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+          Cancel
+        </button>
+      </div>
     </div>
   )
 }

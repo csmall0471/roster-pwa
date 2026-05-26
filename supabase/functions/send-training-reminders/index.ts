@@ -36,6 +36,22 @@ function btn(label: string, url: string, color = "#ea580c"): string {
   return `<a href="${url}" style="display:inline-block;padding:11px 22px;background:${color};color:#ffffff;font-weight:600;font-size:14px;text-decoration:none;border-radius:8px;margin:4px 4px 4px 0;">${esc(label)}</a>`;
 }
 
+function payMethodHtml(m: { label: string; link: string | null }, paymentAmount: string | null): string {
+  if (!m.link) {
+    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(m.label)}: pay at the session</p>`;
+  }
+  if (m.link.startsWith("tel:")) {
+    const phone = m.link.replace("tel:", "");
+    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(m.label)}: <a href="${m.link}" style="color:#ea580c;text-decoration:none;">${esc(phone)}</a></p>`;
+  }
+  let url = m.link;
+  if (url.includes("venmo.com") && paymentAmount) {
+    const amt = paymentAmount.replace(/[^0-9.]/g, "");
+    if (amt) url = `${url}${url.includes("?") ? "&" : "?"}txn=pay&amount=${amt}&note=Training`;
+  }
+  return btn(m.label, url);
+}
+
 function infoRow(label: string, value: string): string {
   return `<tr>
     <td style="padding:5px 16px 5px 0;font-size:14px;color:#6b7280;white-space:nowrap;font-weight:500;vertical-align:top;">${esc(label)}</td>
@@ -51,7 +67,7 @@ function divider(): string {
   return `<hr style="border:none;border-top:1px solid #f3f4f6;margin:22px 0;">`;
 }
 
-function buildHtml(htmlBody: string): string {
+function buildHtml(htmlBody: string, title: string, subtitle: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -61,8 +77,8 @@ function buildHtml(htmlBody: string): string {
       <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:560px;">
         <tr>
           <td style="background:#ea580c;padding:24px 32px;border-radius:12px 12px 0 0;">
-            <p style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">CS Sports Training</p>
-            <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:13px;">Training Reminder</p>
+            <p style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">${esc(title)}</p>
+            <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:13px;">${esc(subtitle)}</p>
           </td>
         </tr>
         <tr>
@@ -188,8 +204,7 @@ Deno.serve(async (_req) => {
             divider(),
             `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Payment</p>`,
             `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(String(paymentAmount))}</strong></p>`,
-            linkedMethods.map((m: any) => btn(m.label, m.link)).join(""),
-            hasCash ? `<p style="margin:10px 0 0;font-size:13px;color:#6b7280;">Or pay with cash or check at the session.</p>` : "",
+            paymentMethods.map((m: any) => payMethodHtml(m, paymentAmount)).join(""),
           ].filter(Boolean).join("\n")
         : hasPaid
           ? `${divider()}<p style="margin:0;font-size:14px;color:#16a34a;font-weight:600;">Payment confirmed — you're all set!</p>`
@@ -223,9 +238,10 @@ Deno.serve(async (_req) => {
         body: JSON.stringify({
           from,
           to:      [parent.email],
+          ...(Deno.env.get("NOTIFY_EMAIL") ? { bcc: [Deno.env.get("NOTIFY_EMAIL")] } : {}),
           subject: `Reminder: Training session tomorrow — ${session?.title}`,
           text,
-          html:    buildHtml(htmlBody),
+          html:    buildHtml(htmlBody, session?.title ?? "CS Sports Training", "Training Reminder"),
         }),
       });
       if (res.ok) emailsSent++;

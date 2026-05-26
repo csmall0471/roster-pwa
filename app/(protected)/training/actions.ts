@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
-import { notifyCoachTrainingChange, sendTrainingConfirmation } from "@/lib/notifications"
+import { sendTrainingConfirmation } from "@/lib/notifications"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -160,14 +160,6 @@ export async function signUpForTraining(
   const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
   const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent"
 
-  notifyCoachTrainingChange({
-    type: "signup",
-    parentName,
-    playerName,
-    sessionTitle: session.title,
-    sessionDate:  session.session_date,
-  }).catch((err) => console.error("[notify] signUpForTraining coach:", err))
-
   if (parent?.email) {
     sendTrainingConfirmation({
       type:            "signup",
@@ -264,14 +256,6 @@ export async function bulkSignUpForTraining(
     const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
     const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent"
     const first      = signedSessions[0]
-
-    notifyCoachTrainingChange({
-      type:         "signup",
-      parentName,
-      playerName,
-      sessionTitle: `${first.title} (${results.length} session${results.length !== 1 ? "s" : ""})`,
-      sessionDate:  first.session_date,
-    }).catch((err) => console.error("[notify] bulkSignUp coach:", err))
 
     if (parent?.email) {
       sendTrainingConfirmation({
@@ -372,14 +356,6 @@ export async function cancelTrainingSignup(signupId: string) {
     const session    = signup.training_sessions as any
     const playerName = player  ? `${player.first_name} ${player.last_name}`  : "your player"
     const parentName = parent  ? `${parent.first_name} ${parent.last_name}`  : "A parent"
-
-    notifyCoachTrainingChange({
-      type:         "cancel",
-      parentName,
-      playerName,
-      sessionTitle: session?.title ?? "Training",
-      sessionDate:  session?.session_date ?? "",
-    }).catch((err) => console.error("[notify] cancelTrainingSignup coach:", err))
 
     if (parent?.email && session?.session_date) {
       sendTrainingConfirmation({

@@ -181,11 +181,28 @@ function buildFrom(): string {
   return name ? `${name} <${email}>` : email
 }
 
+function emailPayMethodHtml(method: PaymentMethod, paymentAmount?: string | null): string {
+  if (!method.link) {
+    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(method.label)}: pay at the session</p>`
+  }
+  if (method.link.startsWith("tel:")) {
+    const phone = method.link.replace("tel:", "")
+    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(method.label)}: <a href="${method.link}" style="color:#ea580c;text-decoration:none;">${esc(phone)}</a></p>`
+  }
+  let url = method.link
+  if (url.includes("venmo.com") && paymentAmount) {
+    const amt = paymentAmount.replace(/[^0-9.]/g, "")
+    if (amt) url = `${url}${url.includes("?") ? "&" : "?"}txn=pay&amount=${amt}&note=Training`
+  }
+  return btn(method.label, url)
+}
+
 async function resendSend(params: {
   to: string
   subject: string
   text: string
   html?: string
+  bcc?: string
   attachments?: Array<{ filename: string; content: Buffer; content_type?: string }>
 }) {
   const { Resend } = await import("resend")
@@ -195,6 +212,7 @@ async function resendSend(params: {
     to: params.to,
     subject: params.subject,
     text: params.text,
+    ...(params.bcc ? { bcc: params.bcc } : {}),
     ...(params.html ? { html: params.html } : {}),
     ...(params.attachments?.length ? { attachments: params.attachments } : {}),
   })
@@ -322,8 +340,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
           divider(),
           `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Payment</p>`,
           `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(payload.paymentAmount)}</strong></p>`,
-          linkedMethods.map(m => btn(m.label, m.link!)).join(""),
-          hasCash ? `<p style="margin:10px 0 0;font-size:13px;color:#6b7280;">Or pay with cash or check at the session.</p>` : "",
+          methods.map(m => emailPayMethodHtml(m, payload.paymentAmount)).join(""),
         ].filter(Boolean).join("\n")
       : ""
 
@@ -358,7 +375,8 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
 
   const html = buildEmailHtml({
     htmlBody,
-    teamName: "CS Sports Training",
+    teamName: payload.sessionTitle,
+    organization: isSignup ? "Registration Confirmed" : "Registration Cancelled",
     headerColor: "#ea580c",
   })
 
@@ -379,7 +397,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     })
   }
 
-  await resendSend({ to: payload.parentEmail, subject, text, html, attachments: attachments.length ? attachments : undefined })
+  await resendSend({ to: payload.parentEmail, subject, text, html, bcc: process.env.NOTIFY_EMAIL, attachments: attachments.length ? attachments : undefined })
 }
 
 // ── Parent day-before reminder ────────────────────────────────────────────────
@@ -447,8 +465,7 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
           divider(),
           `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Payment</p>`,
           `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(payload.paymentAmount)}</strong></p>`,
-          linked.map(m => btn(m.label, m.link!)).join(""),
-          hasCash ? `<p style="margin:10px 0 0;font-size:13px;color:#6b7280;">Or pay with cash or check at the session.</p>` : "",
+          methods.map(m => emailPayMethodHtml(m, payload.paymentAmount)).join(""),
         ].filter(Boolean).join("\n")
       : payload.hasPaid
         ? `${divider()}<p style="margin:0;font-size:14px;color:#16a34a;font-weight:600;">Payment confirmed — you're all set!</p>`
@@ -472,11 +489,12 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
 
     const html = buildEmailHtml({
       htmlBody,
-      teamName: "CS Sports Training",
+      teamName: payload.title,
+      organization: "Training Reminder",
       headerColor: "#ea580c",
     })
 
-    await resendSend({ to: payload.parentEmail, subject, text, html })
+    await resendSend({ to: payload.parentEmail, subject, text, html, bcc: process.env.NOTIFY_EMAIL })
   }
 
   if (payload.reminderSms && payload.parentPhone) {
