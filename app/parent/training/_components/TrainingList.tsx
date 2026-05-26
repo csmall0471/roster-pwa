@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition, useMemo, Fragment } from "react"
-import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining } from "@/app/(protected)/training/actions"
+import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups } from "@/app/(protected)/training/actions"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
 import { describeRules } from "@/lib/training-eligibility"
 
@@ -578,37 +578,91 @@ function SeriesPlayerRow({
     })
   }
 
+  function handleCancelAll() {
+    if (!confirm(`Cancel all ${registeredSessions.length} registrations for ${name}?`)) return
+    const signupIds = registeredSessions
+      .map((s) => s.players.find((p) => p.player_id === playerId)?.signup_id)
+      .filter(Boolean) as string[]
+    setError(null)
+    start(async () => {
+      const result = await cancelMultipleTrainingSignups(signupIds)
+      if (result.error) { setError(result.error); return }
+      registeredSessions.forEach((s) => onCancel(s.id))
+    })
+  }
+
+  // Payment summary for registered sessions
+  const paidCount   = registeredSessions.filter((s) => s.players.find((p) => p.player_id === playerId)?.paid).length
+  const unpaidCount = registeredSessions.length - paidCount
+  const amtNum      = paymentAmount ? parseFloat(paymentAmount.replace(/[^0-9.]/g, "")) || 0 : 0
+  const totalDue    = unpaidCount * amtNum
+  const firstUnpaid = registeredSessions.find((s) => !s.players.find((p) => p.player_id === playerId)?.paid)
+  const unpaidPayMethod = paymentMethods.find(
+    (m) => m.label === firstUnpaid?.players.find((p) => p.player_id === playerId)?.payment_method
+  )
+
   return (
     <div className="px-5 py-3 bg-white dark:bg-gray-900">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0 flex-1">
-          <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
+            {registeredSessions.length > 1 && (
+              <button
+                onClick={handleCancelAll}
+                disabled={pending}
+                className="text-xs text-red-500 hover:underline disabled:opacity-50"
+              >
+                Cancel all
+              </button>
+            )}
+          </div>
 
           {registeredSessions.length > 0 && (
-            <div className="mt-1.5 space-y-1">
-              {registeredSessions.map((s) => {
-                const playerData = s.players.find((p) => p.player_id === playerId)!
-                const chosenMethod = paymentMethods.find((m) => m.label === playerData.payment_method)
-                return (
-                  <div key={s.id} className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-gray-500 dark:text-gray-400">{fmtShortDate(s.session_date)}</span>
-                    <span className={`text-xs font-medium ${playerData.paid ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
-                      ✓ Registered{playerData.paid ? " · Paid" : ""}
-                    </span>
-                    {!playerData.paid && chosenMethod && (
-                      <PayLink method={chosenMethod} paymentAmount={paymentAmount} />
-                    )}
-                    <button
-                      onClick={() => handleCancel(s.id)}
-                      disabled={pending}
-                      className="text-xs text-red-500 hover:underline disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
+            <>
+              {/* Payment summary — once per player, not per session */}
+              <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {registeredSessions.length} session{registeredSessions.length !== 1 ? "s" : ""} registered
+                </span>
+                {paymentAmount && (
+                  unpaidCount > 0 ? (
+                    <>
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
+                        · ${totalDue.toFixed(2)} due
+                      </span>
+                      {unpaidPayMethod && (
+                        <PayLink method={unpaidPayMethod} paymentAmount={totalDue.toFixed(2)} />
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-green-600 dark:text-green-400">· All paid ✓</span>
+                  )
+                )}
+              </div>
+
+              {/* Per-session rows — date + status + cancel */}
+              <div className="mt-1.5 space-y-1">
+                {registeredSessions.map((s) => {
+                  const playerData = s.players.find((p) => p.player_id === playerId)!
+                  return (
+                    <div key={s.id} className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">{fmtShortDate(s.session_date)}</span>
+                      <span className={`text-xs font-medium ${playerData.paid ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+                        ✓{playerData.paid ? " Paid" : " Registered"}
+                      </span>
+                      <button
+                        onClick={() => handleCancel(s.id)}
+                        disabled={pending}
+                        className="text-xs text-red-500 hover:underline disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           )}
         </div>
 

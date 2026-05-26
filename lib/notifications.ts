@@ -310,7 +310,10 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     const refundNote = payload.hasPaid
       ? "\n\nCoach Connor will process a refund for any fees you have paid."
       : ""
-    text = `Hi ${payload.parentFirstName},\n\n${payload.playerName}'s registration for ${payload.sessionTitle} has been cancelled.\n\n${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}${locLine}${refundNote}\n\nSign up again at:\n${manageUrl}\n\n— Coach Connor`
+    const dateSection = dates.length > 1
+      ? `${dates.length} sessions:\n${dates.map(d => `  • ${fmtDateShort(d.date)}${fmtTimeRange(d.time, d.endTime)}`).join("\n")}`
+      : `${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}`
+    text = `Hi ${payload.parentFirstName},\n\n${payload.playerName}'s registration for ${payload.sessionTitle} has been cancelled.\n\n${dateSection}${locLine}${refundNote}\n\nSign up again at:\n${manageUrl}\n\n— Coach Connor`
   }
 
   // ── HTML ─────────────────────────────────────────────────────────────────
@@ -368,11 +371,22 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
 
     htmlBody = [mediaHtml, introHtml, detailsHtml, notesHtml, payHtml, cancelHtml].filter(Boolean).join("\n")
   } else {
-    const rows = [
-      infoRow("Date", fmtDate(dates[0].date)),
-      dates[0].time ? infoRow("Time", fmtTimeRange(dates[0].time, dates[0].endTime).replace(" at ", "").trim()) : "",
-      payload.location ? infoRow("Location", payload.location) : "",
-    ].filter(Boolean).join("\n")
+    let cancelDetailsHtml: string
+    if (dates.length > 1) {
+      const items = dates.map(d =>
+        `<li style="margin-bottom:4px;">${esc(fmtDateShort(d.date))}${esc(fmtTimeRange(d.time, d.endTime))}</li>`
+      ).join("\n")
+      cancelDetailsHtml = `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Sessions cancelled (${dates.length}):</p>
+<ul style="margin:0 0 8px;padding-left:20px;font-size:14px;color:#374151;line-height:1.75;">${items}</ul>`
+      if (payload.location) cancelDetailsHtml += infoTable(infoRow("Location", payload.location))
+    } else {
+      const rows = [
+        infoRow("Date", fmtDate(dates[0].date)),
+        dates[0].time ? infoRow("Time", fmtTimeRange(dates[0].time, dates[0].endTime).replace(" at ", "").trim()) : "",
+        payload.location ? infoRow("Location", payload.location) : "",
+      ].filter(Boolean).join("\n")
+      cancelDetailsHtml = infoTable(rows)
+    }
 
     const refundHtml = payload.hasPaid
       ? `${divider()}<p style="margin:0;font-size:14px;color:#374151;">Coach Connor will process a refund for any fees you have paid.</p>`
@@ -381,7 +395,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     htmlBody = [
       `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentFirstName)},</p>`,
       `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(payload.playerName)}</strong>'s registration for <strong>${esc(payload.sessionTitle)}</strong> has been cancelled.</p>`,
-      infoTable(rows),
+      cancelDetailsHtml,
       refundHtml,
       divider(),
       `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Sign up again anytime.</p>`,

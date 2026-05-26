@@ -384,3 +384,57 @@ export async function cancelTrainingSignup(signupId: string) {
   revalidatePath("/parent/training")
   return { error: null }
 }
+
+export async function cancelMultipleTrainingSignups(signupIds: string[]) {
+  if (signupIds.length === 0) return { error: null }
+  const supabase = await createClient()
+
+  const { data: signups } = await supabase
+    .from("training_signups")
+    .select(`
+      id, paid,
+      parents(first_name, last_name, email),
+      players(first_name, last_name),
+      training_sessions(title, session_date, session_time, session_end_time, location)
+    `)
+    .in("id", signupIds)
+
+  const { error } = await supabase.from("training_signups").delete().in("id", signupIds)
+  if (error) return { error: error.message }
+
+  if (signups && signups.length > 0) {
+    const first   = signups[0]
+    const parent  = first.parents as any
+    const player  = first.players as any
+    const session = first.training_sessions as any
+    const playerName = player ? `${player.first_name} ${player.last_name}` : "your player"
+    const hasPaid = signups.some((s) => (s as any).paid)
+
+    if (parent?.email && session) {
+      const bulkDates = signups
+        .map((s) => {
+          const sess = s.training_sessions as any
+          return sess ? { date: sess.session_date as string, time: (sess.session_time ?? null) as string | null, endTime: (sess.session_end_time ?? null) as string | null } : null
+        })
+        .filter(Boolean)
+        .sort((a, b) => a!.date.localeCompare(b!.date)) as Array<{ date: string; time: string | null; endTime: string | null }>
+
+      sendTrainingConfirmation({
+        type:            "cancel",
+        parentEmail:     parent.email,
+        parentFirstName: parent.first_name ?? "there",
+        playerName,
+        sessionTitle:    session.title,
+        sessionDate:     bulkDates[0]?.date ?? session.session_date,
+        sessionTime:     bulkDates[0]?.time ?? session.session_time ?? null,
+        sessionEndTime:  bulkDates[0]?.endTime ?? null,
+        location:        session.location ?? null,
+        hasPaid,
+        bulkDates:       bulkDates.length > 1 ? bulkDates : undefined,
+      }).catch((err) => console.error("[notify] cancelMultiple parent:", err))
+    }
+  }
+
+  revalidatePath("/parent/training")
+  return { error: null }
+}
