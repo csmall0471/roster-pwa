@@ -39,7 +39,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-orange-50 to-white dark:from-gray-950 dark:to-gray-900 px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-orange-50 to-white dark:from-gray-950 dark:to-gray-900 px-4 py-12">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-5xl mb-3 select-none">🏀🏀🏀</div>
@@ -109,6 +109,32 @@ export default function LoginPage() {
               </p>
             </form>
           )}
+        </div>
+
+        {/* About section */}
+        <div className="mt-8 text-center space-y-3">
+          <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+            A private roster management tool for youth basketball teams coached by Connor Small
+            — CCV, Jr. Suns, and Wholistic. Parents use this app to view game schedules,
+            sign up for snack duties, and register for training sessions.
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+            Coaches and parents receive SMS and email reminders for upcoming games and
+            training sessions. All messaging is limited to team-related communications.
+          </p>
+        </div>
+
+        {/* Compliance footer */}
+        <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 flex justify-center gap-6 text-xs text-gray-400 dark:text-gray-500">
+          <a href="/privacy" className="hover:text-gray-600 dark:hover:text-gray-300 hover:underline transition-colors">
+            Privacy Policy
+          </a>
+          <a href="/sms-terms" className="hover:text-gray-600 dark:hover:text-gray-300 hover:underline transition-colors">
+            SMS Consent &amp; Terms
+          </a>
+          <a href="mailto:csmall0471@gmail.com" className="hover:text-gray-600 dark:hover:text-gray-300 hover:underline transition-colors">
+            Contact
+          </a>
         </div>
       </div>
     </div>
