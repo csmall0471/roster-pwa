@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { sendTrainingConfirmation } from "@/lib/notifications"
 import { logActivity } from "@/lib/activity"
+import { track } from "@vercel/analytics/server"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -158,6 +159,7 @@ export async function signUpForTraining(
 
   const parent = parentLink.parents as any
   logActivity(parentLink.parent_id, "training_signup", { session_id: sessionId, session_title: session.title, session_date: session.session_date, player_id: playerId }).catch(() => {})
+  track("training_signup", { session_title: session.title, session_date: session.session_date }).catch(() => {})
   const { data: playerRow } = await supabase.from("players").select("first_name, last_name").eq("id", playerId).single()
   const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
 
@@ -291,6 +293,7 @@ export async function bulkSignUpForTraining(
 
   if (results.length > 0) {
     logActivity(parentLink.parent_id, "training_signup", { session_ids: results.map((r) => r.sessionId), count: results.length, player_id: playerId, bulk: true }).catch(() => {})
+    track("training_signup", { count: results.length, bulk: true }).catch(() => {})
   }
 
   revalidatePath("/parent/training")
@@ -348,6 +351,7 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
 
   if (parentRow?.parent_id) {
     logActivity(parentRow.parent_id, "training_signup", { session_id: sessionId, session_title: session.title, session_date: session.session_date, player_id: playerId, by_admin: true }).catch(() => {})
+    track("training_signup", { session_title: session.title, session_date: session.session_date, by_admin: true }).catch(() => {})
   }
 
   revalidatePath("/training")
@@ -439,6 +443,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
     }
     if (parentId) {
       logActivity(parentId, "training_signup", { session_ids: added.map((r) => r.sessionId), count: added.length, player_id: playerId, bulk: true, by_admin: true }).catch(() => {})
+      track("training_signup", { count: added.length, bulk: true, by_admin: true }).catch(() => {})
     }
   }
 
@@ -477,6 +482,7 @@ export async function cancelTrainingSignup(signupId: string) {
     const session    = signup.training_sessions as any
     if ((signup as any).parent_id && session) {
       logActivity((signup as any).parent_id, "training_cancel", { session_title: session.title, session_date: session.session_date }).catch(() => {})
+      track("training_cancel", { session_title: session.title, session_date: session.session_date }).catch(() => {})
     }
     const playerName = player  ? `${player.first_name} ${player.last_name}`  : "your player"
     const parentName = parent  ? `${parent.first_name} ${parent.last_name}`  : "A parent"
