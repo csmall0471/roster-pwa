@@ -92,6 +92,8 @@ export default async function ParentHomePage() {
     });
   }
 
+  const today = new Date().toISOString().split("T")[0];
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">My Kids</h1>
@@ -131,9 +133,15 @@ export default async function ParentHomePage() {
               </Link>
 
               {teamEntries.length > 0 && (() => {
-                const activeEntries = teamEntries.filter((e: any) => e.status === "active");
+                const activeEntries = teamEntries.filter((e: any) => {
+                  const end = e.teams?.season_end;
+                  return !end || end >= today;
+                });
                 const pastEntries: PastTeamEntry[] = teamEntries
-                  .filter((e: any) => e.status !== "active")
+                  .filter((e: any) => {
+                    const end = e.teams?.season_end;
+                    return end && end < today;
+                  })
                   .map((e: any) => {
                     const t = e.teams;
                     return {
