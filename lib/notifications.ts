@@ -289,13 +289,15 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const methods     = payload.paymentMethods ?? []
   const linkedMethods = methods.filter(m => m.link)
   const hasCash     = methods.some(m => !m.link)
+  // Strip any leading $ so the template doesn't double it
+  const payAmt      = payload.paymentAmount?.replace(/^\$+/, "").trim() || null
 
   // ── Plain-text fallback ──────────────────────────────────────────────────
   const dateLinesText = dates.length > 1
     ? dates.map(d => `  • ${fmtDateShort(d.date)}${fmtTimeRange(d.time, d.endTime)}`).join("\n")
     : `${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}`
   const locLine  = payload.location ? `\nLocation: ${payload.location}` : ""
-  const payLine  = payload.paymentAmount ? `\n\nAmount due: $${payload.paymentAmount}` : ""
+  const payLine  = payAmt ? `\n\nAmount due: $${payAmt}` : ""
   const payLinks = linkedMethods.map(m => `  • ${m.label}: ${m.link}`).join("\n")
   const cashLine = hasCash ? "  • Cash / Check at the session" : ""
   const payMethods = [payLinks, cashLine].filter(Boolean).join("\n")
@@ -351,12 +353,12 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       detailsHtml = infoTable(rows)
     }
 
-    const payHtml = payload.paymentAmount
+    const payHtml = payAmt
       ? [
           divider(),
           `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Payment</p>`,
-          `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(payload.paymentAmount)}</strong></p>`,
-          methods.map(m => emailPayMethodHtml(m, payload.paymentAmount)).join(""),
+          `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(payAmt)}</strong></p>`,
+          methods.map(m => emailPayMethodHtml(m, payAmt)).join(""),
         ].filter(Boolean).join("\n")
       : ""
 

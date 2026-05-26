@@ -32,6 +32,14 @@ export type RepeatDayConfig = {
   session_end_time: string | null
 }
 
+function calcBulkAmount(perSession: string | null, count: number): string | null {
+  if (!perSession || count <= 1) return perSession ?? null
+  const num = parseFloat(perSession.replace(/[^0-9.]/g, ""))
+  if (!num) return perSession
+  const total = num * count
+  return Number.isInteger(total) ? String(total) : total.toFixed(2)
+}
+
 function addWeeks(dateStr: string, weeks: number): string {
   const d = new Date(dateStr + "T00:00:00")
   d.setDate(d.getDate() + weeks * 7)
@@ -277,7 +285,7 @@ export async function bulkSignUpForTraining(
         sessionTime:     first.session_time,
         sessionEndTime:  first.session_end_time,
         location:        first.location,
-        paymentAmount:   first.payment_amount,
+        paymentAmount:   calcBulkAmount(first.payment_amount, signedSessions.length),
         paymentMethods:  first.payment_methods,
         imageUrl:        first.image_url,
         description:     first.description,
@@ -429,7 +437,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
         sessionTime:     (first as any).session_time ?? null,
         sessionEndTime:  (first as any).session_end_time ?? null,
         location:        (first as any).location ?? null,
-        paymentAmount:   (first as any).payment_amount ?? null,
+        paymentAmount:   calcBulkAmount((first as any).payment_amount ?? null, signedSessions!.length),
         paymentMethods:  (first as any).payment_methods ?? [],
         imageUrl:        (first as any).image_url ?? null,
         description:     (first as any).description ?? null,
