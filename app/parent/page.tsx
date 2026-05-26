@@ -172,9 +172,13 @@ export default async function ParentHomePage() {
                           <div>
                             <div className="flex items-center gap-2">
                               <p className="text-sm font-medium text-gray-900 dark:text-white">{sportEmoji(t.sport)} {t.name}</p>
-                              {isUpcoming && (
+                              {isUpcoming ? (
                                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400">
                                   Upcoming
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">
+                                  Active
                                 </span>
                               )}
                             </div>
