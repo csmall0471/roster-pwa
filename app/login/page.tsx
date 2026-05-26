@@ -58,7 +58,10 @@ export default function LoginPage() {
     });
     setLoading(false);
     if (authError) setError(authError.message);
-    else window.location.href = "/parent/dashboard";
+    else {
+      const next = new URLSearchParams(window.location.search).get("next");
+      window.location.href = next && next.startsWith("/") ? next : "/parent/dashboard";
+    }
   }
 
   return (

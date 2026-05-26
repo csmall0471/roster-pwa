@@ -253,15 +253,17 @@ export default function TrainingList({
           )}
         </div>
       )}
-      {Array.from(grouped.values()).map((seriesSessions) => (
-        <SeriesGroup
-          key={seriesSessions[0].series_id ?? seriesSessions[0].id}
-          sessions={seriesSessions}
-          onSignup={onSignup}
-          onCancel={onCancel}
-          onBulkSignup={onBulkSignup}
-        />
-      ))}
+      {Array.from(grouped.values())
+        .filter((seriesSessions) => seriesSessions.some((s) => s.players.length > 0))
+        .map((seriesSessions) => (
+          <SeriesGroup
+            key={seriesSessions[0].series_id ?? seriesSessions[0].id}
+            sessions={seriesSessions}
+            onSignup={onSignup}
+            onCancel={onCancel}
+            onBulkSignup={onBulkSignup}
+          />
+        ))}
     </div>
   )
 }

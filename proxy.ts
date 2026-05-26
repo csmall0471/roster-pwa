@@ -36,6 +36,7 @@ export async function proxy(request: NextRequest) {
   if (!user && pathname !== "/login" && pathname !== "/admin" && !pathname.startsWith("/auth") && !pathname.startsWith("/api/cron") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/sms-opt-in" && pathname !== "/no-access" && pathname !== "/house") {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.searchParams.set("next", pathname + (request.nextUrl.search ?? ""));
     return NextResponse.redirect(url);
   }
 
