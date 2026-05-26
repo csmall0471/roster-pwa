@@ -1,11 +1,31 @@
 import { createClient } from "@/lib/supabase/server"
 
 const EVENT_LABELS: Record<string, { label: string; color: string }> = {
-  login:           { label: "Login",           color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
-  training_signup: { label: "Training signup",  color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
-  training_cancel: { label: "Training cancel",  color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
-  snack_signup:    { label: "Snack signup",     color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
-  snack_cancel:    { label: "Snack cancel",     color: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" },
+  // Auth
+  login:                    { label: "Login",               color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+  // Training
+  training_signup:          { label: "Training signup",     color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
+  training_cancel:          { label: "Training cancel",     color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  training_series_expanded: { label: "Series expanded",     color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
+  training_payment_clicked: { label: "Payment link",        color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300" },
+  // Snacks
+  snack_signup:             { label: "Snack signup",        color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
+  snack_cancel:             { label: "Snack cancel",        color: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" },
+  snack_form_opened:        { label: "Snack form opened",   color: "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400" },
+  // Player / guardian edits
+  player_info_updated:      { label: "Player info updated", color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
+  guardian_updated:         { label: "Guardian updated",    color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
+  guardian_added:           { label: "Guardian added",      color: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300" },
+  // Photo cards
+  player_card_download:     { label: "Card download",       color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
+  player_card_download_all: { label: "Card download all",   color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
+  photo_card_opened:        { label: "Card opened",         color: "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400" },
+  // Browsing
+  team_tab_viewed:          { label: "Team tab",            color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
+  team_photo_viewed:        { label: "Team photo",          color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
+  past_seasons_expanded:    { label: "Past seasons",        color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
+  past_teams_expanded:      { label: "Past teams",          color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
+  calendar_month_changed:   { label: "Calendar nav",        color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
 }
 
 function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
@@ -15,6 +35,7 @@ function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
     if (meta.session_title) parts.push(String(meta.session_title))
     if (meta.session_date)  parts.push(String(meta.session_date))
     if (meta.bulk && meta.count) parts.push(`× ${meta.count} sessions`)
+    if (meta.by_admin) parts.push("(by admin)")
     return parts.join(" · ")
   }
   if (event === "snack_signup" || event === "snack_cancel") {
@@ -24,6 +45,18 @@ function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
     if (meta.game_date) parts.push(String(meta.game_date))
     return parts.join(" · ")
   }
+  if (event === "training_series_expanded") return meta.title ? String(meta.title) : ""
+  if (event === "training_payment_clicked") return meta.method ? String(meta.method) : ""
+  if (event === "player_card_download" || event === "photo_card_opened") {
+    const parts = []
+    if (meta.team)   parts.push(String(meta.team))
+    if (meta.season) parts.push(String(meta.season))
+    return parts.join(" · ")
+  }
+  if (event === "player_card_download_all") return meta.count ? `${meta.count} cards` : ""
+  if (event === "past_teams_expanded") return meta.count ? `${meta.count} teams` : ""
+  if (event === "team_tab_viewed") return meta.tab ? String(meta.tab) : ""
+  if (event === "calendar_month_changed") return meta.direction ? String(meta.direction) : ""
   return ""
 }
 
