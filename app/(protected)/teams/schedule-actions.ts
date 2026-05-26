@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { notifyCoachSignupChange, sendSnackConfirmation } from "@/lib/notifications";
+import { logActivity } from "@/lib/activity";
 
 // ── Admin: game management ────────────────────────────────────────────────────
 
@@ -116,6 +117,8 @@ export async function claimSnackSlot(
   });
   if (error) return { error: error.message };
 
+  logActivity(parentLink.parent_id, "snack_signup", { game_id: gameId, game_date: (game as any).game_date, opponent: (game as any).opponent, team: (game as any).teams?.name }).catch(() => {});
+
   const parent     = parentLink.parents as any;
   const gameTeam   = game.teams as any;
   const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent";
@@ -168,6 +171,10 @@ export async function cancelSnackSlot(signupId: string) {
 
   if (signup) {
     const parent     = signup.parents as any;
+    if ((signup as any).parent_id) {
+      const game = signup.games as any
+      logActivity((signup as any).parent_id, "snack_cancel", { game_date: game?.game_date, opponent: game?.opponent, team: game?.teams?.name }).catch(() => {})
+    }
     const game       = signup.games as any;
     const parentName = parent ? `${parent.first_name} ${parent.last_name}` : "A parent";
 

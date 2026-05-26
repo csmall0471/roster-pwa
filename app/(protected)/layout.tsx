@@ -87,6 +87,9 @@ export default async function ProtectedLayout({
             <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
               Preview
             </Link>
+            <Link href="/activity" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+              Activity
+            </Link>
           </nav>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{user.email ?? user.phone}</span>

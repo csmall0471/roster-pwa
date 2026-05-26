@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { sendTrainingConfirmation } from "@/lib/notifications"
+import { logActivity } from "@/lib/activity"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -156,6 +157,7 @@ export async function signUpForTraining(
   if (error) return { signupId: null, error: error.message }
 
   const parent = parentLink.parents as any
+  logActivity(parentLink.parent_id, "training_signup", { session_id: sessionId, session_title: session.title, session_date: session.session_date, player_id: playerId }).catch(() => {})
   const { data: playerRow } = await supabase.from("players").select("first_name, last_name").eq("id", playerId).single()
   const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
 
@@ -287,6 +289,10 @@ export async function bulkSignUpForTraining(
     }
   }
 
+  if (results.length > 0) {
+    logActivity(parentLink.parent_id, "training_signup", { session_ids: results.map((r) => r.sessionId), count: results.length, player_id: playerId, bulk: true }).catch(() => {})
+  }
+
   revalidatePath("/parent/training")
   return { results, error: null }
 }
@@ -397,7 +403,7 @@ export async function cancelTrainingSignup(signupId: string) {
   const { data: signup } = await supabase
     .from("training_signups")
     .select(`
-      paid,
+      paid, parent_id,
       parents(first_name, last_name, email),
       players(first_name, last_name),
       training_sessions(title, session_date, session_time, session_end_time, location)
@@ -412,6 +418,9 @@ export async function cancelTrainingSignup(signupId: string) {
     const parent     = signup.parents as any
     const player     = signup.players as any
     const session    = signup.training_sessions as any
+    if ((signup as any).parent_id && session) {
+      logActivity((signup as any).parent_id, "training_cancel", { session_title: session.title, session_date: session.session_date }).catch(() => {})
+    }
     const playerName = player  ? `${player.first_name} ${player.last_name}`  : "your player"
     const parentName = parent  ? `${parent.first_name} ${parent.last_name}`  : "A parent"
 

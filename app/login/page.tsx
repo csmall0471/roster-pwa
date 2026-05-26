@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { logActivityForCurrentUser } from "@/lib/activity";
 
 const FEATURES = [
   {
@@ -59,6 +60,7 @@ export default function LoginPage() {
     setLoading(false);
     if (authError) setError(authError.message);
     else {
+      logActivityForCurrentUser("login", { phone: normalized }).catch(() => {});
       const next = new URLSearchParams(window.location.search).get("next");
       window.location.href = next && next.startsWith("/") ? next : "/parent/dashboard";
     }
