@@ -3,6 +3,7 @@
 import { useState, useTransition, useMemo } from "react"
 import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining } from "@/app/(protected)/training/actions"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
+import { describeRules } from "@/lib/training-eligibility"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ export type TrainingSessionForParent = {
   notes:             string | null
   total_signups:     number
   series_id:         string | null
+  eligibility_label: string | null
   players:           EligiblePlayer[]
   ineligiblePlayers: IneligiblePlayer[]
   signedUpPlayers:   SignedUpPlayer[]
@@ -237,6 +239,9 @@ function SeriesGroup({
             <div>{subtitle}</div>
             {uniqueTimes.length > 0 && <div>{uniqueTimes.join(" / ")}</div>}
             {locationLabel && <div>{locationLabel}</div>}
+            {firstSession.eligibility_label && (
+              <div className="text-blue-600 dark:text-blue-400">{firstSession.eligibility_label}</div>
+            )}
           </div>
         </div>
         <span className="text-gray-400 dark:text-gray-500 text-sm ml-4 shrink-0">{open ? "▾" : "▸"}</span>

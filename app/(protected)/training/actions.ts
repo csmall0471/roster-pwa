@@ -102,6 +102,14 @@ export async function deleteTrainingSession(id: string) {
   return { error: null }
 }
 
+export async function deleteTrainingSeries(seriesId: string) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("training_sessions").delete().eq("series_id", seriesId)
+  if (error) return { error: error.message }
+  revalidatePath("/training")
+  return { error: null }
+}
+
 export async function signUpForTraining(
   sessionId:     string,
   playerId:      string,

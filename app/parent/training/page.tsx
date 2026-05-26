@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
-import { isPlayerEligible, explainIneligibility, type EligibilityRules } from "@/lib/training-eligibility"
+import { isPlayerEligible, explainIneligibility, describeRules, type EligibilityRules } from "@/lib/training-eligibility"
 import TrainingList, { type TrainingSessionForParent } from "./_components/TrainingList"
 
 export default async function ParentTrainingPage() {
@@ -129,6 +129,7 @@ export default async function ParentTrainingPage() {
         payment_methods:   s.payment_methods ?? [],
         notes:             s.notes,
         series_id:         s.series_id ?? null,
+        eligibility_label: s.eligibility_rules ? describeRules(s.eligibility_rules as EligibilityRules) : null,
         total_signups:     signups.length,
         players:           eligiblePlayers,
         ineligiblePlayers,

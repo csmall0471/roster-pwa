@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { createTrainingSession, updateTrainingSession, deleteTrainingSession, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid } from "../actions"
+import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid } from "../actions"
 import type { SessionData, PaymentMethod, RepeatDayConfig } from "../actions"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
@@ -119,6 +119,15 @@ function generateSessionDates(
   }
   return rows.sort((a, b) => a.date.localeCompare(b.date))
 }
+
+function addMinutes(timeStr: string, mins: number): string {
+  if (!timeStr) return ""
+  const [h, m] = timeStr.split(":").map(Number)
+  const total  = h * 60 + m + mins
+  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`
+}
+
+const DURATION_SHORTCUTS = [30, 50, 60, 90] as const
 
 function fmtDate(iso: string) {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
@@ -366,6 +375,37 @@ export default function SessionList({
     })
   }
 
+  function handleDeleteSeries(seriesId: string, ids: string[]) {
+    const count = ids.length
+    if (!confirm(`Delete all ${count} session${count !== 1 ? "s" : ""} in this series? All signups will be removed.`)) return
+    start(async () => {
+      const result = await deleteTrainingSeries(seriesId)
+      if (result.error) { setError(result.error); return }
+      setSessions((prev) => prev.filter((s) => !ids.includes(s.id)))
+    })
+  }
+
+  function openDuplicateSeries(group: TrainingSession[]) {
+    const first      = group[0]
+    const uniqueDays = [...new Set(group.map((s) => new Date(s.session_date + "T00:00:00").getDay()))].sort((a, b) => a - b)
+    const repeatWeeks = uniqueDays.length > 0 ? Math.ceil(group.length / uniqueDays.length) : group.length
+    const day_times: Record<number, DayTime> = {}
+    for (const day of uniqueDays) {
+      const match = group.find((s) => new Date(s.session_date + "T00:00:00").getDay() === day)
+      if (match) day_times[day] = { time: match.session_time ?? "", end_time: match.session_end_time ?? "" }
+    }
+    setForm({
+      ...sessionToForm(first, true),
+      repeat_weekly: group.length > 1,
+      repeat_weeks:  String(repeatWeeks),
+      repeat_days:   uniqueDays,
+      day_times,
+    })
+    setEditId(null)
+    setAdding(true)
+    setError(null)
+  }
+
   const inputCls = "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
 
   return (
@@ -417,14 +457,22 @@ export default function SessionList({
             />
           </div>
 
-          {/* Date + time + location */}
+          {/* Date + time */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Date *</label>
               <input
                 type="date" required
                 value={form.session_date}
-                onChange={(e) => setForm((f) => ({ ...f, session_date: e.target.value }))}
+                onChange={(e) => {
+                  const updates: Partial<FormState> = { session_date: e.target.value }
+                  if (form.repeat_weekly && form.repeat_days.length === 0 && e.target.value) {
+                    const day = new Date(e.target.value + "T00:00:00").getDay()
+                    updates.repeat_days = [day]
+                    updates.day_times   = { [day]: { time: form.session_time, end_time: form.session_end_time } }
+                  }
+                  setForm((f) => ({ ...f, ...updates }))
+                }}
                 className={inputCls}
               />
             </div>
@@ -447,6 +495,21 @@ export default function SessionList({
               />
             </div>
           </div>
+          {/* Duration shortcuts */}
+          {form.session_time && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400 dark:text-gray-500">Duration:</span>
+              {DURATION_SHORTCUTS.map((mins) => (
+                <button
+                  key={mins} type="button"
+                  onClick={() => setForm((f) => ({ ...f, session_end_time: addMinutes(f.session_time, mins) }))}
+                  className="text-xs rounded-full px-2.5 py-0.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                >
+                  {mins} min
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Repeat weekly (only on create) */}
           {!editingId && (
@@ -508,29 +571,47 @@ export default function SessionList({
                     <div className="space-y-2 pl-1">
                       <p className="text-xs text-gray-500 dark:text-gray-400">Times per day</p>
                       {form.repeat_days.map((day) => (
-                        <div key={day} className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-gray-700 dark:text-gray-300 w-24 shrink-0">
-                            {DAY_NAMES[day]}
-                          </span>
-                          <input
-                            type="time"
-                            value={form.day_times[day]?.time ?? ""}
-                            onChange={(e) => setForm((f) => ({
-                              ...f,
-                              day_times: { ...f.day_times, [day]: { ...f.day_times[day], time: e.target.value } },
-                            }))}
-                            className="w-32 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                          <span className="text-xs text-gray-400">–</span>
-                          <input
-                            type="time"
-                            value={form.day_times[day]?.end_time ?? ""}
-                            onChange={(e) => setForm((f) => ({
-                              ...f,
-                              day_times: { ...f.day_times, [day]: { ...f.day_times[day], end_time: e.target.value } },
-                            }))}
-                            className="w-32 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
+                        <div key={day} className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-medium text-gray-700 dark:text-gray-300 w-24 shrink-0">
+                              {DAY_NAMES[day]}
+                            </span>
+                            <input
+                              type="time"
+                              value={form.day_times[day]?.time ?? ""}
+                              onChange={(e) => setForm((f) => ({
+                                ...f,
+                                day_times: { ...f.day_times, [day]: { ...f.day_times[day], time: e.target.value } },
+                              }))}
+                              className="w-28 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-gray-400">–</span>
+                            <input
+                              type="time"
+                              value={form.day_times[day]?.end_time ?? ""}
+                              onChange={(e) => setForm((f) => ({
+                                ...f,
+                                day_times: { ...f.day_times, [day]: { ...f.day_times[day], end_time: e.target.value } },
+                              }))}
+                              className="w-28 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </div>
+                          {form.day_times[day]?.time && (
+                            <div className="flex items-center gap-1.5 pl-[7rem]">
+                              {DURATION_SHORTCUTS.map((mins) => (
+                                <button
+                                  key={mins} type="button"
+                                  onClick={() => setForm((f) => ({
+                                    ...f,
+                                    day_times: { ...f.day_times, [day]: { ...f.day_times[day], end_time: addMinutes(f.day_times[day]?.time ?? "", mins) } },
+                                  }))}
+                                  className="text-[10px] rounded-full px-2 py-0.5 border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                >
+                                  {mins}m
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -751,6 +832,8 @@ export default function SessionList({
               onEdit={openEdit}
               onDuplicate={openDuplicate}
               onDelete={(id) => handleDelete(id)}
+              onDuplicateSeries={() => openDuplicateSeries(g)}
+              onDeleteSeries={() => handleDeleteSeries(g[0].series_id ?? g[0].id, g.map((s) => s.id))}
               onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
               onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
               onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
@@ -776,6 +859,8 @@ export default function SessionList({
                 onEdit={openEdit}
                 onDuplicate={openDuplicate}
                 onDelete={(id) => handleDelete(id)}
+                onDuplicateSeries={() => openDuplicateSeries(g)}
+                onDeleteSeries={() => handleDeleteSeries(g[0].series_id ?? g[0].id, g.map((s) => s.id))}
                 onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
                 onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
                 onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
@@ -802,6 +887,7 @@ export default function SessionList({
 
 function AdminSeriesGroup({
   sessions, players, expandedId, onToggleExpand, onEdit, onDuplicate, onDelete,
+  onDuplicateSeries, onDeleteSeries,
   onSignupAdded, onSignupRemoved, onSignupPaidToggled,
 }: {
   sessions:        TrainingSession[]
@@ -811,6 +897,8 @@ function AdminSeriesGroup({
   onEdit:          (s: TrainingSession) => void
   onDuplicate:     (s: TrainingSession) => void
   onDelete:        (id: string) => void
+  onDuplicateSeries: () => void
+  onDeleteSeries:    () => void
   onSignupAdded:       (sessionId: string, signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (sessionId: string, signupId: string) => void
   onSignupPaidToggled: (sessionId: string, signupId: string, paid: boolean) => void
@@ -840,12 +928,13 @@ function AdminSeriesGroup({
 
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
-      >
-        <div className="min-w-0 flex-1">
+      <div className="flex items-center px-4 py-3 bg-gray-50 dark:bg-gray-800/60">
+        {/* Clickable title area */}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 min-w-0 text-left"
+        >
           <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
           <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
             <div>
@@ -858,9 +947,26 @@ function AdminSeriesGroup({
               <div className="text-blue-600 dark:text-blue-400">{describeRules(firstSession.eligibility_rules)}</div>
             )}
           </div>
+        </button>
+        {/* Series-level actions */}
+        <div className="flex items-center gap-2 shrink-0 ml-3">
+          <button
+            type="button"
+            onClick={onDuplicateSeries}
+            className="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            onClick={onDeleteSeries}
+            className="text-xs text-red-500 hover:underline"
+          >
+            Delete all
+          </button>
+          <span className="text-gray-400 dark:text-gray-500 text-sm ml-1">{open ? "▾" : "▸"}</span>
         </div>
-        <span className="text-gray-400 dark:text-gray-500 text-sm ml-4 shrink-0">{open ? "▾" : "▸"}</span>
-      </button>
+      </div>
 
       {open && (
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
