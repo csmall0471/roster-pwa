@@ -32,6 +32,14 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  if (user && !pathname.startsWith("/api/cron")) {
+    console.log(JSON.stringify({
+      uid:   user.id,
+      phone: user.phone ?? null,
+      path:  pathname,
+    }));
+  }
+
   // Unauthenticated → /login (allow the auth callback through)
   if (!user && pathname !== "/login" && pathname !== "/admin" && !pathname.startsWith("/auth") && !pathname.startsWith("/api/cron") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/sms-opt-in" && pathname !== "/no-access" && pathname !== "/house") {
     const url = request.nextUrl.clone();
