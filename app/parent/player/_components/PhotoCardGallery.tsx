@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
+import { track } from "@vercel/analytics";
 
 type PhotoCard = {
   id: string;
@@ -23,6 +24,7 @@ async function fetchPhotoFile(photo: PhotoCard): Promise<File> {
 }
 
 async function savePhoto(photo: PhotoCard) {
+  track("player_card_download", { team: photo.team_name ?? undefined, season: photo.season ?? undefined });
   const file = await fetchPhotoFile(photo);
   if (navigator.canShare?.({ files: [file] })) {
     await navigator.share({ files: [file] });
@@ -60,6 +62,7 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
   }, [activeIndex, prev, next, close]);
 
   async function handleDownloadAll() {
+    track("player_card_download_all", { count: photos.length });
     setDownloading(true);
     try {
       const files = await Promise.all(photos.map(fetchPhotoFile));
@@ -112,7 +115,7 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
         {photos.map((photo, i) => (
           <button
             key={photo.id}
-            onClick={() => setActiveIndex(i)}
+            onClick={() => { setActiveIndex(i); track("photo_card_opened", { team: photo.team_name ?? undefined, season: photo.season ?? undefined }); }}
             className="relative rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 cursor-zoom-in hover:opacity-90 transition-opacity text-left"
           >
             <Image

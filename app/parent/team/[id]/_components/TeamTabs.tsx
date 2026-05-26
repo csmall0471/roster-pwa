@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { track } from "@vercel/analytics";
 import SnackSchedule, { type SnackGameRow } from "./SnackSchedule";
 
 export type RosterEntry = {
@@ -104,10 +105,10 @@ export default function TeamTabs({
     <>
       {/* Tab nav */}
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-6">
-        <button onClick={() => setTab("roster")} className={tabCls("roster")}>
+        <button onClick={() => { setTab("roster"); track("team_tab_viewed", { tab: "roster" }); }} className={tabCls("roster")}>
           Roster ({active.length})
         </button>
-        <button onClick={() => setTab("schedule")} className={tabCls("schedule")}>
+        <button onClick={() => { setTab("schedule"); track("team_tab_viewed", { tab: "schedule" }); }} className={tabCls("schedule")}>
           {snackEnabled ? "Schedule & Snacks" : "Schedule"}
           {games.filter((g) => !g.event_type || g.event_type === "game").length > 0
             ? ` (${games.filter((g) => !g.event_type || g.event_type === "game").length})`

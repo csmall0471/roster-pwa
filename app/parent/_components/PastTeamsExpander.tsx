@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { track } from "@vercel/analytics";
 
 export type PastTeamEntry = {
   teamId: string;
@@ -19,7 +20,7 @@ export default function PastTeamsExpander({ entries }: { entries: PastTeamEntry[
   return (
     <>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => { if (!open) track("past_teams_expanded", { count: entries.length }); setOpen((o) => !o); }}
         className="w-full px-5 py-2.5 flex items-center justify-between text-sm text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-t border-gray-100 dark:border-gray-800"
       >
         <span>{entries.length} past team{entries.length !== 1 ? "s" : ""}</span>

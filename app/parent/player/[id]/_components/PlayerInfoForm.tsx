@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { updatePlayerInfo } from "../actions";
+import { track } from "@vercel/analytics";
 
 export type PlayerInfoData = {
   first_name: string;
@@ -50,6 +51,7 @@ export default function PlayerInfoForm({
     if (result.error) {
       setError(result.error);
     } else {
+      track("player_info_updated");
       setSaved(draft);
       setOpen(false);
     }

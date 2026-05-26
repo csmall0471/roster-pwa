@@ -4,6 +4,7 @@ import { useState, useTransition, useMemo, Fragment } from "react"
 import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups } from "@/app/(protected)/training/actions"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
 import { describeRules } from "@/lib/training-eligibility"
+import { track } from "@vercel/analytics"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,7 @@ function PayLink({
     return (
       <button
         onClick={() => {
+          track("training_payment_clicked", { method: method.label });
           navigator.clipboard.writeText(phone)
           setCopied(true)
           setTimeout(() => setCopied(false), 2000)
@@ -134,7 +136,7 @@ function PayLink({
   }
 
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className={className}>
+    <a href={url} target="_blank" rel="noopener noreferrer" className={className} onClick={() => track("training_payment_clicked", { method: method.label })}>
       Pay ${paymentAmount ?? ""} via {method.label} →
     </a>
   )
@@ -344,7 +346,7 @@ function SeriesGroup({
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { if (!open) track("training_series_expanded", { title }); setOpen((v) => !v); }}
         className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
         <div className="min-w-0 flex-1">

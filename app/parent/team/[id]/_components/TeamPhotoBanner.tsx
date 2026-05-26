@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { track } from "@vercel/analytics";
 
 export default function TeamPhotoBanner({ src, alt }: { src: string; alt: string }) {
   const [open, setOpen] = useState(false);
@@ -9,7 +10,7 @@ export default function TeamPhotoBanner({ src, alt }: { src: string; alt: string
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => { setOpen(true); track("team_photo_viewed"); }}
         className="relative w-full aspect-[3/1] rounded-2xl overflow-hidden mb-5 bg-gray-100 dark:bg-gray-800 block cursor-zoom-in"
         aria-label="View full team photo"
       >

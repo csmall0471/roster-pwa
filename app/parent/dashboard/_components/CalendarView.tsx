@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { track } from "@vercel/analytics"
 
 export type CalEvent = {
   date: string
@@ -77,7 +78,7 @@ export default function CalendarView({ events, players }: { events: CalEvent[]; 
       {/* Month navigation */}
       <div className="flex items-center justify-between mb-3">
         <button
-          onClick={() => setViewDate(new Date(year, month - 1, 1))}
+          onClick={() => { setViewDate(new Date(year, month - 1, 1)); track("calendar_month_changed", { direction: "prev" }); }}
           className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors"
           aria-label="Previous month"
         >
@@ -87,7 +88,7 @@ export default function CalendarView({ events, players }: { events: CalEvent[]; 
           {viewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
         </span>
         <button
-          onClick={() => setViewDate(new Date(year, month + 1, 1))}
+          onClick={() => { setViewDate(new Date(year, month + 1, 1)); track("calendar_month_changed", { direction: "next" }); }}
           className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors"
           aria-label="Next month"
         >

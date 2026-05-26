@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { updateAnyParent, addCoparent } from "../actions";
+import { track } from "@vercel/analytics";
 
 export type GuardianData = {
   id: string;
@@ -39,6 +40,7 @@ function GuardianRow({
     if (result.error) {
       setError(result.error);
     } else {
+      track("guardian_updated");
       setOpen(false);
     }
   }
@@ -138,6 +140,7 @@ function AddGuardianForm({
     if (result.error) {
       setError(result.error);
     } else {
+      track("guardian_added");
       onAdded({
         id: result.parentId!,
         first_name: draft.first_name.trim(),

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { claimSnackSlot, cancelSnackSlot } from "@/app/(protected)/teams/schedule-actions";
+import { track } from "@vercel/analytics";
 
 export type SnackGameRow = {
   id: string;
@@ -310,7 +311,7 @@ function GameRow({
                 {openSlots} slot{openSlots !== 1 ? "s" : ""} open
               </span>
               <button
-                onClick={() => setShowSignupForm(true)}
+                onClick={() => { setShowSignupForm(true); track("snack_form_opened"); }}
                 className="rounded-lg border border-green-300 dark:border-green-700 px-3 py-1 text-xs font-medium text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 transition-colors"
               >
                 I&apos;ll bring snacks
