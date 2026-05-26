@@ -320,7 +320,7 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
 
   const { data: row, error } = await supabase
     .from("training_signups")
-    .insert({ session_id: sessionId, player_id: playerId, parent_id: parentRow?.parent_id ?? null })
+    .insert({ session_id: sessionId, player_id: playerId, parent_id: parentRow?.parent_id ?? null, reminder_email: true })
     .select("id")
     .single()
   if (error) return { signupId: null, error: error.message }
@@ -401,7 +401,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
     if ((countBySession.get(session.id) ?? 0) >= session.max_players) continue
     const { data: row, error } = await supabase
       .from("training_signups")
-      .insert({ session_id: session.id, player_id: playerId, parent_id: parentId })
+      .insert({ session_id: session.id, player_id: playerId, parent_id: parentId, reminder_email: true })
       .select("id")
       .single()
     if (!error && row) {
