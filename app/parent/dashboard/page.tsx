@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import CalendarView from "./_components/CalendarView";
+import type { CalEvent } from "./_components/CalendarView";
 
 function fmtDate(iso: string) {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
@@ -133,15 +135,17 @@ export default async function DashboardPage() {
   }
 
   // Build combined calendar (games + training sessions)
-  type CalEvent = { date: string; time: string | null; emoji: string; label: string; sublabel: string | null; href: string }
   const trainingPlayerNames = new Map<string, string[]>()
+  const trainingPlayerIds = new Map<string, string[]>()
   for (const row of calendarSignups ?? []) {
     const sess = row.training_sessions as any
     if (!sess) continue
     const player = (players ?? []).find((p) => p.id === row.player_id)
     if (!player) continue
     if (!trainingPlayerNames.has(sess.id)) trainingPlayerNames.set(sess.id, [])
+    if (!trainingPlayerIds.has(sess.id)) trainingPlayerIds.set(sess.id, [])
     trainingPlayerNames.get(sess.id)!.push(`${player.first_name} ${player.last_name}`)
+    trainingPlayerIds.get(sess.id)!.push(row.player_id as string)
   }
   const seenSessions = new Set<string>()
   const calEvents: CalEvent[] = []
@@ -153,6 +157,7 @@ export default async function DashboardPage() {
       label: `${t?.name ?? "Game"}`,
       sublabel: `${g.is_home ? "vs" : "@"} ${g.opponent ?? "TBD"}${g.location ? ` · ${g.location}` : ""}`,
       href: `/parent/team/${g.team_id}?tab=schedule`,
+      playerIds: teamMap.get(g.team_id)?.playerIds ?? [],
     })
   }
   for (const row of calendarSignups ?? []) {
@@ -166,14 +171,12 @@ export default async function DashboardPage() {
       label: sess.title,
       sublabel: names,
       href: "/parent/training",
+      playerIds: trainingPlayerIds.get(sess.id) ?? [],
     })
   }
   calEvents.sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time ?? "").localeCompare(b.time ?? ""))
-  const calByDate = new Map<string, CalEvent[]>()
-  for (const e of calEvents) {
-    if (!calByDate.has(e.date)) calByDate.set(e.date, [])
-    calByDate.get(e.date)!.push(e)
-  }
+
+  const calPlayers = (players ?? []).map((p) => ({ id: p.id, firstName: p.first_name }))
 
   const unpaidWithAmount = (unpaidSignups ?? []).filter((s: any) => {
     const session = s.training_sessions;
@@ -326,42 +329,12 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {calByDate.size > 0 && (
-        <section className="mb-8">
-          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-            Upcoming Events
-          </h2>
-          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
-            {[...calByDate.entries()].map(([date, events]) => (
-              <div key={date}>
-                <div className="px-5 py-2 bg-gray-50 dark:bg-gray-800/60">
-                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                    {new Date(date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                  </span>
-                </div>
-                {events.map((ev, j) => (
-                  <Link
-                    key={j}
-                    href={ev.href}
-                    className="px-5 py-3 flex items-start gap-3 border-t border-gray-50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                  >
-                    <span className="text-base mt-0.5">{ev.emoji}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                        {ev.label}{ev.time ? fmtTime(ev.time) : ""}
-                      </p>
-                      {ev.sublabel && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{ev.sublabel}</p>
-                      )}
-                    </div>
-                    <span className="text-gray-400 dark:text-gray-500 text-xs mt-0.5 shrink-0">→</span>
-                  </Link>
-                ))}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+          Calendar
+        </h2>
+        <CalendarView events={calEvents} players={calPlayers} />
+      </section>
 
       {unpaidWithAmount.length > 0 && (
         <div>
