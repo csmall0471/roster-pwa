@@ -17,34 +17,55 @@ type PhotoCard = {
   is_primary: boolean;
 };
 
-function photoFileName(photo: PhotoCard) {
+function photoFileName(photo: PhotoCard, side?: "front" | "back") {
   const label = [photo.team_name, photo.season].filter(Boolean).join("-") || "card";
-  return `${label.replace(/\s+/g, "-")}.jpg`;
+  const suffix = side ? `-${side}` : "";
+  return `${label.replace(/\s+/g, "-")}${suffix}.jpg`;
 }
 
-async function fetchPhotoFile(photo: PhotoCard): Promise<File> {
-  const res = await fetch(photo.public_url);
+async function fetchAsFile(url: string, name: string): Promise<File> {
+  const res = await fetch(url);
   const blob = await res.blob();
-  return new File([blob], photoFileName(photo), { type: blob.type || "image/jpeg" });
+  return new File([blob], name, { type: blob.type || "image/jpeg" });
 }
 
-async function savePhoto(photo: PhotoCard) {
-  track("player_card_download", { team: photo.team_name ?? undefined, season: photo.season ?? undefined });
-  logClientActivity("player_card_download", { team: photo.team_name ?? null, season: photo.season ?? null }).catch(() => {});
-  const file = await fetchPhotoFile(photo);
-  if (navigator.canShare?.({ files: [file] })) {
-    await navigator.share({ files: [file] });
+// Saves all card sides to the photo library. On mobile, navigator.share
+// surfaces "Save to Photos / Save to Files"; on desktop, falls back to
+// sequential browser downloads.
+async function exportPhotoToLibrary(photo: PhotoCard) {
+  const files: File[] = [];
+  files.push(await fetchAsFile(photo.public_url, photoFileName(photo, photo.back_public_url ? "front" : undefined)));
+  if (photo.back_public_url) {
+    files.push(await fetchAsFile(photo.back_public_url, photoFileName(photo, "back")));
+  }
+
+  track("player_card_download", {
+    team: photo.team_name ?? undefined,
+    season: photo.season ?? undefined,
+    both_sides: files.length === 2,
+  });
+  logClientActivity("player_card_download", {
+    team: photo.team_name ?? null,
+    season: photo.season ?? null,
+    both_sides: files.length === 2,
+  }).catch(() => {});
+
+  if (navigator.canShare?.({ files })) {
+    await navigator.share({ files });
     return;
   }
-  // Desktop fallback: browser download
-  const url = URL.createObjectURL(file);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = file.name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Desktop fallback: download each file individually.
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
 
 export default function PhotoCardGallery({
@@ -100,18 +121,27 @@ export default function PhotoCardGallery({
     logClientActivity("player_card_download_all", { count: photos.length }).catch(() => {});
     setDownloading(true);
     try {
-      const files = await Promise.all(photos.map(fetchPhotoFile));
+      // Include back sides too when present.
+      const files: File[] = [];
+      for (const p of photos) {
+        files.push(
+          await fetchAsFile(p.public_url, photoFileName(p, p.back_public_url ? "front" : undefined))
+        );
+        if (p.back_public_url) {
+          files.push(await fetchAsFile(p.back_public_url, photoFileName(p, "back")));
+        }
+      }
       if (navigator.canShare?.({ files })) {
         await navigator.share({ files });
         setDownloading(false);
         return;
       }
     } catch { /* cancelled or unsupported — fall through */ }
-    // Desktop fallback: download one by one
+    // Desktop fallback: download one card at a time
     for (const photo of photos) {
       try {
-        await savePhoto(photo);
-        await new Promise(r => setTimeout(r, 200));
+        await exportPhotoToLibrary(photo);
+        await new Promise((r) => setTimeout(r, 200));
       } catch { /* skip */ }
     }
     setDownloading(false);
@@ -210,11 +240,11 @@ export default function PhotoCardGallery({
               <button
                 onClick={async e => {
                   e.stopPropagation();
-                  try { await savePhoto(active); } catch { /* ignore */ }
+                  try { await exportPhotoToLibrary(active); } catch { /* ignore */ }
                 }}
                 className="text-white/70 hover:text-white text-sm px-3 py-1 rounded-lg border border-white/20 hover:border-white/40 transition-colors"
               >
-                ↓ Save
+                {active.back_public_url ? "↓ Save both" : "↓ Save"}
               </button>
               <button
                 onClick={e => { e.stopPropagation(); handleDelete(active); }}

@@ -9,6 +9,57 @@ import { setPrimaryPhoto, deletePlayerPhoto, assignPhotoToTeam } from "../../pho
 
 type PlayerTeam = { id: string; name: string; season: string | null };
 
+// Exports front (and back if present) to the photo library via Web Share on
+// mobile, falling back to browser downloads on desktop.
+async function exportCardToLibrary(photo: PlayerPhoto) {
+  const label =
+    [photo.team_name, photo.season].filter(Boolean).join("-").replace(/\s+/g, "-") ||
+    "card";
+  const fetchAsFile = async (url: string, name: string) => {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new File([blob], name, { type: blob.type || "image/jpeg" });
+  };
+
+  const files: File[] = [];
+  files.push(
+    await fetchAsFile(
+      photo.public_url,
+      `${label}${photo.back_public_url ? "-front" : ""}.jpg`
+    )
+  );
+  if (photo.back_public_url) {
+    files.push(await fetchAsFile(photo.back_public_url, `${label}-back.jpg`));
+  }
+
+  track("player_card_download", {
+    team: photo.team_name ?? undefined,
+    season: photo.season ?? undefined,
+    both_sides: files.length === 2,
+  });
+  logClientActivity("player_card_download", {
+    team: photo.team_name ?? null,
+    season: photo.season ?? null,
+    both_sides: files.length === 2,
+  }).catch(() => {});
+
+  if (navigator.canShare?.({ files })) {
+    await navigator.share({ files });
+    return;
+  }
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
 // ── Gallery grid ──────────────────────────────────────────────
 
 export default function PhotoGallery({
@@ -312,6 +363,18 @@ function Lightbox({
           )}
 
           <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  await exportCardToLibrary(photo);
+                } catch {
+                  /* user-cancelled share or unsupported */
+                }
+              }}
+              className="flex-1 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-2 transition-colors"
+            >
+              {photo.back_public_url ? "↓ Save both" : "↓ Save"}
+            </button>
             {!photo.is_primary && (
               <button
                 onClick={handleSetPrimary}
