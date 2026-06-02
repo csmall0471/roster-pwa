@@ -59,6 +59,42 @@ function fileExt(name: string) {
   return parts.length > 1 ? parts.pop()!.toLowerCase() : "jpg";
 }
 
+// iPhone photos arrive with EXIF "rotate 90°" tags that downstream image
+// processors (like the Replicate bg-removal model) ignore — so the cutout
+// comes back sideways. Decode through createImageBitmap with from-image,
+// downscale, and re-encode as JPEG so the bytes themselves are upright.
+async function normalizePhotoForUpload(
+  file: File,
+  maxDim = 1600
+): Promise<Blob> {
+  const bitmap = await createImageBitmap(file, {
+    imageOrientation: "from-image",
+  });
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    throw new Error("Canvas not supported in this browser");
+  }
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) =>
+        b
+          ? resolve(b)
+          : reject(new Error("Could not encode photo — try JPEG or PNG")),
+      "image/jpeg",
+      0.92
+    );
+  });
+}
+
 // ── Component ─────────────────────────────────────────────────
 
 export default function CardEditor({
@@ -256,10 +292,14 @@ export default function CardEditor({
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const path = `${user.id}/cardgen-src/${crypto.randomUUID()}.${fileExt(file.name)}`;
+      const normalized = await normalizePhotoForUpload(file);
+      const path = `${user.id}/cardgen-src/${crypto.randomUUID()}.jpg`;
       const { error: upErr } = await supabase.storage
         .from("player-photos")
-        .upload(path, file, { upsert: false });
+        .upload(path, normalized, {
+          upsert: false,
+          contentType: "image/jpeg",
+        });
       if (upErr) throw upErr;
       const { data: urlData } = supabase.storage
         .from("player-photos")
