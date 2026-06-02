@@ -133,6 +133,7 @@ export default async function ParentPlayerPage({
           {player.notes && (
             <p className="text-sm text-gray-500 dark:text-gray-400 italic mt-1">{player.notes}</p>
           )}
+          {/* Card creator hidden from parents for now — admins have access via /players/[id]/card. */}
         </div>
       </div>
 
@@ -174,7 +175,7 @@ export default async function ParentPlayerPage({
           <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
             Season cards ({sortedPhotos.length})
           </h2>
-          <PhotoCardGallery photos={sortedPhotos} />
+          <PhotoCardGallery photos={sortedPhotos} playerId={player.id} />
         </section>
       )}
     </div>

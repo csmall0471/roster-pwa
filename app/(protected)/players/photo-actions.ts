@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import type { CardDesign } from "@/lib/types";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -108,17 +109,23 @@ export async function savePlayerPhoto({
   playerId,
   storagePath,
   publicUrl,
+  backStoragePath,
+  backPublicUrl,
   teamName,
   season,
   teamId,
+  cardDesign,
 }: {
   playerId: string;
   storagePath: string;
   publicUrl: string;
+  backStoragePath?: string;
+  backPublicUrl?: string;
   teamName?: string;
   season?: string;
   teamId?: string;
-}): Promise<{ error?: string }> {
+  cardDesign?: CardDesign;
+}): Promise<{ error?: string; photoId?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -132,21 +139,33 @@ export async function savePlayerPhoto({
     .eq("player_id", playerId)
     .eq("user_id", user.id);
 
-  const { error } = await supabase.from("player_photos").insert({
-    user_id: user.id,
-    player_id: playerId,
-    storage_path: storagePath,
-    public_url: publicUrl,
-    team_name: teamName ?? null,
-    season: season ?? null,
-    is_primary: true,
-    team_id: teamId ?? null,
-  });
+  const { data, error } = await supabase
+    .from("player_photos")
+    .insert({
+      user_id: user.id,
+      player_id: playerId,
+      storage_path: storagePath,
+      public_url: publicUrl,
+      back_storage_path: backStoragePath ?? null,
+      back_public_url: backPublicUrl ?? null,
+      team_name: teamName ?? null,
+      season: season ?? null,
+      is_primary: true,
+      team_id: teamId ?? null,
+      card_design: cardDesign ?? null,
+    })
+    .select("id")
+    .single();
 
   if (error) return { error: error.message };
   revalidatePath(`/players/${playerId}`);
   revalidatePath("/players");
-  return {};
+  revalidatePath(`/parent/player/${playerId}`);
+  if (teamId) {
+    revalidatePath(`/teams/${teamId}`);
+    revalidatePath(`/parent/team/${teamId}`);
+  }
+  return { photoId: data?.id };
 }
 
 // ── Assign a photo to a team ─────────────────────────────────
@@ -242,39 +261,55 @@ export async function deletePlayerPhoto(
   photoId: string,
   storagePath: string,
   playerId: string
-): Promise<void> {
+): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return;
+  if (!user) return { error: "Not authenticated" };
 
-  // Delete from storage
+  // Pull team_id before deletion so we can revalidate the right team page.
+  const { data: photoRow } = await supabase
+    .from("player_photos")
+    .select("team_id, is_primary")
+    .eq("id", photoId)
+    .maybeSingle();
+
+  // Best-effort storage cleanup — bucket policy is user-prefix-based, so cross-
+  // owner deletes silently no-op. The DB row removal below is what hides the
+  // card from the UI; orphan files can be swept later.
   await supabase.storage.from("player-photos").remove([storagePath]);
 
-  // Delete record
-  await supabase
+  // RLS gates this: owner / parent of kid / team owner can delete.
+  const { error: delErr } = await supabase
     .from("player_photos")
     .delete()
-    .eq("id", photoId)
-    .eq("user_id", user.id);
+    .eq("id", photoId);
+  if (delErr) return { error: delErr.message };
 
-  // Promote most recent remaining photo to primary
-  const { data: remaining } = await supabase
-    .from("player_photos")
-    .select("id")
-    .eq("player_id", playerId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (remaining) {
-    await supabase
+  // If we deleted the primary, promote the most recent remaining card.
+  if (photoRow?.is_primary) {
+    const { data: remaining } = await supabase
       .from("player_photos")
-      .update({ is_primary: true })
-      .eq("id", remaining.id);
+      .select("id")
+      .eq("player_id", playerId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (remaining) {
+      await supabase
+        .from("player_photos")
+        .update({ is_primary: true })
+        .eq("id", remaining.id);
+    }
   }
 
   revalidatePath(`/players/${playerId}`);
   revalidatePath("/players");
+  revalidatePath(`/parent/player/${playerId}`);
+  if (photoRow?.team_id) {
+    revalidatePath(`/teams/${photoRow.team_id}`);
+    revalidatePath(`/parent/team/${photoRow.team_id}`);
+  }
+  return {};
 }

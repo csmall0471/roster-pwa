@@ -19,54 +19,75 @@ export type RosterEntry = {
 function PlayerCard({
   entry,
   isMyKid,
+  teamId,
 }: {
   entry: RosterEntry;
   isMyKid: boolean;
+  teamId: string;
 }) {
   const name = `${entry.first_name} ${entry.last_name}`;
-  const inner = (
-    <div className={`relative rounded-xl overflow-hidden border ${isMyKid ? "border-blue-400 dark:border-blue-500" : "border-gray-200 dark:border-gray-700"}`}>
+  const photoNode = entry.photo_url ? (
+    <Image
+      src={entry.photo_url}
+      alt={name}
+      width={200}
+      height={280}
+      className="w-full h-full object-cover"
+    />
+  ) : (
+    <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600 text-4xl">
+      👤
+    </div>
+  );
+
+  return (
+    <div
+      className={`relative rounded-xl overflow-hidden border ${
+        isMyKid
+          ? "border-blue-400 dark:border-blue-500"
+          : "border-gray-200 dark:border-gray-700"
+      }`}
+    >
       <div className="relative aspect-[5/7] bg-gray-100 dark:bg-gray-800">
-        {entry.photo_url ? (
-          <Image
-            src={entry.photo_url}
-            alt={name}
-            width={200}
-            height={280}
-            className="w-full h-full object-cover"
-          />
+        {isMyKid ? (
+          <Link
+            href={`/parent/player/${entry.player_id}`}
+            className="block w-full h-full hover:opacity-90 transition-opacity"
+          >
+            {photoNode}
+          </Link>
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600 text-4xl">
-            👤
-          </div>
+          photoNode
         )}
         {isMyKid && (
-          <span className="absolute top-2 left-2 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+          <span className="absolute top-2 left-2 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full pointer-events-none">
             MY KID
           </span>
         )}
         {entry.jersey_number != null && (
-          <span className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full">
+          <span className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full pointer-events-none">
             #{entry.jersey_number}
           </span>
         )}
+        {/* Card creator hidden from parents for now — admins still have access
+            via /(protected)/players/[id]/card. */}
       </div>
       <div className="px-2 py-1.5">
-        <p className={`text-xs font-medium truncate ${isMyKid ? "text-blue-600 dark:text-blue-400" : "text-gray-900 dark:text-white"}`}>
-          {name}
-        </p>
+        {isMyKid ? (
+          <Link
+            href={`/parent/player/${entry.player_id}`}
+            className={`block text-xs font-medium truncate text-blue-600 dark:text-blue-400 hover:underline`}
+          >
+            {name}
+          </Link>
+        ) : (
+          <p className="text-xs font-medium truncate text-gray-900 dark:text-white">
+            {name}
+          </p>
+        )}
       </div>
     </div>
   );
-
-  if (isMyKid) {
-    return (
-      <Link href={`/parent/player/${entry.player_id}`} className="block hover:opacity-90 transition-opacity">
-        {inner}
-      </Link>
-    );
-  }
-  return inner;
 }
 
 export default function TeamTabs({
@@ -122,7 +143,7 @@ export default function TeamTabs({
           <section>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
               {active.map((entry) => (
-                <PlayerCard key={entry.player_id} entry={entry} isMyKid={mySet.has(entry.player_id)} />
+                <PlayerCard key={entry.player_id} entry={entry} isMyKid={mySet.has(entry.player_id)} teamId={teamId} />
               ))}
             </div>
           </section>
@@ -134,7 +155,7 @@ export default function TeamTabs({
               </h2>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 opacity-50">
                 {inactive.map((entry) => (
-                  <PlayerCard key={entry.player_id} entry={entry} isMyKid={mySet.has(entry.player_id)} />
+                  <PlayerCard key={entry.player_id} entry={entry} isMyKid={mySet.has(entry.player_id)} teamId={teamId} />
                 ))}
               </div>
             </section>

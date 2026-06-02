@@ -1,13 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useTransition } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { track } from "@vercel/analytics";
 import { logClientActivity } from "@/app/actions/log-activity";
+import { deletePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 
 type PhotoCard = {
   id: string;
   public_url: string;
+  back_public_url: string | null;
+  storage_path: string;
   team_name: string | null;
   season: string | null;
   is_primary: boolean;
@@ -43,14 +47,40 @@ async function savePhoto(photo: PhotoCard) {
   URL.revokeObjectURL(url);
 }
 
-export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
+export default function PhotoCardGallery({
+  photos,
+  playerId,
+}: {
+  photos: PhotoCard[];
+  playerId: string;
+}) {
+  const router = useRouter();
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [showBack, setShowBack] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [pendingDelete, startDelete] = useTransition();
   const touchStartX = useRef<number | null>(null);
 
-  const close = useCallback(() => setActiveIndex(null), []);
-  const prev = useCallback(() => setActiveIndex(i => i !== null ? (i - 1 + photos.length) % photos.length : null), [photos.length]);
-  const next = useCallback(() => setActiveIndex(i => i !== null ? (i + 1) % photos.length : null), [photos.length]);
+  const close = useCallback(() => { setActiveIndex(null); setShowBack(false); }, []);
+  const prev = useCallback(() => { setShowBack(false); setActiveIndex(i => i !== null ? (i - 1 + photos.length) % photos.length : null); }, [photos.length]);
+  const next = useCallback(() => { setShowBack(false); setActiveIndex(i => i !== null ? (i + 1) % photos.length : null); }, [photos.length]);
+
+  function handleDelete(photo: PhotoCard) {
+    if (!confirm("Delete this card? This can't be undone.")) return;
+    startDelete(async () => {
+      const res = await deletePlayerPhoto(photo.id, photo.storage_path, playerId);
+      if (res?.error) {
+        alert(`Couldn't delete: ${res.error}`);
+        return;
+      }
+      if (photos.length <= 1) {
+        setActiveIndex(null);
+      } else {
+        setActiveIndex(i => (i === null ? null : Math.min(i, photos.length - 2)));
+      }
+      router.refresh();
+    });
+  }
 
   useEffect(() => {
     if (activeIndex === null) return;
@@ -161,6 +191,14 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
               {activeIndex + 1} / {photos.length}
             </span>
             <div className="flex items-center gap-3">
+              {active.back_public_url && (
+                <button
+                  onClick={e => { e.stopPropagation(); setShowBack(b => !b); }}
+                  className="text-white/70 hover:text-white text-sm px-3 py-1 rounded-lg border border-white/20 hover:border-white/40 transition-colors"
+                >
+                  {showBack ? "← Front" : "Flip →"}
+                </button>
+              )}
               <button
                 onClick={async e => {
                   e.stopPropagation();
@@ -169,6 +207,13 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
                 className="text-white/70 hover:text-white text-sm px-3 py-1 rounded-lg border border-white/20 hover:border-white/40 transition-colors"
               >
                 ↓ Save
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); handleDelete(active); }}
+                disabled={pendingDelete}
+                className="text-red-300 hover:text-red-200 text-sm px-3 py-1 rounded-lg border border-red-400/30 hover:border-red-400/60 transition-colors disabled:opacity-50"
+              >
+                {pendingDelete ? "Deleting…" : "Delete"}
               </button>
               <button
                 onClick={e => { e.stopPropagation(); close(); }}
@@ -186,7 +231,7 @@ export default function PhotoCardGallery({ photos }: { photos: PhotoCard[] }) {
             onClick={e => e.stopPropagation()}
           >
             <Image
-              src={active.public_url}
+              src={showBack && active.back_public_url ? active.back_public_url : active.public_url}
               alt={`${active.team_name ?? ""} ${active.season ?? ""}`.trim() || "Season card"}
               width={600}
               height={840}

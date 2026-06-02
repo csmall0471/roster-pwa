@@ -62,10 +62,45 @@ export interface PlayerPhoto {
   team_id: string | null;
   storage_path: string;
   public_url: string;
+  back_storage_path: string | null;
+  back_public_url: string | null;
   team_name: string | null;
   season: string | null;
   is_primary: boolean;
+  card_design: CardDesign | null;
   created_at: string;
+}
+
+export interface CardDesign {
+  cutout_url: string;
+  background:
+    | { type: "template"; id: string }
+    | { type: "image"; url: string };
+  transform: { x: number; y: number; scale: number };
+  text: {
+    team_name: string;
+    age_group: string | null;
+    season: string | null;
+    name_line1: string;
+    name_line2: string;
+    color_scheme: "light" | "dark";
+  };
+  back?: CardBackDesign;
+}
+
+export interface CardBackDesign {
+  stats: {
+    position: string;
+    height: string;
+    jersey: string;
+    hand: string;
+    favorite_team: string;
+    favorite_player: string;
+    signature_move: string;
+    age: string;
+  };
+  scouting_report: string;
+  look_alike: string;
 }
 
 export interface RosterEntry {

@@ -156,14 +156,15 @@ function Lightbox({
   onClose: () => void;
 }) {
   const [index, setIndex] = useState(initialIndex);
+  const [showBack, setShowBack] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const photo = photos[index];
   const hasPrev = index > 0;
   const hasNext = index < photos.length - 1;
 
-  const prev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
-  const next = useCallback(() => setIndex((i) => Math.min(photos.length - 1, i + 1)), [photos.length]);
+  const prev = useCallback(() => { setShowBack(false); setIndex((i) => Math.max(0, i - 1)); }, []);
+  const next = useCallback(() => { setShowBack(false); setIndex((i) => Math.min(photos.length - 1, i + 1)); }, [photos.length]);
 
   // Keyboard nav
   useEffect(() => {
@@ -244,13 +245,22 @@ function Lightbox({
         onClick={(e) => e.stopPropagation()}
       >
         <Image
-          src={photo.public_url}
+          src={showBack && photo.back_public_url ? photo.back_public_url : photo.public_url}
           alt={`${photo.team_name ?? ""} ${photo.season ?? ""}`.trim() || "Season card"}
           width={420}
           height={588}
           className="max-h-[90dvh] w-auto rounded-xl object-contain shadow-2xl"
           priority
         />
+
+        {photo.back_public_url && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowBack(b => !b); }}
+            className="absolute top-3 right-3 rounded-full bg-black/60 hover:bg-black/80 text-white text-xs font-semibold px-3 py-1.5 backdrop-blur-sm"
+          >
+            {showBack ? "← Front" : "Flip →"}
+          </button>
+        )}
 
         {/* Primary badge */}
         {photo.is_primary && (

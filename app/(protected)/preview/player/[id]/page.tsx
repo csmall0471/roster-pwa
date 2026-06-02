@@ -133,7 +133,7 @@ export default async function PreviewPlayerPage({
           <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
             Season cards ({sortedPhotos.length})
           </h2>
-          <PhotoCardGallery photos={sortedPhotos} />
+          <PhotoCardGallery photos={sortedPhotos} playerId={player.id} />
         </section>
       )}
     </div>

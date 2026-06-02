@@ -116,12 +116,18 @@ export default async function PlayerDetailPage({
             <p className="text-sm text-gray-500 dark:text-gray-400 italic mt-1">{player.notes}</p>
           )}
 
-          <div className="flex gap-2 mt-3">
+          <div className="flex gap-2 mt-3 flex-wrap">
             <Link
-              href={`/players/upload?player=${id}`}
+              href={`/players/${id}/card`}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
             >
-              + Add card
+              Create card
+            </Link>
+            <Link
+              href={`/players/upload?player=${id}`}
+              className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              Upload card
             </Link>
             <Link
               href={`/players/${id}/edit`}
