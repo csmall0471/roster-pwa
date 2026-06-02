@@ -2,6 +2,8 @@
 
 import { useState, useTransition, useEffect, useCallback } from "react";
 import Image from "next/image";
+import { track } from "@vercel/analytics";
+import { logClientActivity } from "@/app/actions/log-activity";
 import type { PlayerPhoto } from "@/lib/types";
 import { setPrimaryPhoto, deletePlayerPhoto, assignPhotoToTeam } from "../../photo-actions";
 
@@ -74,6 +76,8 @@ function PhotoCard({
     if (!confirm("Remove this card? It will be deleted from storage.")) return;
     startTransition(async () => {
       await deletePlayerPhoto(photo.id, photo.storage_path, playerId);
+      track("card_deleted", { team: photo.team_name ?? undefined, season: photo.season ?? undefined });
+      logClientActivity("card_deleted", { team: photo.team_name, season: photo.season }).catch(() => {});
     });
   }
 
@@ -193,6 +197,8 @@ function Lightbox({
     if (!confirm("Remove this card? It will be deleted from storage.")) return;
     startTransition(async () => {
       await deletePlayerPhoto(photo.id, photo.storage_path, playerId);
+      track("card_deleted", { team: photo.team_name ?? undefined, season: photo.season ?? undefined });
+      logClientActivity("card_deleted", { team: photo.team_name, season: photo.season }).catch(() => {});
       // Move to adjacent photo or close
       if (photos.length === 1) {
         onClose();
@@ -255,7 +261,13 @@ function Lightbox({
 
         {photo.back_public_url && (
           <button
-            onClick={(e) => { e.stopPropagation(); setShowBack(b => !b); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const next = !showBack;
+              setShowBack(next);
+              track("card_flipped", { side: next ? "back" : "front" });
+              logClientActivity("card_flipped", { side: next ? "back" : "front" }).catch(() => {});
+            }}
             className="absolute top-3 right-3 rounded-full bg-black/60 hover:bg-black/80 text-white text-xs font-semibold px-3 py-1.5 backdrop-blur-sm"
           >
             {showBack ? "← Front" : "Flip →"}

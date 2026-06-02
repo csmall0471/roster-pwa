@@ -73,6 +73,8 @@ export default function PhotoCardGallery({
         alert(`Couldn't delete: ${res.error}`);
         return;
       }
+      track("card_deleted", { team: photo.team_name ?? undefined, season: photo.season ?? undefined });
+      logClientActivity("card_deleted", { team: photo.team_name, season: photo.season }).catch(() => {});
       if (photos.length <= 1) {
         setActiveIndex(null);
       } else {
@@ -193,7 +195,13 @@ export default function PhotoCardGallery({
             <div className="flex items-center gap-3">
               {active.back_public_url && (
                 <button
-                  onClick={e => { e.stopPropagation(); setShowBack(b => !b); }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    const next = !showBack;
+                    setShowBack(next);
+                    track("card_flipped", { side: next ? "back" : "front" });
+                    logClientActivity("card_flipped", { side: next ? "back" : "front" }).catch(() => {});
+                  }}
                   className="text-white/70 hover:text-white text-sm px-3 py-1 rounded-lg border border-white/20 hover:border-white/40 transition-colors"
                 >
                   {showBack ? "← Front" : "Flip →"}

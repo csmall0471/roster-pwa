@@ -11,6 +11,20 @@ export type ActivityEvent =
   | "snack_form_opened"
   | "training_series_expanded" | "training_payment_clicked"
   | "calendar_month_changed"
+  // Card generator
+  | "card_editor_opened"
+  | "card_photo_uploaded"
+  | "card_bg_removed"
+  | "card_bg_removal_failed"
+  | "card_template_picked"
+  | "card_bg_image_uploaded"
+  | "card_side_switched"
+  | "card_scouting_generated"
+  | "card_lookalike_generated"
+  | "card_saved"
+  | "card_save_failed"
+  | "card_flipped"
+  | "card_deleted"
 
 export async function logActivity(
   parentId: string,

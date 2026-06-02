@@ -76,7 +76,7 @@ export interface CardDesign {
   background:
     | { type: "template"; id: string }
     | { type: "image"; url: string };
-  transform: { x: number; y: number; scale: number };
+  transform: { x: number; y: number; scale: number; rotation?: number };
   text: {
     team_name: string;
     age_group: string | null;

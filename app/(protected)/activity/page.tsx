@@ -23,6 +23,20 @@ const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   player_card_download:     { label: "Card download",       color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
   player_card_download_all: { label: "Card download all",   color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
   photo_card_opened:        { label: "Card opened",         color: "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400" },
+  card_flipped:             { label: "Card flipped",        color: "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400" },
+  // Card generator
+  card_editor_opened:       { label: "Editor opened",       color: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300" },
+  card_photo_uploaded:      { label: "Photo uploaded",      color: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300" },
+  card_bg_removed:          { label: "BG removed",          color: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300" },
+  card_bg_removal_failed:   { label: "BG removal failed",   color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  card_template_picked:     { label: "Template picked",     color: "bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/20 dark:text-fuchsia-400" },
+  card_bg_image_uploaded:   { label: "Custom BG",           color: "bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/20 dark:text-fuchsia-400" },
+  card_side_switched:       { label: "Side switched",       color: "bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400" },
+  card_scouting_generated:  { label: "AI scouting",         color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
+  card_lookalike_generated: { label: "AI lookalike",        color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
+  card_saved:               { label: "Card saved",          color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
+  card_save_failed:         { label: "Card save failed",    color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  card_deleted:             { label: "Card deleted",        color: "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400" },
   // Browsing
   team_tab_viewed:          { label: "Team tab",            color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
   team_photo_viewed:        { label: "Team photo",          color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
@@ -60,6 +74,20 @@ function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
   if (event === "past_teams_expanded") return meta.count ? `${meta.count} teams` : ""
   if (event === "team_tab_viewed") return meta.tab ? String(meta.tab) : ""
   if (event === "calendar_month_changed") return meta.direction ? String(meta.direction) : ""
+  if (event === "card_editor_opened" || event === "card_saved" || event === "card_deleted") {
+    const parts = []
+    if (meta.team)     parts.push(String(meta.team))
+    if (meta.season)   parts.push(String(meta.season))
+    if (meta.has_back) parts.push("front+back")
+    return parts.join(" · ")
+  }
+  if (event === "card_template_picked")     return meta.template_id ? String(meta.template_id) : ""
+  if (event === "card_side_switched" || event === "card_flipped") return meta.side ? String(meta.side) : ""
+  if (event === "card_lookalike_generated") return meta.name ? String(meta.name) : ""
+  if (event === "card_bg_removed")          return meta.ms ? `${meta.ms} ms` : ""
+  if (event === "card_bg_removal_failed" || event === "card_save_failed") {
+    return meta.error ? String(meta.error).slice(0, 60) : ""
+  }
   return ""
 }
 

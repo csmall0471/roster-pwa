@@ -9,6 +9,8 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
+import { track } from "@vercel/analytics";
+import { logClientActivity } from "@/app/actions/log-activity";
 import { createClient } from "@/lib/supabase/client";
 import {
   removeBackground,
@@ -112,6 +114,22 @@ export default function CardEditor({
 }: Props) {
   const router = useRouter();
 
+  // Fire once on mount so we know how often the editor is opened.
+  useEffect(() => {
+    track("card_editor_opened", {
+      team: teamName,
+      season: season ?? undefined,
+      reopened: !!initialDesign?.cutout_url,
+    });
+    logClientActivity("card_editor_opened", {
+      team: teamName,
+      season,
+      reopened: !!initialDesign?.cutout_url,
+    }).catch(() => {});
+    // Mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [step, setStep] = useState<Step>(
     initialDesign?.cutout_url ? "edit" : "upload"
   );
@@ -131,6 +149,7 @@ export default function CardEditor({
   const [tx, setTx] = useState(initialDesign?.transform.x ?? 0);
   const [ty, setTy] = useState(initialDesign?.transform.y ?? 0);
   const [scale, setScale] = useState(initialDesign?.transform.scale ?? 1);
+  const [rotation, setRotation] = useState(initialDesign?.transform.rotation ?? 0);
 
   const [teamText, setTeamText] = useState(
     initialDesign?.text.team_name ?? teamName.toUpperCase()
@@ -285,6 +304,7 @@ export default function CardEditor({
   async function handlePhotoSelected(file: File) {
     setStep("processing");
     setError(null);
+    const startedAt = Date.now();
     try {
       const supabase = createClient();
       const {
@@ -305,13 +325,25 @@ export default function CardEditor({
         .from("player-photos")
         .getPublicUrl(path);
 
+      track("card_photo_uploaded", { bytes: normalized.size });
+      logClientActivity("card_photo_uploaded", { bytes: normalized.size }).catch(() => {});
+
       const result = await removeBackground(urlData.publicUrl);
-      if (result.error) throw new Error(result.error);
+      const ms = Date.now() - startedAt;
+      if (result.error) {
+        track("card_bg_removal_failed", { error: result.error });
+        logClientActivity("card_bg_removal_failed", { error: result.error }).catch(() => {});
+        throw new Error(result.error);
+      }
+
+      track("card_bg_removed", { ms });
+      logClientActivity("card_bg_removed", { ms }).catch(() => {});
 
       setCutoutUrl(result.cutoutUrl!);
       setTx(0);
       setTy(0);
       setScale(1);
+      setRotation(0);
       setStep("edit");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -335,6 +367,8 @@ export default function CardEditor({
         .from("player-photos")
         .getPublicUrl(path);
       setBg({ type: "image", url: urlData.publicUrl });
+      track("card_bg_image_uploaded");
+      logClientActivity("card_bg_image_uploaded").catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -359,7 +393,11 @@ export default function CardEditor({
         },
       });
       if (res.error) throw new Error(res.error);
-      if (res.report) setScoutingReport(res.report);
+      if (res.report) {
+        setScoutingReport(res.report);
+        track("card_scouting_generated");
+        logClientActivity("card_scouting_generated").catch(() => {});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -374,7 +412,11 @@ export default function CardEditor({
     try {
       const res = await findLookalike(cutoutUrl);
       if (res.error) throw new Error(res.error);
-      if (res.name) setLookAlike(res.name);
+      if (res.name) {
+        setLookAlike(res.name);
+        track("card_lookalike_generated", { name: res.name });
+        logClientActivity("card_lookalike_generated", { name: res.name }).catch(() => {});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -476,7 +518,7 @@ export default function CardEditor({
       const design: CardDesign = {
         cutout_url: cutoutUrl,
         background: bg,
-        transform: { x: tx, y: ty, scale },
+        transform: { x: tx, y: ty, scale, rotation },
         text: {
           team_name: teamText,
           age_group: ageText || null,
@@ -501,11 +543,27 @@ export default function CardEditor({
       });
       if (res.error) throw new Error(res.error);
 
+      track("card_saved", {
+        team: teamText,
+        season: seasonText || season || undefined,
+        has_back: !!backDesign,
+        template: bg.type === "template" ? bg.id : "custom",
+      });
+      logClientActivity("card_saved", {
+        team: teamText,
+        season: seasonText || season || null,
+        has_back: !!backDesign,
+        template: bg.type === "template" ? bg.id : "custom",
+      }).catch(() => {});
+
       setStep("saved");
       router.push(returnHref);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      track("card_save_failed", { error: msg });
+      logClientActivity("card_save_failed", { error: msg }).catch(() => {});
+      setError(msg);
       setStep("edit");
     }
   }
@@ -598,7 +656,13 @@ export default function CardEditor({
         {(["front", "back"] as const).map((s) => (
           <button
             key={s}
-            onClick={() => setSide(s)}
+            onClick={() => {
+              if (s !== side) {
+                setSide(s);
+                track("card_side_switched", { side: s });
+                logClientActivity("card_side_switched", { side: s }).catch(() => {});
+              }
+            }}
             className={`flex-1 py-1.5 text-xs font-semibold uppercase tracking-wide rounded-md transition-colors ${
               side === s
                 ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm"
@@ -669,12 +733,38 @@ export default function CardEditor({
               width: "100%",
               height: "100%",
               objectFit: "contain",
-              transform: `translate(${tx * 100}%, ${ty * 100}%) scale(${scale})`,
+              transform: `translate(${tx * 100}%, ${ty * 100}%) rotate(${rotation}deg) scale(${scale})`,
               transformOrigin: "center center",
               cursor: "grab",
               touchAction: "none",
             }}
           />
+        )}
+
+        {/* Jersey number badge — top right. */}
+        {stats.jersey && (
+          <div
+            style={{
+              position: "absolute",
+              top: "4.5%",
+              right: "5%",
+              minWidth: "14%",
+              aspectRatio: "1 / 1",
+              borderRadius: "9999px",
+              background: "rgba(10,10,10,0.85)",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "var(--font-anton), Impact, sans-serif",
+              fontSize: "min(7vw, 36px)",
+              letterSpacing: "0.02em",
+              boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+              pointerEvents: "none",
+            }}
+          >
+            #{stats.jersey}
+          </div>
         )}
 
         {/* Team name plate — stacked chevron-cut chips. */}
@@ -772,28 +862,45 @@ export default function CardEditor({
         <div className="p-3">
           {tab === "photo" && (
             <div className="space-y-3">
-              <label className="block text-xs text-gray-500 dark:text-gray-400">
-                Size: {Math.round(scale * 100)}%
-              </label>
-              <input
-                type="range"
-                min={0.3}
-                max={2.5}
-                step={0.01}
-                value={scale}
-                onChange={(e) => setScale(parseFloat(e.target.value))}
-                className="w-full"
-              />
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-gray-400">
+                  Size: {Math.round(scale * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min={0.3}
+                  max={2.5}
+                  step={0.01}
+                  value={scale}
+                  onChange={(e) => setScale(parseFloat(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-gray-400">
+                  Rotation: {Math.round(rotation)}°
+                </label>
+                <input
+                  type="range"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={rotation}
+                  onChange={(e) => setRotation(parseFloat(e.target.value))}
+                  className="w-full"
+                />
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => {
                     setTx(0);
                     setTy(0);
                     setScale(1);
+                    setRotation(0);
                   }}
                   className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
-                  Recenter
+                  Reset
                 </button>
                 <button
                   onClick={() => fileRef.current?.click()}
@@ -813,7 +920,7 @@ export default function CardEditor({
                 />
               </div>
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                Drag the player on the card to move. Pinch to scale on phones.
+                Drag the player to move. Pinch to scale on phones. Use sliders for rotation.
               </p>
             </div>
           )}
@@ -821,19 +928,90 @@ export default function CardEditor({
           {tab === "bg" && (
             <div className="space-y-3">
               <div className="grid grid-cols-3 gap-2">
-                {TEMPLATES.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => setBg({ type: "template", id: t.id })}
-                    className={`aspect-square rounded-lg border-2 transition-all ${
-                      bg.type === "template" && bg.id === t.id
-                        ? "border-blue-500 ring-2 ring-blue-200 dark:ring-blue-800"
-                        : "border-transparent"
-                    }`}
-                    style={t.style}
-                    aria-label={t.name}
-                  />
-                ))}
+                {TEMPLATES.map((t) => {
+                  const selected = bg.type === "template" && bg.id === t.id;
+                  const lightText = t.textColor === "light";
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        setBg({ type: "template", id: t.id });
+                        track("card_template_picked", { template_id: t.id });
+                        logClientActivity("card_template_picked", {
+                          template_id: t.id,
+                        }).catch(() => {});
+                      }}
+                      className={`relative aspect-[5/7] rounded-lg overflow-hidden transition-all ${
+                        selected
+                          ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900"
+                          : ""
+                      }`}
+                      style={t.style}
+                      aria-label={t.name}
+                    >
+                      {/* Mini cutout preview */}
+                      {cutoutDataUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={cutoutDataUrl}
+                          alt=""
+                          className="absolute inset-0 w-full h-full pointer-events-none"
+                          style={{
+                            objectFit: "contain",
+                            transform: `translate(${tx * 100}%, ${ty * 100}%) rotate(${rotation}deg) scale(${scale})`,
+                            transformOrigin: "center center",
+                          }}
+                        />
+                      )}
+                      {/* Mini name plate */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "6%",
+                          left: 0,
+                          pointerEvents: "none",
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: "#fff",
+                            color: "#0a0a0a",
+                            padding: "0.2em 0.55em 0.2em 8%",
+                            clipPath:
+                              "polygon(0 0, 100% 0, calc(100% - 0.4em) 100%, 0 100%)",
+                            fontFamily:
+                              "var(--font-anton), Impact, sans-serif",
+                            fontSize: "9px",
+                            lineHeight: 1,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {(teamText || "TEAM").slice(0, 10)}
+                        </div>
+                      </div>
+                      {/* Mini player name */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: "8%",
+                          bottom: "6%",
+                          pointerEvents: "none",
+                          fontFamily:
+                            "var(--font-anton), Impact, sans-serif",
+                          color: lightText ? "#fff" : "#111",
+                          lineHeight: 0.9,
+                          fontSize: "11px",
+                          textShadow: lightText
+                            ? "0 1px 3px rgba(0,0,0,0.55)"
+                            : "none",
+                        }}
+                      >
+                        {nameL1 && <div>{nameL1.slice(0, 8)}</div>}
+                        {nameL2 && <div>{nameL2.slice(0, 8)}</div>}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
               <button
                 onClick={() => bgFileRef.current?.click()}
