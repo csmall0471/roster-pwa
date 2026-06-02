@@ -19,6 +19,7 @@ import {
 } from "@/app/actions/cardgen";
 import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { TEMPLATES, getTemplate, type Template } from "./templates";
+import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
 import type { CardDesign, CardBackDesign } from "@/lib/types";
 
@@ -168,6 +169,15 @@ export default function CardEditor({
   );
   const [colorScheme, setColorScheme] = useState<"light" | "dark">(
     initialDesign?.text.color_scheme ?? "light"
+  );
+  const [nameFont, setNameFont] = useState(
+    initialDesign?.text.name_font ?? NAME_FONTS[0].id
+  );
+  const [nameSize, setNameSize] = useState(
+    initialDesign?.text.name_size ?? 1
+  );
+  const [nameItalic, setNameItalic] = useState(
+    initialDesign?.text.name_italic ?? false
   );
 
   const [tab, setTab] = useState<"photo" | "bg" | "text">("photo");
@@ -526,6 +536,9 @@ export default function CardEditor({
           name_line1: nameL1,
           name_line2: nameL2,
           color_scheme: colorScheme,
+          name_font: nameFont,
+          name_size: nameSize,
+          name_italic: nameItalic,
         },
         ...(backDesign ? { back: backDesign } : {}),
       };
@@ -823,15 +836,16 @@ export default function CardEditor({
             right: "5%",
             bottom: "5%",
             pointerEvents: "none",
-            fontFamily: "var(--font-anton), Impact, sans-serif",
+            fontFamily: getNameFont(nameFont).family,
+            fontStyle: nameItalic ? "italic" : "normal",
             color: titleColor,
             textShadow: titleShadow,
             lineHeight: 0.92,
             letterSpacing: "0.01em",
           }}
         >
-          <div style={{ fontSize: "min(11vw, 64px)" }}>{nameL1}</div>
-          <div style={{ fontSize: "min(11vw, 64px)", marginTop: "2%" }}>
+          <div style={{ fontSize: `min(${11 * nameSize}vw, ${64 * nameSize}px)` }}>{nameL1}</div>
+          <div style={{ fontSize: `min(${11 * nameSize}vw, ${64 * nameSize}px)`, marginTop: "2%" }}>
             {nameL2}
           </div>
         </div>
@@ -996,11 +1010,11 @@ export default function CardEditor({
                           left: "8%",
                           bottom: "6%",
                           pointerEvents: "none",
-                          fontFamily:
-                            "var(--font-anton), Impact, sans-serif",
+                          fontFamily: getNameFont(nameFont).family,
+                          fontStyle: nameItalic ? "italic" : "normal",
                           color: lightText ? "#fff" : "#111",
                           lineHeight: 0.9,
-                          fontSize: "11px",
+                          fontSize: `${11 * nameSize}px`,
                           textShadow: lightText
                             ? "0 1px 3px rgba(0,0,0,0.55)"
                             : "none",
@@ -1093,6 +1107,70 @@ export default function CardEditor({
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
+
+              {/* Font picker */}
+              <Field label="Name font">
+                <div className="grid grid-cols-3 gap-1.5">
+                  {NAME_FONTS.map((f) => {
+                    const selected = nameFont === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => setNameFont(f.id)}
+                        className={`rounded-md border px-2 py-2 text-center transition-colors ${
+                          selected
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
+                            : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+                        }`}
+                      >
+                        <div
+                          style={{
+                            fontFamily: f.family,
+                            fontSize: "18px",
+                            lineHeight: 1,
+                          }}
+                        >
+                          Aa
+                        </div>
+                        <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 truncate">
+                          {f.name}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              {/* Size */}
+              <Field label={`Size: ${Math.round(nameSize * 100)}%`}>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={1.5}
+                  step={0.05}
+                  value={nameSize}
+                  onChange={(e) => setNameSize(parseFloat(e.target.value))}
+                  className="w-full"
+                />
+              </Field>
+
+              {/* Italic toggle */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Italic
+                </span>
+                <button
+                  onClick={() => setNameItalic((v) => !v)}
+                  aria-pressed={nameItalic}
+                  className={`rounded-md border px-3 py-1 text-xs font-semibold transition-colors ${
+                    nameItalic
+                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
+                      : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  {nameItalic ? "On" : "Off"}
+                </button>
+              </div>
             </div>
           )}
         </div>

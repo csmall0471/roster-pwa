@@ -84,6 +84,9 @@ export interface CardDesign {
     name_line1: string;
     name_line2: string;
     color_scheme: "light" | "dark";
+    name_font?: string;
+    name_size?: number; // multiplier 0.5–1.5 against the base
+    name_italic?: boolean;
   };
   back?: CardBackDesign;
 }

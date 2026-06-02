@@ -1,5 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Anton } from "next/font/google";
+import {
+  Geist,
+  Geist_Mono,
+  Anton,
+  Bebas_Neue,
+  Archivo_Black,
+  Oswald,
+  Black_Ops_One,
+  Bungee,
+  Permanent_Marker,
+} from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import PullToRefresh from "./_components/PullToRefresh";
 import "./globals.css";
@@ -16,6 +26,42 @@ const geistMono = Geist_Mono({
 
 const anton = Anton({
   variable: "--font-anton",
+  weight: "400",
+  subsets: ["latin"],
+});
+
+const bebas = Bebas_Neue({
+  variable: "--font-bebas",
+  weight: "400",
+  subsets: ["latin"],
+});
+
+const archivoBlack = Archivo_Black({
+  variable: "--font-archivo-black",
+  weight: "400",
+  subsets: ["latin"],
+});
+
+const oswald = Oswald({
+  variable: "--font-oswald",
+  weight: "700",
+  subsets: ["latin"],
+});
+
+const blackOps = Black_Ops_One({
+  variable: "--font-black-ops",
+  weight: "400",
+  subsets: ["latin"],
+});
+
+const bungee = Bungee({
+  variable: "--font-bungee",
+  weight: "400",
+  subsets: ["latin"],
+});
+
+const marker = Permanent_Marker({
+  variable: "--font-marker",
   weight: "400",
   subsets: ["latin"],
 });
@@ -41,7 +87,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${anton.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${anton.variable} ${bebas.variable} ${archivoBlack.variable} ${oswald.variable} ${blackOps.variable} ${bungee.variable} ${marker.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <PullToRefresh />
