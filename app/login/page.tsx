@@ -176,7 +176,7 @@ export default function LoginPage() {
         </p>
 
         {/* Compliance footer */}
-        <div className="mt-6 pt-5 border-t border-gray-200 dark:border-gray-700 flex justify-center gap-5 text-xs text-gray-400 dark:text-gray-500">
+        <div className="mt-6 pt-5 border-t border-gray-200 dark:border-gray-700 flex justify-center items-center gap-5 text-xs text-gray-400 dark:text-gray-500">
           <a href="/privacy" className="hover:text-gray-600 dark:hover:text-gray-300 hover:underline transition-colors">
             Privacy Policy
           </a>
@@ -185,6 +185,17 @@ export default function LoginPage() {
           </a>
           <a href="mailto:csmall0471@gmail.com" className="hover:text-gray-600 dark:hover:text-gray-300 hover:underline transition-colors">
             Contact
+          </a>
+          {/* Discreet staff entry — sets the post-login redirect to the admin
+              dashboard so coaches don't have to type the URL. Reads as a
+              decorative dot to anyone else. */}
+          <a
+            href="/login?next=/teams"
+            aria-label="Staff"
+            title="Staff"
+            className="text-gray-200 dark:text-gray-800 hover:text-gray-500 dark:hover:text-gray-400 transition-colors select-none"
+          >
+            ·
           </a>
         </div>
       </div>
