@@ -289,6 +289,17 @@ function GameRow({
                   Text me the day before
                 </label>
               </div>
+              {reminderSms && (
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mt-1">
+                  By checking &ldquo;Text me the day before&rdquo; you agree to
+                  receive a recurring automated SMS reminder from CS Sports AZ
+                  for this signup. Msg freq varies. Msg&amp;Data rates may
+                  apply. Reply STOP to opt out, HELP for help. See{" "}
+                  <a href="/privacy" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">Privacy Policy</a>
+                  {" "}and{" "}
+                  <a href="/sms-terms" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">SMS Terms</a>.
+                </p>
+              )}
               {error && <p className="text-xs text-red-500">{error}</p>}
               <div className="flex items-center gap-3">
                 <button
