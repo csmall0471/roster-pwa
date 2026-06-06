@@ -184,22 +184,6 @@ function buildFrom(): string {
   return name ? `${name} <${email}>` : email
 }
 
-function emailPayMethodHtml(method: PaymentMethod, paymentAmount?: string | null): string {
-  if (!method.link) {
-    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(method.label)}: pay at the session</p>`
-  }
-  if (method.link.startsWith("tel:")) {
-    const phone = method.link.replace("tel:", "")
-    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(method.label)}: <a href="${method.link}" style="color:#ea580c;text-decoration:none;">${esc(phone)}</a></p>`
-  }
-  let url = method.link
-  if (url.includes("venmo.com") && paymentAmount) {
-    const amt = paymentAmount.replace(/[^0-9.]/g, "")
-    if (amt) url = `${url}${url.includes("?") ? "&" : "?"}txn=pay&amount=${amt}&note=Training`
-  }
-  return btn(method.label, url)
-}
-
 function locationMapRow(location: string): string {
   const encoded = encodeURIComponent(location)
   const appleUrl = `https://maps.apple.com/?q=${encoded}`
@@ -286,21 +270,11 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     endTime: payload.sessionEndTime ?? null,
   }]
 
-  const methods     = payload.paymentMethods ?? []
-  const linkedMethods = methods.filter(m => m.link)
-  const hasCash     = methods.some(m => !m.link)
-  // Strip any leading $ so the template doesn't double it
-  const payAmt      = payload.paymentAmount?.replace(/^\$+/, "").trim() || null
-
   // ── Plain-text fallback ──────────────────────────────────────────────────
   const dateLinesText = dates.length > 1
     ? dates.map(d => `  • ${fmtDateShort(d.date)}${fmtTimeRange(d.time, d.endTime)}`).join("\n")
     : `${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}`
   const locLine  = payload.location ? `\nLocation: ${payload.location}` : ""
-  const payLine  = payAmt ? `\n\nAmount due: $${payAmt}` : ""
-  const payLinks = linkedMethods.map(m => `  • ${m.label}: ${m.link}`).join("\n")
-  const cashLine = hasCash ? "  • Cash / Check at the session" : ""
-  const payMethods = [payLinks, cashLine].filter(Boolean).join("\n")
 
   let text: string
   if (isSignup) {
@@ -311,21 +285,16 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       "",
       dates.length > 1 ? `Sessions (${dates.length}):\n${dateLinesText}` : dateLinesText,
       locLine,
-      payLine,
-      payMethods ? `\nPay via:\n${payMethods}` : "",
       "",
       `To cancel or manage:\n${manageUrl}`,
       "",
       "See you there!\n— Coach Connor",
     ].filter(s => s !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim()
   } else {
-    const refundNote = payload.hasPaid
-      ? "\n\nCoach Connor will process a refund for any fees you have paid."
-      : ""
     const dateSection = dates.length > 1
       ? `${dates.length} sessions:\n${dates.map(d => `  • ${fmtDateShort(d.date)}${fmtTimeRange(d.time, d.endTime)}`).join("\n")}`
       : `${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}`
-    text = `Hi ${payload.parentFirstName},\n\n${payload.playerName}'s registration for ${payload.sessionTitle} has been cancelled.\n\n${dateSection}${locLine}${refundNote}\n\nSign up again at:\n${manageUrl}\n\n— Coach Connor`
+    text = `Hi ${payload.parentFirstName},\n\n${payload.playerName}'s registration for ${payload.sessionTitle} has been cancelled.\n\n${dateSection}${locLine}\n\nSign up again at:\n${manageUrl}\n\n— Coach Connor`
   }
 
   // ── HTML ─────────────────────────────────────────────────────────────────
@@ -353,15 +322,6 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       detailsHtml = infoTable(rows)
     }
 
-    const payHtml = payAmt
-      ? [
-          divider(),
-          `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Payment</p>`,
-          `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(payAmt)}</strong></p>`,
-          methods.map(m => emailPayMethodHtml(m, payAmt)).join(""),
-        ].filter(Boolean).join("\n")
-      : ""
-
     const cancelHtml = [
       divider(),
       `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel? Manage your registrations at any time.</p>`,
@@ -380,7 +340,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
       : ""
 
-    htmlBody = [introHtml, detailsHtml, imageHtml, descriptionHtml, notesHtml, payHtml, cancelHtml].filter(Boolean).join("\n")
+    htmlBody = [introHtml, detailsHtml, imageHtml, descriptionHtml, notesHtml, cancelHtml].filter(Boolean).join("\n")
   } else {
     let cancelDetailsHtml: string
     if (dates.length > 1) {
@@ -399,15 +359,10 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       cancelDetailsHtml = infoTable(rows)
     }
 
-    const refundHtml = payload.hasPaid
-      ? `${divider()}<p style="margin:0;font-size:14px;color:#374151;">Coach Connor will process a refund for any fees you have paid.</p>`
-      : ""
-
     htmlBody = [
       `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentFirstName)},</p>`,
       `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(payload.playerName)}</strong>'s registration for <strong>${esc(payload.sessionTitle)}</strong> has been cancelled.</p>`,
       cancelDetailsHtml,
-      refundHtml,
       divider(),
       `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Sign up again anytime.</p>`,
       btn("View Training Sessions", manageUrl, "#6b7280"),
@@ -476,24 +431,12 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
   const appUrl   = process.env.APP_URL ?? "https://cssports-az.com"
   const dateStr  = `${fmtDate(payload.sessionDate)}${fmtTime(payload.sessionTime)}`
   const locLine  = payload.location ? `\nLocation: ${payload.location}` : ""
-  const methods  = payload.paymentMethods ?? []
-  const linked   = methods.filter(m => m.link)
-  const hasCash  = methods.some(m => !m.link)
   const manageUrl = `${appUrl}/parent/training`
 
   if (payload.reminderEmail && payload.parentEmail) {
     const subject = `Reminder: Training session tomorrow — ${payload.title}`
 
-    // Plain-text
-    let payText = ""
-    if (!payload.hasPaid && payload.paymentAmount) {
-      const links = linked.map(m => `  • ${m.label}: ${m.link}`).join("\n")
-      const cash  = hasCash ? "  • Cash / Check at the session" : ""
-      payText = `\n\nAmount due: $${payload.paymentAmount}\nPay via:\n${[links, cash].filter(Boolean).join("\n")}`
-    } else if (payload.hasPaid) {
-      payText = "\n\nPayment confirmed — you're all set!"
-    }
-    const text = `Hi ${payload.parentName},\n\nJust a reminder that ${payload.playerName} is registered for ${payload.title} tomorrow (${dateStr}).${locLine}${payText}\n\nTo cancel:\n${manageUrl}\n\nSee you there!\n— Coach Connor`
+    const text = `Hi ${payload.parentName},\n\nJust a reminder that ${payload.playerName} is registered for ${payload.title} tomorrow (${dateStr}).${locLine}\n\nTo cancel:\n${manageUrl}\n\nSee you there!\n— Coach Connor`
 
     // HTML
     const timeDisplay = fmtTimeRange(payload.sessionTime, payload.sessionEndTime ?? null).replace(" at ", "").trim()
@@ -502,17 +445,6 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
       payload.sessionTime ? infoRow("Time", timeDisplay) : "",
       payload.location ? infoRow("Location", payload.location) : "",
     ].filter(Boolean).join("\n")
-
-    const payHtml = !payload.hasPaid && payload.paymentAmount
-      ? [
-          divider(),
-          `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Payment</p>`,
-          `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(payload.paymentAmount)}</strong></p>`,
-          methods.map(m => emailPayMethodHtml(m, payload.paymentAmount)).join(""),
-        ].filter(Boolean).join("\n")
-      : payload.hasPaid
-        ? `${divider()}<p style="margin:0;font-size:14px;color:#16a34a;font-weight:600;">Payment confirmed — you're all set!</p>`
-        : ""
 
     const htmlBody = [
       `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentName)},</p>`,
@@ -524,7 +456,6 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
       payload.notes
         ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
         : "",
-      payHtml,
       divider(),
       `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel?</p>`,
       btn("Cancel Registration", manageUrl, "#6b7280"),

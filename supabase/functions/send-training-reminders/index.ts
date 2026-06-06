@@ -36,22 +36,6 @@ function btn(label: string, url: string, color = "#ea580c"): string {
   return `<a href="${url}" style="display:inline-block;padding:11px 22px;background:${color};color:#ffffff;font-weight:600;font-size:14px;text-decoration:none;border-radius:8px;margin:4px 4px 4px 0;">${esc(label)}</a>`;
 }
 
-function payMethodHtml(m: { label: string; link: string | null }, paymentAmount: string | null): string {
-  if (!m.link) {
-    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(m.label)}: pay at the session</p>`;
-  }
-  if (m.link.startsWith("tel:")) {
-    const phone = m.link.replace("tel:", "");
-    return `<p style="margin:6px 0;font-size:14px;color:#374151;">${esc(m.label)}: <a href="${m.link}" style="color:#ea580c;text-decoration:none;">${esc(phone)}</a></p>`;
-  }
-  let url = m.link;
-  if (url.includes("venmo.com") && paymentAmount) {
-    const amt = paymentAmount.replace(/[^0-9.]/g, "");
-    if (amt) url = `${url}${url.includes("?") ? "&" : "?"}txn=pay&amount=${amt}&note=Training`;
-  }
-  return btn(m.label, url);
-}
-
 function infoRow(label: string, value: string): string {
   return `<tr>
     <td style="padding:5px 16px 5px 0;font-size:14px;color:#6b7280;white-space:nowrap;font-weight:500;vertical-align:top;">${esc(label)}</td>
@@ -148,14 +132,13 @@ Deno.serve(async (_req) => {
     .from("training_signups")
     .select(`
       id,
-      paid,
       reminder_email,
       reminder_sms,
       parents(first_name, last_name, email, phone),
       players(first_name, last_name),
       training_sessions!inner(
         title, session_date, session_time, session_end_time,
-        location, payment_amount, payment_methods, image_url, notes
+        location, image_url, notes
       )
     `)
     .eq("training_sessions.session_date", tomorrowStr);
@@ -176,30 +159,15 @@ Deno.serve(async (_req) => {
     const parent  = signup.parents   as any;
     const player  = signup.players   as any;
     const session = signup.training_sessions as any;
-    const hasPaid = (signup as any).paid ?? false;
 
     const playerName  = player ? `${player.first_name} ${player.last_name}` : "your player";
     const timeRange   = fmtTimeRange(session?.session_time ?? null, session?.session_end_time ?? null);
     const dateStr     = fmtDate(session?.session_date) + timeRange;
     const locationLine = session?.location ? `\nLocation: ${session.location}` : "";
 
-    const paymentAmount  = session?.payment_amount ?? null;
-    const paymentMethods: Array<{ label: string; link: string | null }> = session?.payment_methods ?? [];
-    const linkedMethods  = paymentMethods.filter((m: any) => m.link);
-    const hasCash        = paymentMethods.some((m: any) => !m.link);
-
     // ── Email ─────────────────────────────────────────────────────────────
     if (signup.reminder_email && parent?.email) {
-      // Plain-text fallback
-      let payText = "";
-      if (!hasPaid && paymentAmount) {
-        const links = linkedMethods.map((m: any) => `  • ${m.label}: ${m.link}`).join("\n");
-        const cash  = hasCash ? "  • Cash / Check at the session" : "";
-        payText = `\n\nAmount due: $${paymentAmount}\nPay via:\n${[links, cash].filter(Boolean).join("\n")}`;
-      } else if (hasPaid) {
-        payText = "\n\nPayment confirmed — you're all set!";
-      }
-      const text = `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session?.title} tomorrow (${dateStr}).${locationLine}${payText}\n\nTo cancel:\n${manageUrl}\n\nSee you there!\n— Coach Connor`;
+      const text = `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session?.title} tomorrow (${dateStr}).${locationLine}\n\nTo cancel:\n${manageUrl}\n\nSee you there!\n— Coach Connor`;
 
       // HTML
       const timeDisplay = timeRange.replace(" at ", "").trim();
@@ -208,17 +176,6 @@ Deno.serve(async (_req) => {
         session?.session_time ? infoRow("Time", timeDisplay) : "",
         session?.location ? locationMapRow(session.location) : "",
       ].filter(Boolean).join("\n");
-
-      const payHtml = !hasPaid && paymentAmount
-        ? [
-            divider(),
-            `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Payment</p>`,
-            `<p style="margin:0 0 14px;font-size:14px;color:#374151;">Amount due: <strong>$${esc(String(paymentAmount))}</strong></p>`,
-            paymentMethods.map((m: any) => payMethodHtml(m, paymentAmount)).join(""),
-          ].filter(Boolean).join("\n")
-        : hasPaid
-          ? `${divider()}<p style="margin:0;font-size:14px;color:#16a34a;font-weight:600;">Payment confirmed — you're all set!</p>`
-          : "";
 
       const imageUrl = session?.image_url ?? null;
       const notes    = session?.notes ?? null;
@@ -229,7 +186,6 @@ Deno.serve(async (_req) => {
         infoTable(rows),
         imageUrl ? `<img src="${imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin:16px 0;">` : "",
         notes ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(notes)}</p>` : "",
-        payHtml,
         divider(),
         `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel?</p>`,
         btn("Cancel Registration", manageUrl, "#6b7280"),

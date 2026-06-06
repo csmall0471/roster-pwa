@@ -56,7 +56,7 @@ export default async function DashboardPage() {
 
   const today = new Date().toISOString().split("T")[0];
 
-  const [{ data: players }, { data: rosterRows }, { data: unpaidSignups }, { data: calendarSignups }] = await Promise.all([
+  const [{ data: players }, { data: rosterRows }, { data: calendarSignups }] = await Promise.all([
     supabase
       .from("players")
       .select("id, first_name, last_name")
@@ -66,11 +66,6 @@ export default async function DashboardPage() {
       .select("player_id, teams(id, name, sport, season, age_group, organization, season_start, season_end, mojo_code, snack_signup_enabled)")
       .in("player_id", playerIds)
       .eq("status", "active"),
-    supabase
-      .from("training_signups")
-      .select("id, player_id, training_sessions(id, title, session_date, payment_amount, payment_methods)")
-      .in("player_id", playerIds)
-      .eq("paid", false),
     supabase
       .from("training_signups")
       .select("player_id, training_sessions!inner(id, title, session_date, session_time, location)")
@@ -177,11 +172,6 @@ export default async function DashboardPage() {
   calEvents.sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time ?? "").localeCompare(b.time ?? ""))
 
   const calPlayers = (players ?? []).map((p) => ({ id: p.id, firstName: p.first_name }))
-
-  const unpaidWithAmount = (unpaidSignups ?? []).filter((s: any) => {
-    const session = s.training_sessions;
-    return session?.payment_amount && parseFloat(session.payment_amount.replace(/[^0-9.]/g, "")) > 0;
-  });
 
   const playerMap = new Map((players ?? []).map((p) => [p.id, p]));
   const hasAny = activeEntries.length > 0 || futureEntries.length > 0;
@@ -336,44 +326,6 @@ export default async function DashboardPage() {
         <CalendarView events={calEvents} players={calPlayers} />
       </section>
 
-      {unpaidWithAmount.length > 0 && (
-        <div>
-          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
-            Outstanding payments
-          </h2>
-          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-amber-300 dark:border-amber-700 divide-y divide-gray-100 dark:divide-gray-800">
-            {unpaidWithAmount.map((s: any) => {
-              const session = s.training_sessions;
-              const player = playerMap.get(s.player_id);
-              const payMethods: Array<{ label: string; link?: string }> = session?.payment_methods ?? [];
-              const payLink = payMethods.find((m: any) => m.link)?.link;
-              return (
-                <div key={s.id} className="px-5 py-3 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{session?.title ?? "Training"}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500">
-                      {player ? `${player.first_name} ${player.last_name}` : ""}
-                      {session?.session_date ? ` · ${fmtDate(session.session_date)}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{session?.payment_amount}</span>
-                    {payLink ? (
-                      <a href={payLink} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
-                        Pay →
-                      </a>
-                    ) : (
-                      <Link href="/parent/training" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
-                        View →
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

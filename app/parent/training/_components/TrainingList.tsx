@@ -99,51 +99,6 @@ function groupBySeries(sessions: TrainingSessionForParent[]) {
   return map
 }
 
-// ── PayLink ───────────────────────────────────────────────────────────────────
-
-function PayLink({
-  method,
-  paymentAmount,
-  className = "text-xs text-blue-600 dark:text-blue-400 hover:underline",
-}: {
-  method: PaymentMethod
-  paymentAmount: string | null
-  className?: string
-}) {
-  const [copied, setCopied] = useState(false)
-  if (!method.link) return null
-
-  if (method.link.startsWith("tel:")) {
-    const phone = method.link.replace("tel:", "")
-    return (
-      <button
-        onClick={() => {
-          track("training_payment_clicked", { method: method.label });
-          logClientActivity("training_payment_clicked", { method: method.label }).catch(() => {});
-          navigator.clipboard.writeText(phone)
-          setCopied(true)
-          setTimeout(() => setCopied(false), 2000)
-        }}
-        className={className}
-      >
-        {copied ? "Copied!" : `${method.label}: ${phone}`}
-      </button>
-    )
-  }
-
-  let url = method.link
-  if (url.includes("venmo.com") && paymentAmount) {
-    const amt = paymentAmount.replace(/[^0-9.]/g, "")
-    if (amt) url = `${url}${url.includes("?") ? "&" : "?"}txn=pay&amount=${amt}&note=Training`
-  }
-
-  return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className={className} onClick={() => { track("training_payment_clicked", { method: method.label }); logClientActivity("training_payment_clicked", { method: method.label }).catch(() => {}); }}>
-      Pay ${paymentAmount ?? ""} via {method.label} →
-    </a>
-  )
-}
-
 // ── TrainingList ──────────────────────────────────────────────────────────────
 
 export default function TrainingList({
@@ -203,60 +158,8 @@ export default function TrainingList({
 
   const grouped = useMemo(() => groupBySeries(sessions), [sessions])
 
-  const unpaidTotal = useMemo(() => {
-    let total = 0
-    for (const s of sessions) {
-      if (!s.payment_amount) continue
-      const amount = parseFloat(s.payment_amount.replace(/[^0-9.]/g, ""))
-      if (isNaN(amount)) continue
-      for (const p of s.players) {
-        if (p.signup_id && !p.paid) total += amount
-      }
-    }
-    return total
-  }, [sessions])
-
-  const unpaidPayLinks = useMemo(() => {
-    const seen = new Set<string>()
-    const links: PaymentMethod[] = []
-    for (const s of sessions) {
-      if (!s.payment_amount) continue
-      for (const p of s.players) {
-        if (!p.signup_id || p.paid) continue
-        const chosen = (s.payment_methods ?? []).find((m) => m.label === p.payment_method)
-        if (chosen?.link && !seen.has(chosen.label)) {
-          seen.add(chosen.label)
-          links.push(chosen)
-        }
-      }
-    }
-    return links
-  }, [sessions])
-
   return (
     <div className="space-y-3">
-      {unpaidTotal > 0 && (
-        <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-4 py-3">
-          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-            Outstanding balance: ${unpaidTotal.toFixed(2)}
-          </p>
-          <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-            Payment due for registered training sessions
-          </p>
-          {unpaidPayLinks.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {unpaidPayLinks.map((m) => (
-                <PayLink
-                  key={m.label}
-                  method={m}
-                  paymentAmount={unpaidTotal.toFixed(2)}
-                  className="text-xs text-amber-700 dark:text-amber-300 font-medium hover:underline"
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
       {Array.from(grouped.values())
         .filter((seriesSessions) => seriesSessions.some((s) => s.players.length > 0))
         .map((seriesSessions) => (
@@ -317,8 +220,7 @@ function SeriesGroup({
       .join(" / ")
   })()
 
-  const costLabel  = firstSession.payment_amount ? `${firstSession.payment_amount}/session` : null
-  const metaItems  = [firstSession.location, costLabel].filter(Boolean)
+  const metaItems  = [firstSession.location].filter(Boolean)
 
   // All eligible players across the entire series (deduplicated)
   const allPlayers = useMemo(() => {
@@ -514,15 +416,10 @@ function SeriesPlayerRow({
     [unregisteredSessions]
   )
 
-  const firstSession       = eligibleSessions[0]
-  const paymentMethods     = firstSession?.payment_methods ?? []
-  const paymentAmount      = firstSession?.payment_amount ?? null
-  const needsPaymentChoice = paymentMethods.length > 0
-  const needsForm          = needsPaymentChoice || unregisteredSessions.length > 1
+  const needsForm = unregisteredSessions.length > 1
 
   const [showForm, setShowForm]           = useState(false)
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
-  const [selectedMethod, setMethod]       = useState<string | null>(null)
   const [reminderEmail, setReminderEmail] = useState(true)
   const [reminderSms, setReminderSms]     = useState(false)
   const [error, setError]                 = useState<string | null>(null)
@@ -548,11 +445,11 @@ function SeriesPlayerRow({
       const ids = [...selectedIds]
       if (ids.length === 0) return
       if (ids.length === 1) {
-        const result = await signUpForTraining(ids[0], playerId, selectedMethod, reminderEmail, reminderSms)
+        const result = await signUpForTraining(ids[0], playerId, null, reminderEmail, reminderSms)
         if (result.error) { setError(result.error); return }
         onSignup(ids[0], result.signupId!)
       } else {
-        const result = await bulkSignUpForTraining(ids, playerId, selectedMethod, reminderEmail, reminderSms)
+        const result = await bulkSignUpForTraining(ids, playerId, null, reminderEmail, reminderSms)
         if (result.error) { setError(result.error); return }
         onBulkSignup(result.results)
       }
@@ -597,16 +494,6 @@ function SeriesPlayerRow({
     })
   }
 
-  // Payment summary for registered sessions
-  const paidCount   = registeredSessions.filter((s) => s.players.find((p) => p.player_id === playerId)?.paid).length
-  const unpaidCount = registeredSessions.length - paidCount
-  const amtNum      = paymentAmount ? parseFloat(paymentAmount.replace(/[^0-9.]/g, "")) || 0 : 0
-  const totalDue    = unpaidCount * amtNum
-  const firstUnpaid = registeredSessions.find((s) => !s.players.find((p) => p.player_id === playerId)?.paid)
-  const unpaidPayMethod = paymentMethods.find(
-    (m) => m.label === firstUnpaid?.players.find((p) => p.player_id === playerId)?.payment_method
-  )
-
   return (
     <div className="px-5 py-3 bg-white dark:bg-gray-900">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -626,47 +513,29 @@ function SeriesPlayerRow({
 
           {registeredSessions.length > 0 && (
             <>
-              {/* Payment summary — once per player, not per session */}
-              <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+              <div className="mt-0.5">
                 <span className="text-xs text-gray-500 dark:text-gray-400">
                   {registeredSessions.length} session{registeredSessions.length !== 1 ? "s" : ""} registered
                 </span>
-                {paymentAmount && (
-                  unpaidCount > 0 ? (
-                    <>
-                      <span className="text-xs text-amber-600 dark:text-amber-400">
-                        · ${totalDue.toFixed(2)} due
-                      </span>
-                      {unpaidPayMethod && (
-                        <PayLink method={unpaidPayMethod} paymentAmount={totalDue.toFixed(2)} />
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-xs text-green-600 dark:text-green-400">· All paid ✓</span>
-                  )
-                )}
               </div>
 
               {/* Per-session rows — date + status + cancel */}
               <div className="mt-1.5 space-y-1">
-                {registeredSessions.map((s) => {
-                  const playerData = s.players.find((p) => p.player_id === playerId)!
-                  return (
-                    <div key={s.id} className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-500 dark:text-gray-400">{fmtShortDate(s.session_date)}</span>
-                      <span className={`text-xs font-medium ${playerData.paid ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
-                        ✓{playerData.paid ? " Paid" : " Registered"}
-                      </span>
-                      <button
-                        onClick={() => handleCancel(s.id)}
-                        disabled={pending}
-                        className="text-xs text-red-500 hover:underline disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )
-                })}
+                {registeredSessions.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{fmtShortDate(s.session_date)}</span>
+                    <span className="text-xs font-medium text-green-700 dark:text-green-400">
+                      ✓ Registered
+                    </span>
+                    <button
+                      onClick={() => handleCancel(s.id)}
+                      disabled={pending}
+                      className="text-xs text-red-500 hover:underline disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ))}
               </div>
             </>
           )}
@@ -685,28 +554,6 @@ function SeriesPlayerRow({
 
       {showForm && (
         <div className="mt-3 space-y-3 pl-1">
-          {needsPaymentChoice && (
-            <div className="space-y-1.5">
-              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-                How will you pay{paymentAmount ? ` (${paymentAmount})` : ""}?
-              </p>
-              <div className="flex flex-wrap gap-3">
-                {paymentMethods.map((pm) => (
-                  <label key={pm.label} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                    <input
-                      type="radio"
-                      name={`pay-${playerId}`}
-                      checked={selectedMethod === pm.label}
-                      onChange={() => setMethod(pm.label)}
-                      className="accent-blue-600"
-                    />
-                    {pm.label}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
           {unregisteredSessions.length > 1 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between flex-wrap gap-1">
@@ -806,7 +653,6 @@ function SeriesPlayerRow({
               onClick={handleSubmit}
               disabled={
                 pending ||
-                (needsPaymentChoice && !selectedMethod) ||
                 (unregisteredSessions.length > 1 && selectedIds.size === 0)
               }
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
@@ -818,7 +664,7 @@ function SeriesPlayerRow({
                   : "Confirm"}
             </button>
             <button
-              onClick={() => { setShowForm(false); setMethod(null) }}
+              onClick={() => setShowForm(false)}
               className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
             >
               Cancel
@@ -889,10 +735,6 @@ function BulkPlayerForm({
   onSuccess: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
   onDone:    () => void
 }) {
-  const paymentMethods     = sessions[0]?.payment_methods ?? []
-  const paymentAmount      = sessions[0]?.payment_amount ?? null
-  const needsPaymentChoice = paymentMethods.length > 0
-
   const availableSessions = useMemo(() =>
     sessions.filter((s) =>
       players.some((pl) =>
@@ -909,7 +751,6 @@ function BulkPlayerForm({
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(
     () => new Set(availableSessions.map((s) => s.id))
   )
-  const [paymentMethod, setPaymentMethod]     = useState<string | null>(null)
   const [reminderEmail, setReminderEmail]     = useState(true)
   const [reminderSms, setReminderSms]         = useState(false)
   const [errors, setErrors]                   = useState<string[]>([])
@@ -925,7 +766,7 @@ function BulkPlayerForm({
           return s?.players.some((p) => p.player_id === playerId && !p.signup_id) && (s?.total_signups ?? 0) < (s?.max_players ?? 0)
         })
         if (sessionIds.length === 0) continue
-        const result = await bulkSignUpForTraining(sessionIds, playerId, paymentMethod, reminderEmail, reminderSms)
+        const result = await bulkSignUpForTraining(sessionIds, playerId, null, reminderEmail, reminderSms)
         if (result.error) {
           const pl = players.find((p) => p.player_id === playerId)
           errs.push(`${pl?.first_name ?? "Player"}: ${result.error}`)
@@ -1005,28 +846,6 @@ function BulkPlayerForm({
         </div>
       )}
 
-      {needsPaymentChoice && (
-        <div>
-          <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
-            How will you pay{paymentAmount ? ` (${paymentAmount}/player per session)` : ""}?
-          </p>
-          <div className="flex flex-wrap gap-3">
-            {paymentMethods.map((pm) => (
-              <label key={pm.label} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input
-                  type="radio"
-                  name="bulk-pay"
-                  checked={paymentMethod === pm.label}
-                  onChange={() => setPaymentMethod(pm.label)}
-                  className="accent-blue-600"
-                />
-                {pm.label}
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
           <input type="checkbox" checked={reminderEmail} onChange={(e) => setReminderEmail(e.target.checked)} className="accent-blue-600" />
@@ -1059,8 +878,7 @@ function BulkPlayerForm({
           disabled={
             pending ||
             selectedPlayers.size === 0 ||
-            effectiveSessionCount === 0 ||
-            (needsPaymentChoice && !paymentMethod)
+            effectiveSessionCount === 0
           }
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
