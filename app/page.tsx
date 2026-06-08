@@ -101,10 +101,19 @@ export default async function RootPage() {
       {/* SMS program — the critical block for A2P review */}
       <section className="max-w-3xl mx-auto px-6 pb-12">
         <div className="bg-white border border-gray-200 rounded-2xl p-6 sm:p-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-2">SMS reminders</h2>
-          <p className="text-sm text-gray-500 mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-2">SMS reminders (optional)</h2>
+          <p className="text-sm text-gray-500 mb-4">
             How the text-message program works on this site
           </p>
+          <div className="mb-6 p-3 border-l-4 border-blue-500 bg-blue-50 rounded">
+            <p className="text-sm text-gray-800 leading-snug">
+              <strong>SMS reminders are completely optional.</strong> Every
+              feature of cssports-az.com (signing in, claiming a snack slot,
+              registering for training, viewing schedules) works without
+              opting in to SMS. Receiving the sign-in verification code does
+              not enroll anyone in reminders.
+            </p>
+          </div>
 
           <h3 className="text-sm font-semibold text-gray-900 mb-2">
             What messages parents receive

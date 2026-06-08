@@ -420,7 +420,8 @@ function SeriesPlayerRow({
 
   const [showForm, setShowForm]           = useState(false)
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
-  const [reminderEmail, setReminderEmail] = useState(true)
+  // Reminder opts default off — neither email nor SMS is required to register.
+  const [reminderEmail, setReminderEmail] = useState(false)
   const [reminderSms, setReminderSms]     = useState(false)
   const [error, setError]                 = useState<string | null>(null)
   const [pending, start]                  = useTransition()
@@ -614,25 +615,30 @@ function SeriesPlayerRow({
             </div>
           )}
 
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={reminderEmail}
-                onChange={(e) => { if (!e.target.checked && !reminderSms) return; setReminderEmail(e.target.checked) }}
-                className="accent-blue-600"
-              />
-              Email reminder
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={reminderSms}
-                onChange={(e) => { if (!e.target.checked && !reminderEmail) return; setReminderSms(e.target.checked) }}
-                className="accent-blue-600"
-              />
-              Text reminder
-            </label>
+          <div>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+              Reminders are optional — you can confirm without either.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reminderEmail}
+                  onChange={(e) => setReminderEmail(e.target.checked)}
+                  className="accent-blue-600"
+                />
+                Email reminder
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reminderSms}
+                  onChange={(e) => setReminderSms(e.target.checked)}
+                  className="accent-blue-600"
+                />
+                Text reminder
+              </label>
+            </div>
           </div>
           {reminderSms && (
             <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mt-1">
@@ -751,7 +757,8 @@ function BulkPlayerForm({
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(
     () => new Set(availableSessions.map((s) => s.id))
   )
-  const [reminderEmail, setReminderEmail]     = useState(true)
+  // Reminder opts default off — neither email nor SMS is required to register.
+  const [reminderEmail, setReminderEmail]     = useState(false)
   const [reminderSms, setReminderSms]         = useState(false)
   const [errors, setErrors]                   = useState<string[]>([])
   const [pending, start]                      = useTransition()
@@ -846,15 +853,20 @@ function BulkPlayerForm({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-4">
-        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-          <input type="checkbox" checked={reminderEmail} onChange={(e) => setReminderEmail(e.target.checked)} className="accent-blue-600" />
-          Email reminder
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-          <input type="checkbox" checked={reminderSms} onChange={(e) => setReminderSms(e.target.checked)} className="accent-blue-600" />
-          Text reminder
-        </label>
+      <div>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+          Reminders are optional — you can register without either.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+            <input type="checkbox" checked={reminderEmail} onChange={(e) => setReminderEmail(e.target.checked)} className="accent-blue-600" />
+            Email reminder
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+            <input type="checkbox" checked={reminderSms} onChange={(e) => setReminderSms(e.target.checked)} className="accent-blue-600" />
+            Text reminder
+          </label>
+        </div>
       </div>
       {reminderSms && (
         <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mt-1">

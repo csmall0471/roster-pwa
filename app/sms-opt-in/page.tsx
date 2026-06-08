@@ -11,7 +11,10 @@ export default function SmsOptInPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!checked) {
-      setError("Please check the consent box to continue.");
+      // We don't block use of any service — this page's only purpose is the
+      // optional SMS opt-in itself. The hint just tells the user to tick the
+      // box if that's what they came here for.
+      setError("To sign up for SMS reminders, please tick the consent box. Reminders are optional — you can use cssports-az.com without opting in.");
       return;
     }
     setError(null);
@@ -25,7 +28,12 @@ export default function SmsOptInPage() {
           <div className="text-5xl mb-3 select-none">🏀🏀🏀</div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">CS Sports AZ</h1>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            Sign up for SMS reminders from Coach Connor
+            Optional SMS reminders from Coach Connor
+          </p>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-500 leading-relaxed">
+            SMS reminders are entirely optional. The team roster app and all
+            its features (signing up for snacks, registering for training,
+            viewing schedules) work the same without opting in here.
           </p>
         </div>
 

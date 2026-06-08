@@ -13,6 +13,16 @@ export default function SmsTermsPage() {
       <h1 className="text-3xl font-bold mb-2">SMS Consent &amp; Terms</h1>
       <p className="text-sm text-gray-500 mb-8">Last updated: June 2026</p>
 
+      <section className="mb-8 p-4 border-l-4 border-blue-500 bg-blue-50 rounded">
+        <p className="text-sm text-gray-800 leading-relaxed">
+          <strong>SMS reminders are entirely optional.</strong> No service,
+          team registration, snack signup, training registration, or any other
+          feature of cssports-az.com requires you to opt in to SMS. Receiving
+          the one-time login code is for phone-number verification only and
+          does not enroll you in the reminders program.
+        </p>
+      </section>
+
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">Who sends these messages</h2>
         <p className="text-gray-700 leading-relaxed">

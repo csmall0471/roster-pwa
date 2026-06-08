@@ -145,7 +145,8 @@ function GameRow({
   dimmed: boolean;
 }) {
   const [showSignupForm, setShowSignupForm] = useState(false);
-  const [reminderEmail, setReminderEmail]   = useState(true);
+  // Both reminder options default off so SMS is never a precondition.
+  const [reminderEmail, setReminderEmail]   = useState(false);
   const [reminderSms, setReminderSms]       = useState(false);
   const [error, setError]                   = useState<string | null>(null);
   const [pending, start]                    = useTransition();
@@ -267,14 +268,17 @@ function GameRow({
           ) : showSignupForm ? (
             <div className="space-y-2">
               <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                Reminders for {fmtDate(game.game_date)}?
+                Optional reminders for {fmtDate(game.game_date)}
+              </p>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Both are optional — you can confirm without picking either.
               </p>
               <div className="flex flex-wrap gap-4">
                 <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={reminderEmail}
-                    onChange={(e) => { if (!e.target.checked && !reminderSms) return; setReminderEmail(e.target.checked) }}
+                    onChange={(e) => setReminderEmail(e.target.checked)}
                     className="accent-green-600"
                   />
                   Email me the day before
@@ -283,7 +287,7 @@ function GameRow({
                   <input
                     type="checkbox"
                     checked={reminderSms}
-                    onChange={(e) => { if (!e.target.checked && !reminderEmail) return; setReminderSms(e.target.checked) }}
+                    onChange={(e) => setReminderSms(e.target.checked)}
                     className="accent-green-600"
                   />
                   Text me the day before

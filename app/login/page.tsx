@@ -163,8 +163,11 @@ export default function LoginPage() {
               >
                 {loading ? "Sending…" : "Send verification code"}
               </button>
-              <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-                We&apos;ll text you a one-time code. US numbers only.
+              <p className="text-xs text-gray-400 dark:text-gray-500 text-center leading-relaxed">
+                We&apos;ll text you a one-time code to verify the number. US
+                numbers only. This is for sign-in verification only and is{" "}
+                <strong>not</strong> SMS reminder opt-in — you will not receive
+                any reminders unless you opt in separately inside the app.
               </p>
             </form>
           )}
