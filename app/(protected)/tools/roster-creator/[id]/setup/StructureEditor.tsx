@@ -100,7 +100,12 @@ export default function StructureEditor({
         <span className="text-xs text-gray-400">
           One sheet per division, one row per team (coach name, or &ldquo;Team N&rdquo; for an open slot).
         </span>
-        {busy && <span className="text-xs text-blue-500">working…</span>}
+        {busy && (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            Working…
+          </span>
+        )}
       </div>
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
