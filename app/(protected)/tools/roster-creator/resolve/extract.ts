@@ -85,7 +85,10 @@ function emptyIntent(id: string): ExtractedIntent {
 async function extractBatch(
   client: Anthropic,
   batch: RawPlayer[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // Reports players finished WITHIN this batch as they stream in, so the overall
+  // bar climbs continuously instead of jumping a whole batch at a time.
+  onPlayer?: (delta: number) => void
 ): Promise<ExtractedIntent[]> {
   const lines = batch
     .map((p) => {
@@ -100,8 +103,18 @@ async function extractBatch(
   const byId = new Map(batch.map((p) => [p.id, emptyIntent(p.id)]));
 
   let raw = "";
+  let reported = 0;
+  // Make sure every player in this batch is counted once the batch is done, even
+  // if the stream-based estimate undercounted (or the batch failed).
+  const topUp = () => {
+    if (onPlayer && reported < batch.length) {
+      onPlayer(batch.length - reported);
+      reported = batch.length;
+    }
+  };
+
   try {
-    const response = await client.messages.create(
+    const stream = client.messages.stream(
       {
         model: MODEL,
         max_tokens: 8000,
@@ -112,7 +125,17 @@ async function extractBatch(
       },
       { signal }
     );
-    const textBlock = response.content.find((b) => b.type === "text");
+    // Each player object ends with a "notes" field, so counting "notes": keys in
+    // the streamed text is a good proxy for players completed so far.
+    stream.on("text", (_delta, snapshot) => {
+      const count = Math.min((snapshot.match(/"notes"\s*:/g) ?? []).length, batch.length);
+      if (onPlayer && count > reported) {
+        onPlayer(count - reported);
+        reported = count;
+      }
+    });
+    const final = await stream.finalMessage();
+    const textBlock = final.content.find((b) => b.type === "text");
     raw = textBlock && textBlock.type === "text" ? textBlock.text : "";
   } catch (e) {
     // Account-level errors (billing/auth) hit every batch — fail loudly instead
@@ -132,7 +155,8 @@ async function extractBatch(
     }
     // Otherwise one flaky batch shouldn't kill the whole run — log and continue.
     console.error(`[extract] batch failed (${batch.length} players):`, e instanceof Error ? e.message : e);
-    return [...byId.values()];
+  } finally {
+    topUp();
   }
 
   if (!raw) return [...byId.values()];
@@ -172,16 +196,19 @@ export async function extractIntent(
 
   const results: ExtractedIntent[][] = new Array(batches.length);
   let done = 0;
+  // Incremented player-by-player as each batch streams in (across all workers).
+  const bump = (delta: number) => {
+    done += delta;
+    onProgress?.(done, players.length);
+  };
   let next = 0;
   async function worker() {
     while (next < batches.length) {
       if (signal?.aborted) throw new Error("aborted");
       const idx = next++;
       const t0 = Date.now();
-      results[idx] = await extractBatch(client, batches[idx], signal);
-      done += batches[idx].length;
+      results[idx] = await extractBatch(client, batches[idx], signal, bump);
       console.error(`[extract] batch ${idx + 1}/${batches.length} done in ${((Date.now() - t0) / 1000).toFixed(1)}s — ${done}/${players.length}`);
-      onProgress?.(done, players.length);
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));

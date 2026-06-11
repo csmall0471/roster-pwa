@@ -136,7 +136,15 @@ export function packageOf(record: CanonicalRecord): string {
 export function isCoachChild(playerLastName: string, accountName: string, coachName: string): boolean {
   const coach = coachNorm(coachName);
   if (!coach) return false;
-  if (accountName && jaroWinkler(coachNorm(accountName), coach) >= 0.9) return true;
+  // The parent IS this coach — match the FULL name, but guard against a shared
+  // FIRST name alone (parent "Brandon Nicastro" vs coach "Brandon Ryan" scores
+  // 0.90 overall) by also requiring the surnames to be similar.
+  if (
+    accountName &&
+    jaroWinkler(coachNorm(accountName), coach) >= 0.9 &&
+    jaroWinkler(lastToken(coachNorm(accountName)), lastToken(coach)) >= 0.7
+  )
+    return true;
   const cl = lastToken(coach);
   if (cl.length < 3) return false; // too-short surnames invite false matches
   return lastToken(coachNorm(accountName)) === cl || lastToken(coachNorm(playerLastName)) === cl;

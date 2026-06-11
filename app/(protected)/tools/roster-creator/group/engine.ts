@@ -40,6 +40,10 @@ export function parseNights(raw: string): string[] {
 export type GroupPlayer = {
   id: string;
   coachId: string | null;
+  // True if the family asked for a coach at all — even one not on the roster
+  // (coachId null). Lets "coach unmet" flag unmatched requests, not just
+  // matched-but-wrong-team ones. Defaults to "has a matched coach" when unset.
+  coachReq?: boolean;
   teamNameId: string | null;
   nights: string[];
   buddyIds: string[];
@@ -151,14 +155,15 @@ export function assignDivision(input: AssignInput): AssignResult {
   }
 
   // 4. Buddies: pull a free agent onto a team already holding one of their
-  //    buddies — but only if that team is still under target (a buddy request
-  //    doesn't justify going over). Process in input order for determinism.
+  //    requested buddies. Like a coach request, honoring a buddy is worth going
+  //    a bit over target — otherwise a kid whose buddies are all on a full team
+  //    gets stranded elsewhere. Process in input order for determinism.
   const stillFree: GroupPlayer[] = [];
   for (const p of free) {
     let host: WorkingTeam | null = null;
     for (const bid of p.buddyIds) {
       const bt = teamOf.get(bid);
-      if (bt && bt.members.length < target) {
+      if (bt) {
         host = bt;
         break;
       }
@@ -280,7 +285,11 @@ export function flagsFor(
   team: { coachId: string | null; playerIds: string[]; night: string | null }
 ): PlayerFlags {
   const teamMates = new Set(team.playerIds);
-  const coachUnmet = player.coachId != null && team.coachId !== player.coachId;
+  // Requested a coach (matched or not) but isn't on that coach's team. An
+  // unmatched request (coach not on the roster) can never be on the right team,
+  // so it always counts as unmet.
+  const requestedCoach = player.coachReq ?? player.coachId != null;
+  const coachUnmet = requestedCoach && !(player.coachId != null && team.coachId === player.coachId);
   const buddyUnmet =
     player.buddyIds.length > 0 && !player.buddyIds.some((id) => teamMates.has(id));
   const nightUnmet = team.night != null && !player.nights.includes(team.night);

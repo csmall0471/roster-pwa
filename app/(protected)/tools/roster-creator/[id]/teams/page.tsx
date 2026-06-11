@@ -69,6 +69,10 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
     // They asked for a coach if either name field holds a real (non-"none") value —
     // counts unmatched requests too, so satisfaction isn't inflated to 100%.
     coachReq: !isNoRequest((p.coach_first as string) ?? "") || !isNoRequest((p.coach_last as string) ?? ""),
+    coachReqText: [p.coach_first, p.coach_last]
+      .filter((v) => v && !isNoRequest(v as string))
+      .join(" ")
+      .trim(),
     teamNameId: (p.resolved_team_name_id as string | null) ?? null,
     nights: parseNights((p.practice_nights as string) ?? ""),
     buddyIds: [...(buddies.get(p.id as string) ?? [])],

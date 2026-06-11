@@ -87,6 +87,14 @@ export default function PlayerDetail({
           (suggestion ? "" : ` No team in this division is run by ${coachLabel(player.coachId)}.`),
       suggestion,
     });
+  } else if (player.coachReq && player.coachReqText) {
+    // Requested a coach who isn't on this division's roster — can't be matched.
+    lines.push({
+      key: "coach",
+      label: `Coach — ${player.coachReqText}`,
+      status: "unmet",
+      explanation: `“${player.coachReqText}” isn't on this division's coach roster, so the request couldn't be matched — add them in Structure and re-analyze, or this player stays a free agent.`,
+    });
   }
 
   if (player.teamNameId) {

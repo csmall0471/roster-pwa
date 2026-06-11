@@ -25,6 +25,7 @@ export type BoardPlayer = {
   teamId: string | null;
   coachId: string | null; // the MATCHED roster coach (null if they asked for someone not on it)
   coachReq: boolean; // they asked for a coach at all (matched or not) — the honest denominator
+  coachReqText: string; // what they typed (for unmatched requests: the coach not on the roster)
   teamNameId: string | null;
   nights: string[];
   buddyIds: string[];
@@ -466,13 +467,13 @@ export default function TeamsBoard({
                 const others = members.filter((p) => !isRequester(p));
                 const card = (p: BoardPlayer) => (
                   <PlayerCard key={p.id} player={p} onSelect={() => setSelectedId(p.id)} flags={flagsFor(
-                    { id: p.id, coachId: p.coachId, teamNameId: p.teamNameId, nights: p.nights, buddyIds: p.buddyIds },
+                    { id: p.id, coachId: p.coachId, coachReq: p.coachReq, teamNameId: p.teamNameId, nights: p.nights, buddyIds: p.buddyIds },
                     { coachId: teamCoach.get(t.id) ?? null, playerIds: members.map((m) => m.id), night: t.night }
                   )} />
                 );
                 return (
                   <div className="space-y-1">
-                    {requesters.length > 0 && others.length > 0 && (
+                    {requesters.length > 0 && (
                       <p className="text-[10px] uppercase tracking-wide text-gray-300 dark:text-gray-600">requested</p>
                     )}
                     {requesters.map(card)}
