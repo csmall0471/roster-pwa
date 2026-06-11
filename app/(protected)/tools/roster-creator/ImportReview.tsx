@@ -261,12 +261,20 @@ export default function ImportReview({
       </section>
       )}
 
-      {/* Column mapping */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+      {/* Column mapping — auto-detected; collapsed unless a required field is unmapped */}
+      <details
+        open={missingRequired.length > 0}
+        className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+      >
+        <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
           Column mapping
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
+          <span className="font-normal normal-case text-xs text-gray-400">
+            {missingRequired.length > 0
+              ? `— ${missingRequired.length} required field${missingRequired.length === 1 ? "" : "s"} need mapping`
+              : "— auto-detected; expand only if a column looks wrong"}
+          </span>
+        </summary>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 px-4 pb-4">
           {FIELD_DEFS.map((f) => (
             <label key={f.key} className="flex flex-col gap-1">
               <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
@@ -289,11 +297,11 @@ export default function ImportReview({
           ))}
         </div>
         {missingRequired.length > 0 && (
-          <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
+          <p className="px-4 pb-4 text-sm text-amber-600 dark:text-amber-400">
             Map these required fields before importing: {missingRequired.map((f) => f.label).join(", ")}
           </p>
         )}
-      </section>
+      </details>
 
       {/* Team settings */}
       <section>
