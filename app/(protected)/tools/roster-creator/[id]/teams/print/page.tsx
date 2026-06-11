@@ -161,6 +161,11 @@ export default async function PrintRostersPage({ params }: { params: Promise<{ i
                       </div>
                       {/* Players: requesters first, then fill-ins */}
                       <ol className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {requesters.length > 0 && filled.length > 0 && (
+                          <li className="bg-gray-50 dark:bg-gray-800/50 px-4 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                            Requested
+                          </li>
+                        )}
                         {requesters.map((p, i) => (
                           <PlayerLi key={`r${i}`} p={p} n={i + 1} chip={c.chip} />
                         ))}

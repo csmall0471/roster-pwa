@@ -22,7 +22,7 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
       supabase.from("tb_divisions").select("id, name, position").eq("season_id", id).order("position"),
       supabase
         .from("tb_teams")
-        .select("id, division_id, name, practice_night, position")
+        .select("id, division_id, name, practice_night, position, coach_id")
         .eq("season_id", id)
         .order("position"),
       selectAll((from, to) =>
@@ -77,6 +77,7 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
     divisionId: t.division_id as string,
     name: t.name as string,
     night: (t.practice_night as string | null) ?? null,
+    coachId: (t.coach_id as string | null) ?? null,
   }));
 
   const config = normalizeConfig(season.grouping_config as Parameters<typeof normalizeConfig>[0]);

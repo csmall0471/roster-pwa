@@ -108,7 +108,17 @@ function computeBlock(
 ): Block {
   const teamById = new Map(teamsList.map((t) => [t.id, t]));
   const dom = dominantCoaches(players, assign);
-  const hasTeams = teamsList.length > 0;
+  // A team's coach is authoritative (tb_teams.coach_id) when set; open
+  // placeholder teams fall back to the dominant member request.
+  const teamCoach = new Map<string, string>();
+  for (const t of teamsList) {
+    const c = t.coachId ?? dom.get(t.id) ?? "";
+    if (c) teamCoach.set(t.id, c);
+  }
+  // "Has teams" means players have actually been ASSIGNED. tb_teams now exists
+  // from the coach-file setup (before you build), so gate satisfaction on real
+  // assignments — otherwise it reads a misleading 0% before any team is built.
+  const hasTeams = players.some((p) => (assign.get(p.id) ?? null) != null);
   const nameById = new Map(players.map((p) => [p.id, p.name]));
   // Most-requested teammates: count incoming buddy mentions.
   const buddyCount = new Map<string, number>();
@@ -119,7 +129,7 @@ function computeBlock(
     .map(([id, n]) => ({ label: nameById.get(id) ?? "—", count: n }));
   return {
     hasTeams,
-    sat: hasTeams ? satisfaction(players, assign, teamById, dom, teamNames) : null,
+    sat: hasTeams ? satisfaction(players, assign, teamById, teamCoach, teamNames) : null,
     vol: {
       players: players.length,
       coach: players.filter((p) => p.coachId).length,

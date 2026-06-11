@@ -29,7 +29,7 @@ export type BoardPlayer = {
   buddyIds: string[];
   raw: Record<string, unknown> | null; // the original CSV row, for the detail view
 };
-export type BoardTeam = { id: string; divisionId: string; name: string; night: string | null };
+export type BoardTeam = { id: string; divisionId: string; name: string; night: string | null; coachId: string | null };
 export type PlayUpFlag = {
   playerId: string;
   name: string;
@@ -215,6 +215,12 @@ export default function TeamsBoard({
   const teamCoach = useMemo(() => {
     const map = new Map<string, string | null>();
     for (const t of divisionTeams) {
+      // Authoritative coach from the uploaded roster wins; open placeholder teams
+      // (no coach_id) fall back to the dominant member request.
+      if (t.coachId) {
+        map.set(t.id, t.coachId);
+        continue;
+      }
       const counts = new Map<string, number>();
       for (const p of membersOf(t.id)) if (p.coachId) counts.set(p.coachId, (counts.get(p.coachId) ?? 0) + 1);
       const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -460,6 +466,9 @@ export default function TeamsBoard({
                 );
                 return (
                   <div className="space-y-1">
+                    {requesters.length > 0 && others.length > 0 && (
+                      <p className="text-[10px] uppercase tracking-wide text-gray-300 dark:text-gray-600">requested</p>
+                    )}
                     {requesters.map(card)}
                     {requesters.length > 0 && others.length > 0 && (
                       <p className="text-[10px] uppercase tracking-wide text-gray-300 dark:text-gray-600 pt-1">added to fill</p>
