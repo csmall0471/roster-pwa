@@ -491,7 +491,7 @@ export default function TeamsBoard({
           player={selectedPlayer}
           divisionTeams={divisionTeams}
           divisions={divisions}
-          players={divisionPlayers}
+          allPlayers={players}
           assign={assign}
           teamCoach={teamCoach}
           coachNames={coachNames}

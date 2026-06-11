@@ -5,10 +5,12 @@ import type { BoardPlayer, BoardTeam } from "./TeamsBoard";
 
 type Ev = { coach?: boolean; team?: boolean; buddy?: boolean; night?: boolean };
 type Suggestion = { teamId: string; label: string; tradeoffs: string[] };
+// "na" = a request that can't be met by moving within this division (buddy in
+// another division, or not on any roster).
 type Line = {
   key: string;
   label: string;
-  status: "met" | "unmet";
+  status: "met" | "unmet" | "na";
   explanation: string;
   suggestion?: Suggestion;
 };
@@ -17,7 +19,7 @@ export default function PlayerDetail({
   player,
   divisionTeams,
   divisions,
-  players,
+  allPlayers,
   assign,
   teamCoach,
   coachNames,
@@ -29,7 +31,7 @@ export default function PlayerDetail({
   player: BoardPlayer;
   divisionTeams: BoardTeam[];
   divisions: { id: string; name: string }[];
-  players: BoardPlayer[];
+  allPlayers: BoardPlayer[];
   assign: Map<string, string | null>;
   teamCoach: Map<string, string | null>;
   coachNames: Record<string, string>;
@@ -38,7 +40,8 @@ export default function PlayerDetail({
   onMoveDivision: (playerId: string, divisionId: string) => void;
   onClose: () => void;
 }) {
-  const byId = new Map(players.map((p) => [p.id, p]));
+  const allById = new Map(allPlayers.map((p) => [p.id, p])); // every division — to resolve cross-division buddies
+  const divName = new Map(divisions.map((d) => [d.id, d.name]));
   const teamById = new Map(divisionTeams.map((t) => [t.id, t]));
   const teamName = (id: string | null) => (id ? teamById.get(id)?.name ?? "—" : "Unassigned");
   const nightOf = (id: string | null) => (id ? teamById.get(id)?.night ?? null : null);
@@ -64,8 +67,6 @@ export default function PlayerDetail({
     if (cur.night === true && hyp.night === false) out.push("won't make the new team's practice night");
     return out;
   };
-
-  const buddyNames = player.buddyIds.map((id) => byId.get(id)?.name).filter(Boolean) as string[];
 
   const lines: Line[] = [];
 
@@ -105,27 +106,62 @@ export default function PlayerDetail({
     });
   }
 
-  if (player.buddyIds.length) {
-    const together = player.buddyIds.filter((id) => (assign.get(id) ?? null) === curTeam);
-    const met = together.length > 0;
+  // Raw teammate/family request text from the signup (covers the "no match"
+  // case where there's no buddy link at all).
+  const rawBuddyText = (() => {
+    const raw = (player.raw ?? {}) as Record<string, unknown>;
+    const keys = Object.keys(raw);
+    const find = (re: RegExp) => {
+      const k = keys.find((key) => re.test(key));
+      return k ? String(raw[k] ?? "").trim() : "";
+    };
+    const f = find(/(teammate|family|buddy).*first/i);
+    const l = find(/(teammate|family|buddy).*last/i);
+    return `${f} ${l}`.trim();
+  })();
+  const isNoReq = (s: string) => !s || ["none", "no", "n/a", "na", "null", "nan"].includes(s.toLowerCase());
+  const requestedBuddy = !isNoReq(rawBuddyText);
+
+  const matched = player.buddyIds.map((id) => allById.get(id)).filter((p): p is BoardPlayer => !!p);
+
+  if (matched.length || requestedBuddy) {
+    const sameDiv = matched.filter((b) => b.divisionId === player.divisionId);
+    const crossDiv = matched.filter((b) => b.divisionId !== player.divisionId);
+    const onTeam = sameDiv.filter((b) => (assign.get(b.id) ?? null) === curTeam);
+    const namesLabel = matched.length ? matched.map((b) => b.name).join(", ") : rawBuddyText;
+
+    let status: Line["status"];
+    let explanation: string;
     let suggestion: Suggestion | undefined;
-    if (!met) {
+
+    if (onTeam.length > 0) {
+      status = "met";
+      explanation = `With ${onTeam.map((b) => b.name).join(", ")}.`;
+    } else if (sameDiv.length > 0) {
+      // A buddy is in this division on another team — fixable by moving.
+      status = "unmet";
+      explanation = `None of their buddies are on ${teamName(curTeam)}.`;
       const counts = new Map<string, number>();
-      for (const b of player.buddyIds) {
-        const tid = assign.get(b) ?? null;
+      for (const b of sameDiv) {
+        const tid = assign.get(b.id) ?? null;
         if (tid && tid !== curTeam) counts.set(tid, (counts.get(tid) ?? 0) + 1);
       }
       const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
       if (best) suggestion = { teamId: best[0], label: teamName(best[0]), tradeoffs: tradeoffs(best[0]) };
+    } else if (crossDiv.length > 0) {
+      // Matched, but in another division — not fixable within this board.
+      status = "na";
+      const divs = [...new Set(crossDiv.map((b) => divName.get(b.divisionId) ?? "another division"))];
+      explanation =
+        `${crossDiv.map((b) => b.name).join(", ")} ${crossDiv.length > 1 ? "are" : "is"} in ${divs.join(", ")} — ` +
+        `a different division, so they can't share a team. To reunite them, move ${player.name.split(" ")[0]} (or the buddy) into the same division.`;
+    } else {
+      // Requested a teammate but no one on any roster matched the name.
+      status = "na";
+      explanation = `No one on any roster matches “${rawBuddyText}”. They may not have signed up, or the name is spelled differently — you can still place ${player.name.split(" ")[0]} manually.`;
     }
-    const togetherNames = together.map((id) => byId.get(id)?.name).filter(Boolean).join(", ");
-    lines.push({
-      key: "buddy",
-      label: `Buddies — ${buddyNames.join(", ") || "—"}`,
-      status: met ? "met" : "unmet",
-      explanation: met ? `With ${togetherNames}.` : `None of their buddies are on ${teamName(curTeam)}.`,
-      suggestion,
-    });
+
+    lines.push({ key: "buddy", label: `Buddies — ${namesLabel || "—"}`, status, explanation, suggestion });
   }
 
   const teamNight = nightOf(curTeam);
@@ -148,6 +184,13 @@ export default function PlayerDetail({
   }
 
   const unmet = lines.filter((l) => l.status === "unmet").length;
+  const na = lines.filter((l) => l.status === "na").length;
+  const statusText =
+    unmet > 0
+      ? `${unmet} unmet request${unmet === 1 ? "" : "s"}`
+      : na > 0
+      ? `${na} request${na === 1 ? "" : "s"} can't be met here`
+      : "all requests met";
 
   // The player's original CSV row — show every non-empty field verbatim.
   const rawEntries = Object.entries(player.raw ?? {})
@@ -163,7 +206,7 @@ export default function PlayerDetail({
           <div>
             <h3 className="text-lg font-bold text-gray-900 dark:text-white">{player.name}</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              On {teamName(curTeam)} · {unmet === 0 ? "all requests met" : `${unmet} unmet request${unmet === 1 ? "" : "s"}`}
+              On {teamName(curTeam)} · {statusText}
             </p>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-xl leading-none">
@@ -176,7 +219,7 @@ export default function PlayerDetail({
           {lines.map((l) => (
             <div key={l.key}>
               <div className="flex items-center gap-2">
-                <span className={`inline-block w-2 h-2 rounded-full ${l.status === "met" ? "bg-green-500" : "bg-red-500"}`} />
+                <span className={`inline-block w-2 h-2 rounded-full ${l.status === "met" ? "bg-green-500" : l.status === "na" ? "bg-gray-400" : "bg-red-500"}`} />
                 <span className="text-sm font-medium text-gray-900 dark:text-white">{l.label}</span>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 ml-4 mt-0.5">{l.explanation}</p>
