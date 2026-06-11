@@ -64,6 +64,13 @@ export default function CalendarView({ events, players }: { events: CalEvent[]; 
     const seen = new Set<string>()
     const colors: string[] = []
     for (const e of evts) {
+      if (e.playerIds.length === 0) {
+        // No specific kid (e.g. a training session or event) — still mark the
+        // day with a neutral indicator dot so it's visible before clicking.
+        const c = "#9ca3af"
+        if (!seen.has(c)) { seen.add(c); colors.push(c) }
+        continue
+      }
       for (const pid of e.playerIds) {
         const c = playerColor.get(pid) ?? "#9ca3af"
         if (!seen.has(c)) { seen.add(c); colors.push(c) }
