@@ -160,6 +160,24 @@ export default function ConfirmView({
   );
   const flagged = flaggedAll.filter((t) => !dismissed.has(`${t.division}::${t.name}`));
 
+  // Aggregate the unmatched requests by the coach asked for (per division), so a
+  // coach that 7 families requested but isn't on the roster stands out — almost
+  // always a real coach left off the workbook. Light-normalized for grouping.
+  const missingCoaches = (() => {
+    const m = new Map<string, { coach: string; division: string; count: number; players: string[] }>();
+    for (const u of r.unmatchedCoaches) {
+      const primary = (u.requested[0] ?? "").trim();
+      if (!primary) continue;
+      const norm = primary.toLowerCase().replace(/^coach\s+/, "").replace(/\s+/g, " ").trim();
+      const key = `${u.division}||${norm}`;
+      if (!m.has(key)) m.set(key, { coach: primary, division: u.division, count: 0, players: [] });
+      const e = m.get(key)!;
+      e.count++;
+      e.players.push(u.playerName);
+    }
+    return [...m.values()].sort((a, b) => b.count - a.count || a.division.localeCompare(b.division));
+  })();
+
   return (
     <div className="space-y-6">
       {/* Summary */}
@@ -211,26 +229,31 @@ export default function ConfirmView({
         </section>
       )}
 
-      {/* Coach requests that matched no one on the roster */}
-      {r.unmatchedCoaches.length > 0 && (
+      {/* Coaches requested but not on the roster — aggregated by coach */}
+      {missingCoaches.length > 0 && (
         <section>
           <h2 className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-            Requests we couldn&rsquo;t match ({r.unmatchedCoaches.length})
+            Coaches requested but not on your roster ({missingCoaches.length})
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-            These players asked for a coach who isn&rsquo;t on your roster for their division, so the request
-            can&rsquo;t be honored — they&rsquo;ll be placed onto an open team when you build. Check for a typo in
-            the coach list, or just let the balancer seat them.
+            These names were requested but aren&rsquo;t in the coaches workbook for their division, so the
+            requests can&rsquo;t be honored ({r.unmatchedCoaches.length} players total). <strong>A high count is
+            almost always a real coach you forgot to list</strong> — add them to the workbook and re-set up the
+            season. Otherwise those players are seated as free agents.
           </p>
-          <ul className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
-            {r.unmatchedCoaches.map((u, i) => (
+          <ul className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 divide-y divide-amber-100 dark:divide-amber-900/30 max-h-80 overflow-y-auto">
+            {missingCoaches.map((m, i) => (
               <li key={i} className="flex items-start justify-between gap-3 px-4 py-2 text-sm">
                 <span className="min-w-0">
-                  <span className="font-medium text-gray-900 dark:text-white">{u.playerName}</span>
-                  <span className="ml-2 text-xs text-gray-400">{shortDiv(u.division)}</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{m.coach}</span>
+                  <span className="ml-2 text-xs text-gray-400">{shortDiv(m.division)}</span>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">
+                    {m.players.slice(0, 6).join(", ")}
+                    {m.players.length > 6 ? ` +${m.players.length - 6} more` : ""}
+                  </p>
                 </span>
-                <span className="text-xs text-gray-500 dark:text-gray-400 text-right shrink-0">
-                  asked for {u.requested.map((c) => `“${c}”`).join(", ")}
+                <span className="shrink-0 tabular-nums text-xs font-semibold text-amber-700 dark:text-amber-300">
+                  {m.count} {m.count === 1 ? "family" : "families"}
                 </span>
               </li>
             ))}

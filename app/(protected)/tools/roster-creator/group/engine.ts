@@ -226,11 +226,21 @@ export function assignDivision(input: AssignInput): AssignResult {
   //    consolidating. Never push a team over target — UNLESS every team is
   //    already at/over target, in which case drop into the least-full team so
   //    nobody is left unassigned.
+  //
+  //    Viability floor: don't strand a coach with a near-empty team. While ANY
+  //    team is still below minViable, a free agent may only land on a below-min
+  //    team — so the small teams fill up before surplus kids get night-optimized
+  //    onto already-viable ones. Night fit still leads within that restricted
+  //    set (an empty placeholder is "open", so a Thursday kid can still start a
+  //    Thursday team rather than be forced onto a Monday one).
+  const minViable = Math.max(2, Math.floor(target / 2));
   for (const p of singles) {
+    const needViable = teams.some((t) => t.members.length < minViable && t.members.length < target);
     let best: WorkingTeam | null = null;
     let bestScore = -Infinity;
     for (const wt of teams) {
       if (wt.members.length >= target) continue;
+      if (needViable && wt.members.length >= minViable) continue; // phase 1: needy teams only
       // Night fit (0..2) dominates; fullness is a small consolidation tiebreak.
       const score = nightFit([p], wt) + (wt.members.length / target) * 0.5;
       if (score > bestScore) {
