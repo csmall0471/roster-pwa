@@ -139,13 +139,10 @@ export default function ImportReview({
         rows: parsed.rows,
         groupingConfig: { target, weights },
       });
-      // Locked (coach-first flow): land back on the editable player list. Otherwise
-      // continue to the resolve/confirm step as before.
-      router.push(
-        lockedSeasonId
-          ? `/tools/roster-creator/${seasonId}/players`
-          : `/tools/roster-creator/${seasonId}/confirm`
-      );
+      // Continue to the analyze/confirm step — that's where the live progress
+      // bar runs as Claude reads every signup. (Edit individual players anytime
+      // from the Players step via the stepper.)
+      router.push(`/tools/roster-creator/${seasonId}/confirm`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to import.");
       setBusy(false);
