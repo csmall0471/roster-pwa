@@ -105,15 +105,17 @@ export default function StructureEditor({
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {/* Divisions */}
+      {/* Divisions — side by side to cut down on scrolling */}
       {divisions.length === 0 ? (
         <p className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
           No divisions yet — add one below or upload a coaches file.
         </p>
       ) : (
-        divisions.map((d) => (
-          <DivisionCard key={d.id} seasonId={seasonId} division={d} busy={busy} run={run} />
-        ))
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
+          {divisions.map((d) => (
+            <DivisionCard key={d.id} seasonId={seasonId} division={d} busy={busy} run={run} />
+          ))}
+        </div>
       )}
 
       {/* Add division */}
@@ -188,16 +190,16 @@ function DivisionCard({
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50">
+      <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-50 dark:bg-gray-800/50">
         <input
           defaultValue={division.name}
           onBlur={(e) => {
             const v = e.target.value.trim();
             if (v && v !== division.name) run(() => renameDivision(seasonId, division.id, v));
           }}
-          className="flex-1 min-w-0 bg-transparent font-semibold text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-blue-500 rounded px-1 py-0.5"
+          className="w-28 sm:w-36 shrink-0 bg-transparent font-semibold text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-blue-500 rounded px-1 py-0.5"
         />
-        <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+        <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
           {division.teams.length} teams · {coached} coached · {open} open
         </span>
         <button
@@ -207,7 +209,7 @@ function DivisionCard({
             if (confirm(`Delete division “${division.name}” and its teams? Players in it become unassigned.`))
               run(() => deleteDivision(seasonId, division.id));
           }}
-          className="shrink-0 text-xs font-semibold text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+          className="ml-auto shrink-0 text-xs font-semibold text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
           title="Delete division"
         >
           Delete
