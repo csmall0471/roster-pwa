@@ -95,9 +95,14 @@ export default function PlayerDetail({
     // Requested a coach who isn't on THIS division's roster. Check whether that
     // coach runs a team in another division (a common play-up/sibling case).
     const reqNorm = normalize(player.coachReqText);
+    const genderOf = (n: string) => (/girls?/i.test(n) ? "g" : /boys?/i.test(n) ? "b" : "");
+    const curGender = genderOf(divName.get(player.divisionId) ?? "");
     const divsWithCoach = new Map<string, string>(); // divisionId -> name
     for (const t of allTeams) {
       if (!t.coachId || t.divisionId === player.divisionId) continue;
+      // Never suggest a cross-gender move (a boy into a girls division).
+      const tGender = genderOf(divName.get(t.divisionId) ?? "");
+      if (curGender && tGender && curGender !== tGender) continue;
       const cname = coachNames[t.coachId] ?? "";
       if (cname && jaroWinkler(reqNorm, normalize(cname)) >= 0.84) {
         divsWithCoach.set(t.divisionId, divName.get(t.divisionId) ?? "another division");
