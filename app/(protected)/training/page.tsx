@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import SessionList, { type TrainingSession, type PlayerOption } from "./_components/SessionList"
 import type { TeamOption } from "./_components/RuleBuilder"
+import CalendarView, { type CalEvent } from "@/app/parent/dashboard/_components/CalendarView"
 
 export default async function TrainingPage() {
   const supabase = await createClient()
@@ -60,6 +61,19 @@ export default async function TrainingPage() {
     last_name:  p.last_name,
   }))
 
+  // Every session as a calendar entry (sublabel shows location + signup count).
+  const calEvents: CalEvent[] = sessions.map((s) => ({
+    date: s.session_date,
+    time: s.session_time,
+    emoji: "🏀",
+    label: s.title,
+    sublabel: [s.location, `${s.signups.length}${s.max_players ? `/${s.max_players}` : ""} signed up`]
+      .filter(Boolean)
+      .join(" · "),
+    href: "/training",
+    playerIds: [],
+  }))
+
   return (
     <div>
       <div className="mb-6">
@@ -68,6 +82,14 @@ export default async function TrainingPage() {
           Create sessions, set eligibility rules, and track signups.
         </p>
       </div>
+
+      <section className="mb-8">
+        <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+          Calendar
+        </h2>
+        <CalendarView events={calEvents} players={[]} />
+      </section>
+
       <SessionList initialSessions={sessions} teams={teams} players={players} />
     </div>
   )

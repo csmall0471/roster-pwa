@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import UploadCard from "./UploadCard";
+import DeleteSeasonButton from "./DeleteSeasonButton";
 
 export default async function RosterCreatorPage() {
   const supabase = await createClient();
@@ -57,10 +58,10 @@ export default async function RosterCreatorPage() {
               const players = s.tb_players?.[0]?.count ?? 0;
               const divisions = s.tb_divisions?.[0]?.count ?? 0;
               return (
-                <li key={s.id}>
+                <li key={s.id} className="flex items-center hover:bg-gray-50 dark:hover:bg-gray-800/50">
                   <Link
                     href={`/tools/roster-creator/${s.id}`}
-                    className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                    className="flex flex-1 min-w-0 items-center justify-between px-4 py-3"
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
@@ -79,6 +80,9 @@ export default async function RosterCreatorPage() {
                       {s.status}
                     </span>
                   </Link>
+                  <div className="pr-3 pl-1">
+                    <DeleteSeasonButton seasonId={s.id} seasonName={s.name} />
+                  </div>
                 </li>
               );
             })}
