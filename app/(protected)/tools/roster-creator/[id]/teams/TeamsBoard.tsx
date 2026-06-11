@@ -101,6 +101,9 @@ export default function TeamsBoard({
     setAssign(new Map(players.map((p) => [p.id, p.teamId])));
   }
   const [busy, setBusy] = useState(false);
+  // Dedicated to the generate action so we can blank the board (below) only
+  // while generating — not while saving settings (also `busy`).
+  const [generating, setGenerating] = useState(false);
   // Per-player division move — kept separate from `busy` (settings/generate) so
   // moving one play-up player doesn't grey out every button or the Generate one.
   const [movingId, setMovingId] = useState<string | null>(null);
@@ -162,7 +165,7 @@ export default function TeamsBoard({
 
   async function generate() {
     if (!confirm("Generate teams for all divisions? This replaces any existing teams.")) return;
-    setBusy(true);
+    setGenerating(true);
     setError(null);
     try {
       await generateTeams(seasonId, config);
@@ -170,7 +173,7 @@ export default function TeamsBoard({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to generate.");
     } finally {
-      setBusy(false);
+      setGenerating(false);
     }
   }
 
@@ -385,12 +388,12 @@ export default function TeamsBoard({
         </div>
 
         <div className="mt-4 flex items-center gap-3">
-          <button type="button" onClick={generate} disabled={busy}
+          <button type="button" onClick={generate} disabled={busy || generating}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
-            {busy && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />}
-            {busy ? "Generating…" : "Generate teams"}
+            {generating && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />}
+            {generating ? "Generating…" : "Generate teams"}
           </button>
-          <button type="button" onClick={saveSettings} disabled={busy}
+          <button type="button" onClick={saveSettings} disabled={busy || generating}
             className="text-sm font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
             Save settings
           </button>
@@ -398,6 +401,15 @@ export default function TeamsBoard({
         </div>
       </section>
 
+      {generating ? (
+        <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-10 text-center">
+          <div className="inline-flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-200">
+            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+            Generating teams…
+          </div>
+        </div>
+      ) : (
+       <>
       {/* Division selector + team search + legend */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -506,6 +518,8 @@ export default function TeamsBoard({
           </div>
         </Column>
       </div>
+       </>
+      )}
 
       {selectedPlayer && (
         <PlayerDetail
