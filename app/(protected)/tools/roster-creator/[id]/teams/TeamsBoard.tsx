@@ -240,7 +240,12 @@ export default function TeamsBoard({
     : divisionTeams
   )
     .slice()
-    .sort((a, b) => a.name.localeCompare(b.name));
+    // Coached teams first (alphabetical), then uncoached "Team N" placeholders last.
+    .sort(
+      (a, b) =>
+        (a.coachId ? 0 : 1) - (b.coachId ? 0 : 1) ||
+        a.name.localeCompare(b.name, undefined, { numeric: true })
+    );
 
   const selectedPlayer = selectedId ? divisionPlayers.find((p) => p.id === selectedId) ?? null : null;
 

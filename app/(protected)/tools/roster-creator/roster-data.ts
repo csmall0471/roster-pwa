@@ -22,7 +22,7 @@ export async function fetchRosterRows(
   const [{ data: divisions }, { data: teams }, players, links, { data: coaches }, { data: teamNames }] =
     await Promise.all([
       supabase.from("tb_divisions").select("id, name, position").eq("season_id", seasonId).order("position"),
-      supabase.from("tb_teams").select("id, name, division_id, practice_night, practice_time, field, position").eq("season_id", seasonId).order("position"),
+      supabase.from("tb_teams").select("id, name, division_id, practice_night, practice_time, field, position, coach_id, is_placeholder").eq("season_id", seasonId).order("position"),
       selectAll((from, to) =>
         supabase
           .from("tb_players")
@@ -57,6 +57,8 @@ export async function fetchRosterRows(
         night: (t.practice_night as string | null) ?? "",
         time: (t.practice_time as string | null) ?? "",
         field: (t.field as string | null) ?? "",
+        coachId: (t.coach_id as string | null) ?? "",
+        isPlaceholder: !!t.is_placeholder,
       },
     ])
   );
@@ -71,8 +73,9 @@ export async function fetchRosterRows(
 
   const teamOfPlayer = new Map((players ?? []).map((p) => [p.id as string, (p.team_id as string | null) ?? null]));
 
-  // Each team's dominant coach + team-name = the most-requested among members.
-  const teamCoachVotes = new Map<string, Map<string, number>>();
+  // A team's coach is authoritative (tb_teams.coach_id) — placeholder teams have
+  // none. The team-name request is still the dominant one among members (that
+  // notion is unchanged; in practice it's empty under the coach-anchored model).
   const teamNameVotes = new Map<string, Map<string, number>>();
   const vote = (m: Map<string, Map<string, number>>, team: string, key: string) => {
     if (!m.has(team)) m.set(team, new Map());
@@ -82,7 +85,6 @@ export async function fetchRosterRows(
   for (const p of players ?? []) {
     const tid = p.team_id as string | null;
     if (!tid) continue;
-    if (p.resolved_coach_id) vote(teamCoachVotes, tid, p.resolved_coach_id as string);
     if (p.resolved_team_name_id) vote(teamNameVotes, tid, p.resolved_team_name_id as string);
   }
   const argmax = (m: Map<string, number> | undefined): string => {
@@ -92,7 +94,6 @@ export async function fetchRosterRows(
     for (const [k, v] of m) if (v > n) { n = v; best = k; }
     return best;
   };
-  const teamCoachId = new Map([...teamCoachVotes.keys()].map((tid) => [tid, argmax(teamCoachVotes.get(tid))]));
   const teamTeamId = new Map([...teamNameVotes.keys()].map((tid) => [tid, argmax(teamNameVotes.get(tid))]));
 
   const yn = (cond: boolean) => (cond ? "Yes" : "No");
@@ -104,7 +105,7 @@ export async function fetchRosterRows(
 
     const reqCoachId = (p.resolved_coach_id as string | null) ?? null;
     const reqTeamId = (p.resolved_team_name_id as string | null) ?? null;
-    const tCoachId = tid ? teamCoachId.get(tid) ?? "" : "";
+    const tCoachId = tid ? teamMeta.get(tid)?.coachId ?? "" : "";
     const tTeamId = tid ? teamTeamId.get(tid) ?? "" : "";
 
     // Buddies: how many named, how many of them share the assigned team.
@@ -144,11 +145,21 @@ export async function fetchRosterRows(
     };
   });
 
+  // Within a division: coached teams first (alphabetical), then the uncoached
+  // "Team N" placeholders (numeric-aware), then the Unassigned bucket last.
+  const teamRank = new Map<string, number>();
+  for (const t of teams ?? []) {
+    const uncoached = !!t.is_placeholder || !t.coach_id;
+    teamRank.set(t.name as string, uncoached ? 1 : 0);
+  }
+  const rankOf = (team: string) => (team === "Unassigned" ? 2 : teamRank.get(team) ?? 1);
+
   return rows.sort(
     (a, b) =>
       (divPos.get(a.division) ?? 0) - (divPos.get(b.division) ?? 0) ||
       a.division.localeCompare(b.division) ||
-      a.team.localeCompare(b.team) ||
+      rankOf(a.team) - rankOf(b.team) ||
+      a.team.localeCompare(b.team, undefined, { numeric: true }) ||
       a.last.localeCompare(b.last)
   );
 }
