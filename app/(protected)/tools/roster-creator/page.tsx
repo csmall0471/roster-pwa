@@ -38,6 +38,23 @@ export default async function RosterCreatorPage() {
         </div>
       </div>
 
+      {/* How it works — the whole process at a glance */}
+      <div className="mb-8 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[
+          ["1", "Structure", "Add your divisions and coaches — upload a coaches file or build it by hand — and set each team's practice day."],
+          ["2", "Players", "Import your signup export, then add, edit, or remove players. Claude matches every coach & buddy request to your roster."],
+          ["3", "Build teams", "Auto-generate balanced teams that honor those requests, drag to fine-tune, then export or print."],
+        ].map(([n, title, desc]) => (
+          <div key={n} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">{n}</span>
+              <span className="font-semibold text-gray-900 dark:text-white">{title}</span>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{desc}</p>
+          </div>
+        ))}
+      </div>
+
       {rows.length > 0 ? (
         <div>
           <div className="flex items-center justify-between mb-3">

@@ -184,23 +184,29 @@ export default function ImportReview({
         {error && <span className="ml-auto text-xs text-red-600 dark:text-red-400">{error}</span>}
       </div>
 
-      {/* How it works */}
-      <details className="rounded-lg border border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 px-4 py-3">
-        <summary className="text-sm font-semibold text-blue-800 dark:text-blue-300 cursor-pointer">
-          New here? How the Roster Creator works
-        </summary>
-        <div className="mt-3 text-sm text-gray-700 dark:text-gray-300 space-y-3">
-          <ol className="list-decimal list-inside space-y-1">
-            <li><strong>Import into a season.</strong> A <em>season</em> is one workspace (e.g. &ldquo;Fall Football 2026&rdquo;). Start a new one, or add this file to an existing season to combine more divisions later.</li>
-            <li><strong>Check the column mapping.</strong> We auto-matched your spreadsheet columns to the fields we understand. Fix any that look wrong; fields marked <span className="text-red-500">*</span> are required.</li>
-            <li><strong>Review the divisions.</strong> Players are grouped into <em>divisions</em> automatically from the &ldquo;Package / division&rdquo; column (e.g. &ldquo;Peoria 8U Boys&rdquo;). Each group is collapsed — expand to see everyone.</li>
-            <li><strong>Import.</strong> Then on the next screens you&rsquo;ll <em>Resolve requests</em> (clean up messy coach/buddy entries, optionally with Claude) and <em>Build teams</em> (auto-group, then drag to fix), and finally export.</li>
-          </ol>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            A dash (—) in the preview means no request was entered for that field. Nothing is saved until you press Import.
+      {/* Import in progress */}
+      {busy ? (
+        <div className="rounded-lg border border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 px-4 py-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
+            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            Importing {parsed.rows.length} players…
+          </div>
+          <div className="relative h-2 w-full overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+            <div className="tb-indeterminate-bar bg-blue-600" />
+          </div>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            Then Claude analyzes every signup — that progress bar shows on the next screen.
           </p>
         </div>
-      </details>
+      ) : (
+        /* What this screen does */
+        <p className="rounded-lg border border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+          We auto-detected your columns and grouped these players by division below. Give it a quick look,
+          then press <strong>Import</strong>. Next, Claude matches every coach &amp; buddy request to your
+          roster and you build the teams. A dash (—) means no request was entered; nothing is saved until
+          you press Import.
+        </p>
+      )}
 
       {/* Target season */}
       {!lockedSeasonId && (
