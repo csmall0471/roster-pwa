@@ -183,6 +183,12 @@ export default function ConfirmView({
     }
     return [...m.values()].sort((a, b) => b.count - a.count || a.division.localeCompare(b.division));
   })();
+  // Only surface coaches several families asked for — those are almost certainly
+  // real coaches left off the roster. One-offs are usually last year's coach or
+  // a typo and just add noise.
+  const MIN_FAMILIES = 3;
+  const missingCoachesShown = missingCoaches.filter((m) => m.count >= MIN_FAMILIES);
+  const missingCoachesHidden = missingCoaches.length - missingCoachesShown.length;
 
   return (
     <div className="space-y-6">
@@ -235,20 +241,20 @@ export default function ConfirmView({
         </section>
       )}
 
-      {/* Coaches requested but not on the roster — aggregated by coach */}
-      {missingCoaches.length > 0 && (
+      {/* Coaches requested but not on the roster — aggregated, 3+ families only */}
+      {missingCoachesShown.length > 0 && (
         <section>
           <h2 className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-            Coaches requested but not on your roster ({missingCoaches.length})
+            Coaches requested but not on your roster ({missingCoachesShown.length})
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-            These names were requested but aren&rsquo;t in the coaches workbook for their division, so the
-            requests can&rsquo;t be honored ({r.unmatchedCoaches.length} players total). <strong>A high count is
-            almost always a real coach you forgot to list</strong> — add them to the workbook and re-set up the
-            season. Otherwise those players are seated as free agents.
+            Requested by <strong>{MIN_FAMILIES}+ families</strong> but not in the coaches workbook for their
+            division — <strong>almost always a real coach you forgot to list</strong>. Add them to the workbook
+            and re-set up the season; otherwise those players are seated as free agents.
+            {missingCoachesHidden > 0 && ` (${missingCoachesHidden} other names were asked for by just 1–2 families and are hidden.)`}
           </p>
           <ul className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 divide-y divide-amber-100 dark:divide-amber-900/30 max-h-80 overflow-y-auto">
-            {missingCoaches.map((m, i) => (
+            {missingCoachesShown.map((m, i) => (
               <li key={i} className="flex items-start justify-between gap-3 px-4 py-2 text-sm">
                 <span className="min-w-0">
                   <span className="font-medium text-gray-900 dark:text-white">{m.coach}</span>
