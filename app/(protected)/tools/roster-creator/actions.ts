@@ -876,3 +876,298 @@ export async function emailRoster(
     return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." };
   }
 }
+
+// ── Setup wizard: blank season + full structure / player editing ──────────────
+
+// Create an EMPTY season (no divisions/coaches/teams) — the start of the manual
+// setup flow. Structure is then added in the editor (by hand or by upload).
+export async function createSeason(name: string, sport?: string): Promise<string> {
+  const { supabase } = await requireOwner();
+  const { data, error } = await supabase
+    .from("tb_seasons")
+    .insert({
+      name: name.trim() || "Untitled season",
+      sport: sport?.trim() || null,
+      grouping_config: { target: 12 },
+      status: "structured",
+    })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Failed to create season");
+  revalidatePath("/tools/roster-creator");
+  return data.id as string;
+}
+
+export async function renameDivision(seasonId: string, divisionId: string, name: string) {
+  const { supabase } = await requireOwner();
+  const { error } = await supabase
+    .from("tb_divisions")
+    .update({ name: name.trim() || "Untitled division" })
+    .eq("id", divisionId)
+    .eq("season_id", seasonId);
+  if (error) {
+    if (error.code === "23505") throw new Error("A division with that name already exists");
+    throw new Error(error.message);
+  }
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+export async function deleteDivision(seasonId: string, divisionId: string) {
+  const { supabase } = await requireOwner();
+  // Players in it keep their record but lose the (now-gone) division; teams cascade.
+  await supabase
+    .from("tb_players")
+    .update({ division_id: null, team_id: null })
+    .eq("season_id", seasonId)
+    .eq("division_id", divisionId);
+  const { error } = await supabase.from("tb_divisions").delete().eq("id", divisionId).eq("season_id", seasonId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+// Find an existing coach by name in the season, else create one. Returns its id.
+async function coachIdForName(
+  supabase: Awaited<ReturnType<typeof requireOwner>>["supabase"],
+  seasonId: string,
+  name: string
+): Promise<string> {
+  const n = name.trim();
+  const { data: existing } = await supabase
+    .from("tb_coaches")
+    .select("id")
+    .eq("season_id", seasonId)
+    .eq("name", n)
+    .maybeSingle();
+  if (existing?.id) return existing.id as string;
+  const { data, error } = await supabase
+    .from("tb_coaches")
+    .insert({ season_id: seasonId, name: n })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Failed to create coach");
+  return data.id as string;
+}
+
+async function nextTeamPosition(
+  supabase: Awaited<ReturnType<typeof requireOwner>>["supabase"],
+  divisionId: string
+): Promise<number> {
+  const { count } = await supabase
+    .from("tb_teams")
+    .select("id", { count: "exact", head: true })
+    .eq("division_id", divisionId);
+  return count ?? 0;
+}
+
+// Add a coached team (a coach name) to a division.
+export async function addCoachTeam(seasonId: string, divisionId: string, coachName: string) {
+  const { supabase } = await requireOwner();
+  const n = coachName.trim();
+  if (!n) throw new Error("Coach name is required");
+  const coachId = await coachIdForName(supabase, seasonId, n);
+  const position = await nextTeamPosition(supabase, divisionId);
+  const { error } = await supabase.from("tb_teams").insert({
+    season_id: seasonId,
+    division_id: divisionId,
+    name: n,
+    coach_id: coachId,
+    is_placeholder: false,
+    position,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+// Add an open "Team N" placeholder slot to a division.
+export async function addPlaceholderTeam(seasonId: string, divisionId: string) {
+  const { supabase } = await requireOwner();
+  const position = await nextTeamPosition(supabase, divisionId);
+  const { error } = await supabase.from("tb_teams").insert({
+    season_id: seasonId,
+    division_id: divisionId,
+    name: `Team ${position + 1}`,
+    coach_id: null,
+    is_placeholder: true,
+    position,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+// Edit a team's coach. Empty name turns it into an open placeholder slot.
+export async function updateTeamCoach(seasonId: string, teamId: string, coachName: string) {
+  const { supabase } = await requireOwner();
+  const n = coachName.trim();
+  if (n) {
+    const coachId = await coachIdForName(supabase, seasonId, n);
+    const { error } = await supabase
+      .from("tb_teams")
+      .update({ coach_id: coachId, name: n, is_placeholder: false })
+      .eq("id", teamId)
+      .eq("season_id", seasonId);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabase
+      .from("tb_teams")
+      .update({ coach_id: null, is_placeholder: true })
+      .eq("id", teamId)
+      .eq("season_id", seasonId);
+    if (error) throw new Error(error.message);
+  }
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+export async function deleteTeam(seasonId: string, teamId: string) {
+  const { supabase } = await requireOwner();
+  const { error } = await supabase.from("tb_teams").delete().eq("id", teamId).eq("season_id", seasonId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+export async function setTeamPracticeNight(seasonId: string, teamId: string, night: string | null) {
+  const { supabase } = await requireOwner();
+  const { error } = await supabase
+    .from("tb_teams")
+    .update({ practice_night: night })
+    .eq("id", teamId)
+    .eq("season_id", seasonId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+// Bulk-add an uploaded coach workbook into an EXISTING season (merges by name).
+export async function addRosterToSeason(
+  seasonId: string,
+  divisions: CreateSeasonFromRosterInput["divisions"]
+) {
+  const { supabase } = await requireOwner();
+  const defaultSize = 12;
+
+  const { data: exDiv } = await supabase.from("tb_divisions").select("id, name").eq("season_id", seasonId);
+  const divIdByName = new Map<string, string>((exDiv ?? []).map((d) => [d.name as string, d.id as string]));
+  let pos = (exDiv ?? []).length;
+
+  const coachNames = [
+    ...new Set(
+      divisions
+        .flatMap((d) => d.teams)
+        .filter((t) => !t.isPlaceholder && t.coachName)
+        .map((t) => t.coachName!.trim())
+        .filter(Boolean)
+    ),
+  ];
+  const coachIdByName = new Map<string, string>();
+  const { data: exCoaches } = await supabase.from("tb_coaches").select("id, name").eq("season_id", seasonId);
+  (exCoaches ?? []).forEach((c) => coachIdByName.set(c.name as string, c.id as string));
+  const toCreate = coachNames.filter((n) => !coachIdByName.has(n));
+  if (toCreate.length > 0) {
+    const { data, error } = await supabase
+      .from("tb_coaches")
+      .insert(toCreate.map((name) => ({ season_id: seasonId, name })))
+      .select("id, name");
+    if (error) throw new Error(error.message);
+    (data ?? []).forEach((c) => coachIdByName.set(c.name as string, c.id as string));
+  }
+
+  for (const d of divisions) {
+    const dn = d.name.trim();
+    let divId = divIdByName.get(dn);
+    if (!divId) {
+      const { data: div, error } = await supabase
+        .from("tb_divisions")
+        .insert({
+          season_id: seasonId,
+          name: dn || `Division ${pos + 1}`,
+          position: pos++,
+          target_team_size: Math.max(1, Math.round(d.targetTeamSize || defaultSize)),
+        })
+        .select("id")
+        .single();
+      if (error || !div) throw new Error(error?.message ?? "Failed to create division");
+      divId = div.id as string;
+      divIdByName.set(dn, divId);
+    }
+    let tp = await nextTeamPosition(supabase, divId);
+    const teamRows = d.teams.map((t) => {
+      const cn = (t.coachName ?? "").trim();
+      const p = tp++;
+      return {
+        season_id: seasonId,
+        division_id: divId,
+        name: t.isPlaceholder ? t.rawLabel.trim() || `Team ${p + 1}` : cn || `Team ${p + 1}`,
+        coach_id: t.isPlaceholder ? null : coachIdByName.get(cn) ?? null,
+        is_placeholder: t.isPlaceholder,
+        position: p,
+      };
+    });
+    if (teamRows.length > 0) {
+      const { error } = await supabase.from("tb_teams").insert(teamRows);
+      if (error) throw new Error(error.message);
+    }
+  }
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+// ── Player editing (add / edit / remove) ─────────────────────────────────────
+
+export type PlayerFields = {
+  first_name: string;
+  last_name: string;
+  gender?: string;
+  age_group?: string;
+  school?: string;
+  coach_first?: string;
+  coach_last?: string;
+  team_name?: string;
+  buddy_first?: string;
+  buddy_last?: string;
+  practice_nights?: string;
+};
+
+export async function addPlayer(seasonId: string, divisionId: string | null, f: PlayerFields) {
+  const { supabase } = await requireOwner();
+  if (!f.first_name.trim() && !f.last_name.trim()) throw new Error("A player name is required");
+  const { error } = await supabase.from("tb_players").insert({
+    season_id: seasonId,
+    division_id: divisionId,
+    first_name: f.first_name.trim(),
+    last_name: f.last_name.trim(),
+    gender: f.gender ?? "",
+    age_group: f.age_group ?? "",
+    school: f.school ?? "",
+    coach_first: f.coach_first ?? "",
+    coach_last: f.coach_last ?? "",
+    team_name: f.team_name ?? "",
+    buddy_first: f.buddy_first ?? "",
+    buddy_last: f.buddy_last ?? "",
+    practice_nights: f.practice_nights ?? "",
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/players`);
+}
+
+export async function updatePlayer(
+  seasonId: string,
+  playerId: string,
+  f: Partial<PlayerFields> & { division_id?: string | null }
+) {
+  const { supabase } = await requireOwner();
+  const keys = [
+    "first_name", "last_name", "gender", "age_group", "school",
+    "coach_first", "coach_last", "team_name", "buddy_first", "buddy_last",
+    "practice_nights", "division_id",
+  ] as const;
+  const patch: Record<string, unknown> = {};
+  for (const k of keys) if (k in f) patch[k] = (f as Record<string, unknown>)[k];
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await supabase.from("tb_players").update(patch).eq("id", playerId).eq("season_id", seasonId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/players`);
+}
+
+export async function deletePlayer(seasonId: string, playerId: string) {
+  const { supabase } = await requireOwner();
+  const { error } = await supabase.from("tb_players").delete().eq("id", playerId).eq("season_id", seasonId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/players`);
+}

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import CoachRosterUpload from "./CoachRosterUpload";
+import NewSeasonButton from "./NewSeasonButton";
 import DeleteSeasonButton from "./DeleteSeasonButton";
 
 export default async function RosterCreatorPage() {
@@ -24,32 +24,21 @@ export default async function RosterCreatorPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Roster Creator</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Upload your coaches &amp; teams to set up a season, then import the signup export — and turn
-          it into balanced rosters that respect parents&rsquo; coach, buddy, and practice-night requests.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Roster Creator</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Build a season&rsquo;s divisions &amp; coaches, add your players, then auto-generate balanced
+            rosters that respect coach, buddy, and practice-night requests.
+          </p>
+        </div>
+        <div className="shrink-0">
+          <NewSeasonButton />
+        </div>
       </div>
 
-      <ol className="mb-6 grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
-        {[
-          ["1. Set up", "Upload coaches & teams (one sheet per division) to define divisions, coaches, and team counts."],
-          ["2. Add players", "Import the signup export — players are matched into the divisions you set up."],
-          ["3. Resolve & build", "Claude matches each player's coach/buddy requests, then auto-fills the teams."],
-          ["4. Export", "Download CSV, print/PDF, or email the rosters."],
-        ].map(([title, desc]) => (
-          <li key={title} className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
-            <p className="font-semibold text-gray-900 dark:text-white">{title}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{desc}</p>
-          </li>
-        ))}
-      </ol>
-
-      <CoachRosterUpload />
-
-      {rows.length > 0 && (
-        <div className="mt-10">
+      {rows.length > 0 ? (
+        <div>
           <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
             Seasons
           </h2>
@@ -66,14 +55,11 @@ export default async function RosterCreatorPage() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
                         {s.name}
-                        {s.sport && (
-                          <span className="ml-2 text-xs font-normal text-gray-400">{s.sport}</span>
-                        )}
+                        {s.sport && <span className="ml-2 text-xs font-normal text-gray-400">{s.sport}</span>}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {divisions} {divisions === 1 ? "division" : "divisions"} · {players}{" "}
-                        {players === 1 ? "player" : "players"} ·{" "}
-                        {new Date(s.created_at).toLocaleDateString()}
+                        {players === 1 ? "player" : "players"} · {new Date(s.created_at).toLocaleDateString()}
                       </p>
                     </div>
                     <span className="shrink-0 text-xs rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-1 text-gray-600 dark:text-gray-300">
@@ -87,6 +73,13 @@ export default async function RosterCreatorPage() {
               );
             })}
           </ul>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-6 py-12 text-center">
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">No seasons yet</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Click <strong>New season</strong> to set up your divisions and coaches.
+          </p>
         </div>
       )}
     </div>
