@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import UploadCard from "./UploadCard";
+import CoachRosterUpload from "./CoachRosterUpload";
 import DeleteSeasonButton from "./DeleteSeasonButton";
 
 export default async function RosterCreatorPage() {
@@ -27,16 +27,16 @@ export default async function RosterCreatorPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Roster Creator</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Turn an external signup export (CSV or Excel) into balanced team rosters that respect
-          parents&rsquo; coach, buddy, and practice-night requests.
+          Upload your coaches &amp; teams to set up a season, then import the signup export — and turn
+          it into balanced rosters that respect parents&rsquo; coach, buddy, and practice-night requests.
         </p>
       </div>
 
       <ol className="mb-6 grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
         {[
-          ["1. Upload", "Drop in your signup CSV/Excel and map the columns."],
-          ["2. Resolve", "Clean up messy coach & buddy entries — fuzzy matching plus an optional Claude pass."],
-          ["3. Build teams", "Auto-group by your priorities, then drag players to fix anything."],
+          ["1. Set up", "Upload coaches & teams (one sheet per division) to define divisions, coaches, and team counts."],
+          ["2. Add players", "Import the signup export — players are matched into the divisions you set up."],
+          ["3. Resolve & build", "Claude matches each player's coach/buddy requests, then auto-fills the teams."],
           ["4. Export", "Download CSV, print/PDF, or email the rosters."],
         ].map(([title, desc]) => (
           <li key={title} className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
@@ -46,7 +46,7 @@ export default async function RosterCreatorPage() {
         ))}
       </ol>
 
-      <UploadCard seasons={rows.map((s) => ({ id: s.id, name: s.name }))} />
+      <CoachRosterUpload />
 
       {rows.length > 0 && (
         <div className="mt-10">

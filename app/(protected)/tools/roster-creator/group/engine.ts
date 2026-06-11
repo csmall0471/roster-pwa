@@ -1,8 +1,14 @@
-// Per-division grouping engine. Pure and deterministic — no DB, no API.
-// Seeds teams from the strongest resolved signals (requested team name, then
-// coach), keeps buddies together, fills toward a TARGET size, then picks each
-// team's practice night by member availability. A team only exceeds the target
-// to keep a coach/team's requesters together — free agents never push it over.
+// Per-division assignment engine. Pure and deterministic — no DB, no API.
+// The admin now uploads an authoritative coach/teams list, so the set of teams
+// per division is FIXED and known up front. This engine ASSIGNS players into
+// that fixed set of teams — it never invents a team and never drops one.
+//
+// Spirit (ported from the old grouping engine): a coach's own kids and a
+// coach's requesters anchor onto that coach's team and may push it over the
+// target; only FREE agents are blocked from overfilling. Buddies pull a free
+// agent onto a buddy's team. Leftover free agents fill the open placeholder
+// teams (and any under-target coached teams) toward the target, preferring the
+// fuller team and a matching practice night.
 
 export type Weights = { coach: number; team: number; buddy: number; night: number };
 export type GroupConfig = { target: number; weights: Weights };
@@ -39,13 +45,6 @@ export type GroupPlayer = {
   buddyIds: string[];
 };
 
-export type GroupedTeam = {
-  coachId: string | null;
-  teamNameId: string | null;
-  playerIds: string[];
-  night: string | null;
-};
-
 // Best night for a set of players: the day the most members have free.
 function bestNight(members: GroupPlayer[]): string | null {
   let best: string | null = null;
@@ -60,147 +59,179 @@ function bestNight(members: GroupPlayer[]): string | null {
   return best;
 }
 
+// ── Fixed-team assignment ────────────────────────────────────────────────────
+
+// One of the division's authoritative teams. The count is FIXED: assignDivision
+// receives these and returns exactly these, never more, never fewer.
+export type FixedTeam = {
+  id: string; // tb_teams.id
+  coachId: string | null; // null for an open "Team N" placeholder
+  isPlaceholder: boolean;
+};
+
+export type AssignInput = {
+  teams: FixedTeam[]; // the division's authoritative teams (FIXED count)
+  players: GroupPlayer[]; // GroupPlayer already carries: id, coachId, teamNameId, nights, buddyIds
+  targetSize: number; // players-per-team target for this division
+  protectedCoachIds?: Set<string>; // coaches whose own child is enrolled here — inviolable
+};
+
+export type TeamAssignment = { teamId: string; playerIds: string[]; night: string | null };
+export type AssignResult = { assignments: TeamAssignment[] };
+
+// A team plus its growing member list while we assign. Index into AssignInput.teams.
 type WorkingTeam = {
-  coachId: string | null;
-  teamNameId: string | null;
+  team: FixedTeam;
   members: GroupPlayer[];
 };
 
-export function groupDivision(
-  players: GroupPlayer[],
-  config: GroupConfig,
-  // Coaches who have their OWN child enrolled in this division. Their team is
-  // real and inviolable: the coach's kids anchor by coach (not team name) and
-  // the team is never merged away. "A coach's children are always on their
-  // parent's team — no exception."
-  protectedCoachIds: Set<string> = new Set()
-): GroupedTeam[] {
-  if (players.length === 0) return [];
-  const target = Math.max(1, Math.round(config.target));
-  const byId = new Map(players.map((p) => [p.id, p]));
-  const isProtected = (t: { coachId: string | null }) => !!t.coachId && protectedCoachIds.has(t.coachId);
+// Assign every player into the FIXED set of input.teams. Pure & deterministic:
+// same input → same output (no DB, no randomness, no Date.now). Every team in
+// input.teams appears in the result — even empty placeholders — so they persist
+// downstream.
+export function assignDivision(input: AssignInput): AssignResult {
+  const target = Math.max(1, Math.round(input.targetSize));
 
-  // 1. Seed "anchored" teams by the strongest identity. Normally the requested
-  //    team name wins, else the coach. But for a protected coach (their own kid
-  //    is here) the COACH wins so all their kids land on the one real team,
-  //    even if some families also typed a team name. These anchors hold all
-  //    their requesters together and may exceed the target — the only allowed
-  //    reason to go over.
-  const keyOf = (p: GroupPlayer) =>
-    p.coachId && protectedCoachIds.has(p.coachId)
-      ? `C:${p.coachId}`
-      : p.teamNameId
-      ? `T:${p.teamNameId}`
-      : p.coachId
-      ? `C:${p.coachId}`
-      : null;
+  // Working teams, in the caller's order so placeholders fill predictably.
+  const teams: WorkingTeam[] = input.teams.map((team) => ({ team, members: [] }));
 
-  const seeds = new Map<string, WorkingTeam>();
-  const free: GroupPlayer[] = [];
-  for (const p of players) {
-    const k = keyOf(p);
-    if (!k) {
-      free.push(p);
-      continue;
+  // 1. coachId -> the team that coach runs. Authoritative teams carry coachId;
+  //    placeholders don't. If two teams somehow share a coach the first wins
+  //    (deterministic by caller order) — but normally a coach owns one team.
+  const teamByCoach = new Map<string, WorkingTeam>();
+  for (const wt of teams) {
+    if (wt.team.coachId && !teamByCoach.has(wt.team.coachId)) {
+      teamByCoach.set(wt.team.coachId, wt);
     }
-    if (!seeds.has(k)) seeds.set(k, { coachId: p.coachId, teamNameId: p.teamNameId, members: [] });
-    seeds.get(k)!.members.push(p);
   }
-  const teams: WorkingTeam[] = [...seeds.values()];
-  const teamIndexOf = new Map<string, number>();
-  teams.forEach((t, i) => t.members.forEach((m) => teamIndexOf.set(m.id, i)));
 
-  // 2. Pull free agents onto a team holding one of their buddies — but only if
-  //    that team is still under target (a buddy request doesn't justify going over).
+  // teamOf tracks where each already-placed player landed, so buddies can find them.
+  const teamOf = new Map<string, WorkingTeam>();
+  const place = (p: GroupPlayer, wt: WorkingTeam) => {
+    wt.members.push(p);
+    teamOf.set(p.id, wt);
+  };
+
+  // 2 + 3. Anchor every player who requested a coach that runs a real team onto
+  //    that team — this covers both a protected coach's OWN kids (their coachId
+  //    points at their parent's team and they ALWAYS land there) and ordinary
+  //    requesters of that coach. Honoring the coach request beats hitting the
+  //    target, so these anchors may exceed target — exactly the old "anchors may
+  //    exceed target" rule. Everyone else is a free agent for now.
+  //
+  //    (input.protectedCoachIds doesn't change the placement here — a coach's
+  //    kid is already routed by coachId — but a protected coach's team is, by
+  //    virtue of holding those inviolable kids, one that can never be left
+  //    empty/dropped. Since every team in input.teams is always emitted, that
+  //    inviolability holds for free.)
+  const free: GroupPlayer[] = [];
+  for (const p of input.players) {
+    const wt = p.coachId ? teamByCoach.get(p.coachId) : undefined;
+    if (wt) place(p, wt);
+    else free.push(p);
+  }
+
+  // 4. Buddies: pull a free agent onto a team already holding one of their
+  //    buddies — but only if that team is still under target (a buddy request
+  //    doesn't justify going over). Process in input order for determinism.
   const stillFree: GroupPlayer[] = [];
   for (const p of free) {
-    const ti = p.buddyIds.map((id) => teamIndexOf.get(id)).find((i) => i != null);
-    if (ti != null && teams[ti].members.length < target) {
-      teams[ti].members.push(p);
-      teamIndexOf.set(p.id, ti);
-    } else {
-      stillFree.push(p);
+    let host: WorkingTeam | null = null;
+    for (const bid of p.buddyIds) {
+      const bt = teamOf.get(bid);
+      if (bt && bt.members.length < target) {
+        host = bt;
+        break;
+      }
     }
+    if (host) place(p, host);
+    else stillFree.push(p);
   }
 
-  // 3. Free agents who are buddies with each other form their own teams.
-  const seen = new Set<string>();
+  // 4b. Free agents who are buddies with EACH OTHER (none anchored to a coach)
+  //     must land together. Find the connected components among the still-free
+  //     players (buddy adjacency, restricted to still-free members) and seat
+  //     each multi-member component as a UNIT into the team that keeps them
+  //     together — preferring a team with just enough room under target, then
+  //     the fuller one (consolidate). Singletons fall through to the fill below.
+  const stillFreeSet = new Set(stillFree.map((p) => p.id));
+  const byId = new Map(stillFree.map((p) => [p.id, p]));
+  const seenComp = new Set<string>();
+  const singles: GroupPlayer[] = [];
   for (const p of stillFree) {
-    if (seen.has(p.id)) continue;
-    const component: GroupPlayer[] = [];
+    if (seenComp.has(p.id)) continue;
+    const comp: GroupPlayer[] = [];
     const queue = [p];
-    seen.add(p.id);
+    seenComp.add(p.id);
     while (queue.length) {
       const cur = queue.shift()!;
-      component.push(cur);
+      comp.push(cur);
       for (const bid of cur.buddyIds) {
-        const b = byId.get(bid);
-        if (b && !seen.has(bid) && stillFree.includes(b)) {
-          seen.add(bid);
-          queue.push(b);
+        if (stillFreeSet.has(bid) && !seenComp.has(bid)) {
+          seenComp.add(bid);
+          queue.push(byId.get(bid)!);
         }
       }
     }
-    if (component.length > 1) {
-      teams.push({ coachId: null, teamNameId: null, members: component });
-    }
-  }
-  const trulyFree = stillFree.filter((p) => !teams.some((t) => t.members.includes(p)));
-
-  // 4. Fill remaining free agents toward the target, NEVER pushing a team over
-  //    it. Prefer fuller teams (consolidate) and a matching practice night.
-  for (const p of trulyFree) {
-    let bestTeam: WorkingTeam | null = null;
-    let bestScore = -Infinity;
-    for (const t of teams) {
-      if (t.members.length >= target) continue;
-      const night = bestNight(t.members);
-      const nightScore = night && p.nights.includes(night) ? config.weights.night : 0;
-      const score = nightScore + t.members.length / target; // fuller-first + night fit
-      if (score > bestScore) {
-        bestScore = score;
-        bestTeam = t;
-      }
-    }
-    if (bestTeam) bestTeam.members.push(p);
-    else teams.push({ coachId: null, teamNameId: null, members: [p] });
-  }
-
-  // 5. Consolidate only the teams too small to be real (a coach requested by a
-  //    single family shouldn't be a team of one). Teams at/above the viability
-  //    floor are kept as-is — honoring the coach request matters more than
-  //    hitting the target exactly. Tiny teams merge into the fullest team they
-  //    fit in without exceeding the target.
-  const minViable = Math.max(2, Math.floor(target / 2));
-  teams.sort((a, b) => a.members.length - b.members.length);
-  const merged: WorkingTeam[] = [];
-  for (const t of teams) {
-    // A protected coach's team is real no matter how small — never fold it away.
-    if (t.members.length >= minViable || isProtected(t)) {
-      merged.push(t);
+    if (comp.length === 1) {
+      singles.push(comp[0]);
       continue;
     }
-    const host = merged
-      .filter((m) => m.members.length < target && m.members.length + t.members.length <= target)
-      .sort((a, b) => b.members.length - a.members.length)[0];
-    if (host) {
-      host.members.push(...t.members);
-      host.coachId = host.coachId ?? t.coachId;
-      host.teamNameId = host.teamNameId ?? t.teamNameId;
-    } else {
-      merged.push(t);
+    // Seat the whole component into one team. Teams that fit the group under
+    // target win decisively; among those the fuller team consolidates. If none
+    // fits under target, pick the team that overflows the least.
+    let best: WorkingTeam | null = null;
+    let bestScore = -Infinity;
+    for (const wt of teams) {
+      const room = target - wt.members.length;
+      const fits = room >= comp.length;
+      const score = (fits ? 100 : 0) + wt.members.length / target - (fits ? 0 : comp.length - room);
+      if (score > bestScore) {
+        bestScore = score;
+        best = wt;
+      }
     }
+    if (best) for (const m of comp) place(m, best);
   }
 
-  // 6. Finalize: choose each team's practice night.
-  return merged
-    .filter((t) => t.members.length > 0)
-    .map((t) => ({
-      coachId: t.coachId,
-      teamNameId: t.teamNameId,
-      playerIds: t.members.map((m) => m.id),
-      night: bestNight(t.members),
-    }));
+  // 5. Remaining free agents (singletons) fill open placeholders and any
+  //    under-target coached teams toward the target. Prefer the FULLER team
+  //    (consolidate) and a matching practice night (GroupConfig.weights.night
+  //    idea). Never push a team over target — UNLESS every team is already
+  //    at/over target, in which case drop into the least-full team so nobody is
+  //    left unassigned.
+  for (const p of singles) {
+    let best: WorkingTeam | null = null;
+    let bestScore = -Infinity;
+    for (const wt of teams) {
+      if (wt.members.length >= target) continue;
+      const night = bestNight(wt.members);
+      const nightScore = night && p.nights.includes(night) ? 1 : 0;
+      // fuller-first (consolidate) plus a nudge for a matching night.
+      const score = nightScore + wt.members.length / target;
+      if (score > bestScore) {
+        bestScore = score;
+        best = wt;
+      }
+    }
+    // Everyone at/over target → place into the least-full team so nobody drops.
+    if (!best) {
+      for (const wt of teams) {
+        if (!best || wt.members.length < best.members.length) best = wt;
+      }
+    }
+    if (best) place(p, best);
+  }
+
+  // 6 + 7. Emit EVERY team (empty placeholders included), each with its practice
+  //    night chosen by member availability. Empty team → night null.
+  const assignments: TeamAssignment[] = teams.map((wt) => ({
+    teamId: wt.team.id,
+    playerIds: wt.members.map((m) => m.id),
+    night: wt.members.length > 0 ? bestNight(wt.members) : null,
+  }));
+
+  return { assignments };
 }
 
 // ── Flags for the board ──────────────────────────────────────────────────────

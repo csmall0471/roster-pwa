@@ -21,12 +21,35 @@ import type { ScheduleConfig } from "./schedule";
 import {
   type GroupConfig,
   type GroupPlayer,
-  groupDivision,
+  assignDivision,
   normalizeConfig,
   parseNights,
 } from "./group/engine";
 import { rosterToCsv } from "./export-csv";
 import { fetchRosterRows } from "./roster-data";
+import { normalize, jaroWinkler } from "./resolve/similarity";
+
+// Map a player file's free-text division string (package_name, e.g. "Boys 8U")
+// onto the closest authoritative division created from the coach workbook (e.g.
+// "8u Boys"). Token overlap (Jaccard) dominates so word-order/case differences
+// don't matter; Jaro-Winkler breaks ties. Returns the best division + score.
+function bestDivisionMatch(
+  pkg: string,
+  divisions: { id: string; name: string }[]
+): { id: string; score: number } | null {
+  const pkgTokens = new Set(normalize(pkg).split(" ").filter(Boolean));
+  let best: { id: string; score: number } | null = null;
+  for (const d of divisions) {
+    const dTokens = new Set(normalize(d.name).split(" ").filter(Boolean));
+    const inter = [...pkgTokens].filter((t) => dTokens.has(t)).length;
+    const union = new Set([...pkgTokens, ...dTokens]).size;
+    const jacc = union ? inter / union : 0;
+    const jw = jaroWinkler(normalize(pkg), normalize(d.name));
+    const score = jacc * 0.7 + jw * 0.3;
+    if (!best || score > best.score) best = { id: d.id, score };
+  }
+  return best;
+}
 
 // Ensure the caller is the coach/owner (authenticated, not a parent). RLS also
 // enforces this, but we fail fast and clearly here too.
@@ -97,27 +120,45 @@ export async function commitImport(input: CommitImportInput): Promise<string> {
     .single();
   if (impErr || !imp) throw new Error(impErr?.message ?? "Failed to record import");
 
-  // 3. Ensure a division exists for each distinct package_name in the file.
+  // 3. Resolve each player's division. When the season was set up from a coach
+  //    workbook, the authoritative divisions already exist — map each file
+  //    package_name onto the closest one (so "Boys 8U" lands in "8u Boys").
+  //    Only create a division as a fallback when a package matches nothing, so
+  //    no player is silently dropped. Legacy/player-first seasons (no divisions
+  //    yet) keep the original behaviour: one division per distinct package.
   const records = input.rows.map((row) => canonicalRecord(row, input.columnMapping));
-  const packages = [...new Set(records.map(packageOf))];
+  const packages = [...new Set(records.map(packageOf))].filter(Boolean);
 
   const { data: existing } = await supabase
     .from("tb_divisions")
     .select("id, name")
     .eq("season_id", seasonId);
-  const divisionIdByName = new Map<string, string>(
-    (existing ?? []).map((d) => [d.name as string, d.id as string])
-  );
+  const existingDivs = (existing ?? []).map((d) => ({ id: d.id as string, name: d.name as string }));
+  const divisionIdByPackage = new Map<string, string>();
 
-  const toCreate = packages.filter((p) => !divisionIdByName.has(p));
-  if (toCreate.length > 0) {
-    const basePos = existing?.length ?? 0;
+  if (existingDivs.length > 0) {
+    const unmatched: string[] = [];
+    for (const pkg of packages) {
+      const m = bestDivisionMatch(pkg, existingDivs);
+      if (m && m.score >= 0.4) divisionIdByPackage.set(pkg, m.id);
+      else unmatched.push(pkg);
+    }
+    if (unmatched.length > 0) {
+      const basePos = existingDivs.length;
+      const { data: created, error: divErr } = await supabase
+        .from("tb_divisions")
+        .insert(unmatched.map((name, i) => ({ season_id: seasonId, name, position: basePos + i })))
+        .select("id, name");
+      if (divErr) throw new Error(divErr.message);
+      for (const d of created ?? []) divisionIdByPackage.set(d.name as string, d.id as string);
+    }
+  } else if (packages.length > 0) {
     const { data: created, error: divErr } = await supabase
       .from("tb_divisions")
-      .insert(toCreate.map((name, i) => ({ season_id: seasonId, name, position: basePos + i })))
+      .insert(packages.map((name, i) => ({ season_id: seasonId, name, position: i })))
       .select("id, name");
     if (divErr) throw new Error(divErr.message);
-    for (const d of created ?? []) divisionIdByName.set(d.name as string, d.id as string);
+    for (const d of created ?? []) divisionIdByPackage.set(d.name as string, d.id as string);
   }
 
   // 4. Insert players with materialized canonical fields + their division.
@@ -126,7 +167,7 @@ export async function commitImport(input: CommitImportInput): Promise<string> {
     return {
       season_id: seasonId,
       import_id: imp.id,
-      division_id: divisionIdByName.get(packageOf(rec)) ?? null,
+      division_id: divisionIdByPackage.get(packageOf(rec)) ?? null,
       first_name: rec.first_name,
       last_name: rec.last_name,
       gender: rec.gender,
@@ -146,6 +187,101 @@ export async function commitImport(input: CommitImportInput): Promise<string> {
   if (players.length > 0) {
     const { error: plErr } = await supabase.from("tb_players").insert(players);
     if (plErr) throw new Error(plErr.message);
+  }
+
+  revalidatePath("/tools/roster-creator");
+  revalidatePath(`/tools/roster-creator/${seasonId}`);
+  return seasonId;
+}
+
+// ── Set up a season from the coach/teams workbook (the new first step) ────────
+// One sheet per division, one row per team (a coach name, or "Team N" for an
+// open slot). This is the authoritative source of divisions, coaches, and the
+// team COUNT per division — created BEFORE players are imported. Generation
+// later only assigns players into these teams; it never invents teams.
+export type CreateSeasonFromRosterInput = {
+  seasonName: string;
+  sport?: string;
+  defaultTeamSize: number;
+  divisions: {
+    name: string;
+    targetTeamSize: number;
+    teams: { coachName: string | null; isPlaceholder: boolean; rawLabel: string }[];
+  }[];
+};
+
+export async function createSeasonFromRoster(input: CreateSeasonFromRosterInput): Promise<string> {
+  const { supabase } = await requireOwner();
+  const defaultSize = Math.max(1, Math.round(input.defaultTeamSize || 10));
+
+  // 1. Season — default players-per-team lives in grouping_config.target.
+  const { data: season, error } = await supabase
+    .from("tb_seasons")
+    .insert({
+      name: input.seasonName.trim() || "Untitled season",
+      sport: input.sport?.trim() || null,
+      grouping_config: { target: defaultSize },
+      status: "structured",
+    })
+    .select("id")
+    .single();
+  if (error || !season) throw new Error(error?.message ?? "Failed to create season");
+  const seasonId = season.id as string;
+
+  // 2. Distinct coaches across the whole season → one tb_coaches identity each,
+  //    even when a coach leads teams in multiple divisions.
+  const coachNames = [
+    ...new Set(
+      input.divisions
+        .flatMap((d) => d.teams)
+        .filter((t) => !t.isPlaceholder && t.coachName)
+        .map((t) => t.coachName!.trim())
+        .filter(Boolean)
+    ),
+  ];
+  const coachIdByName = new Map<string, string>();
+  if (coachNames.length > 0) {
+    const { data, error: cErr } = await supabase
+      .from("tb_coaches")
+      .insert(coachNames.map((name) => ({ season_id: seasonId, name })))
+      .select("id, name");
+    if (cErr) throw new Error(cErr.message);
+    (data ?? []).forEach((r) => coachIdByName.set(r.name as string, r.id as string));
+  }
+
+  // 3. Each division (with its own target size) and its teams (coached or open).
+  for (let i = 0; i < input.divisions.length; i++) {
+    const d = input.divisions[i];
+    const { data: div, error: dErr } = await supabase
+      .from("tb_divisions")
+      .insert({
+        season_id: seasonId,
+        name: d.name.trim() || `Division ${i + 1}`,
+        position: i,
+        target_team_size: Math.max(1, Math.round(d.targetTeamSize || defaultSize)),
+      })
+      .select("id")
+      .single();
+    if (dErr || !div) throw new Error(dErr?.message ?? "Failed to create division");
+    const divisionId = div.id as string;
+
+    const teamRows = d.teams.map((t, pos) => {
+      const coachName = (t.coachName ?? "").trim();
+      return {
+        season_id: seasonId,
+        division_id: divisionId,
+        name: t.isPlaceholder
+          ? t.rawLabel.trim() || `Team ${pos + 1}`
+          : coachName || `Team ${pos + 1}`,
+        coach_id: t.isPlaceholder ? null : coachIdByName.get(coachName) ?? null,
+        is_placeholder: t.isPlaceholder,
+        position: pos,
+      };
+    });
+    if (teamRows.length > 0) {
+      const { error: tErr } = await supabase.from("tb_teams").insert(teamRows);
+      if (tErr) throw new Error(tErr.message);
+    }
   }
 
   revalidatePath("/tools/roster-creator");
@@ -478,8 +614,10 @@ export async function updateGroupingConfig(seasonId: string, config: GroupConfig
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }
 
-// Run the grouping engine for every division and persist the resulting teams +
-// player assignments. Idempotent: clears prior teams first (regenerate).
+// Assign players into the FIXED set of teams that came from the coach workbook.
+// Teams themselves persist (they carry their coach + schedule) — regenerating
+// only reshuffles player → team assignments. Idempotent: clears prior player
+// assignments first, never deletes teams.
 export async function generateTeams(seasonId: string, config?: GroupConfig) {
   const { supabase } = await requireOwner();
 
@@ -488,13 +626,22 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
     await supabase.from("tb_seasons").update({ grouping_config: config }).eq("id", seasonId);
   }
 
-  const [{ data: divisions }, players, links, { data: coaches }, { data: teamNames }] =
+  const [{ data: divisions }, { data: teamRows }, players, links, { data: coaches }] =
     await Promise.all([
-      supabase.from("tb_divisions").select("id, name, position").eq("season_id", seasonId).order("position"),
+      supabase
+        .from("tb_divisions")
+        .select("id, name, position, target_team_size")
+        .eq("season_id", seasonId)
+        .order("position"),
+      supabase
+        .from("tb_teams")
+        .select("id, division_id, coach_id, is_placeholder, practice_night, position")
+        .eq("season_id", seasonId)
+        .order("position"),
       selectAll((from, to) =>
         supabase
           .from("tb_players")
-          .select("id, last_name, division_id, resolved_coach_id, resolved_team_name_id, practice_nights, raw")
+          .select("id, last_name, division_id, resolved_coach_id, practice_nights, raw")
           .eq("season_id", seasonId)
           .order("id")
           .range(from, to)
@@ -508,11 +655,9 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
           .range(from, to)
       ),
       supabase.from("tb_coaches").select("id, name").eq("season_id", seasonId),
-      supabase.from("tb_team_names").select("id, name").eq("season_id", seasonId),
     ]);
 
   const coachName = new Map((coaches ?? []).map((c) => [c.id as string, c.name as string]));
-  const teamName = new Map((teamNames ?? []).map((t) => [t.id as string, t.name as string]));
 
   // Undirected buddy adjacency.
   const buddies = new Map<string, Set<string>>();
@@ -528,16 +673,31 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
   const rows = players;
   const divisionOf = new Map(rows.map((p) => [p.id as string, p.division_id as string | null]));
 
-  // Wipe prior teams (also nulls team_id via ON DELETE SET NULL).
-  await supabase.from("tb_teams").delete().eq("season_id", seasonId);
+  // Reset prior assignments (regenerate). Teams PERSIST — only players move.
+  await supabase.from("tb_players").update({ team_id: null }).eq("season_id", seasonId);
+
+  // The authoritative, fixed teams, grouped by division.
+  type DivTeam = { id: string; coachId: string | null; isPlaceholder: boolean; night: string | null };
+  const teamsByDivision = new Map<string, DivTeam[]>();
+  for (const t of teamRows ?? []) {
+    const dz = t.division_id as string;
+    if (!teamsByDivision.has(dz)) teamsByDivision.set(dz, []);
+    teamsByDivision.get(dz)!.push({
+      id: t.id as string,
+      coachId: (t.coach_id as string | null) ?? null,
+      isPlaceholder: !!t.is_placeholder,
+      night: (t.practice_night as string | null) ?? null,
+    });
+  }
 
   for (const division of divisions ?? []) {
     const members = rows.filter((p) => p.division_id === division.id);
-    if (members.length === 0) continue;
+    const fixedTeams = teamsByDivision.get(division.id as string) ?? [];
+    if (fixedTeams.length === 0 || members.length === 0) continue;
 
-    // A coach whose OWN child is enrolled here runs a real team that must never
-    // be merged away. Detect it: the account that registered the player matches
-    // the coach they requested. Their team is then protected in groupDivision.
+    // A coach whose OWN child is enrolled here runs an inviolable team. Detect
+    // it: the account that registered the player matches the coach they
+    // requested. assignDivision keeps their kids on that team, no exception.
     const protectedCoachIds = new Set<string>();
     for (const p of members) {
       const cid = p.resolved_coach_id as string | null;
@@ -550,7 +710,7 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
     const groupPlayers: GroupPlayer[] = members.map((p) => ({
       id: p.id as string,
       coachId: (p.resolved_coach_id as string | null) ?? null,
-      teamNameId: (p.resolved_team_name_id as string | null) ?? null,
+      teamNameId: null,
       nights: parseNights((p.practice_nights as string) ?? ""),
       // Restrict buddies to same-division players (cross-division ones can't share a team).
       buddyIds: [...(buddies.get(p.id as string) ?? [])].filter(
@@ -558,37 +718,25 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
       ),
     }));
 
-    const grouped = groupDivision(groupPlayers, cfg, protectedCoachIds);
+    const targetSize = (division.target_team_size as number | null) ?? cfg.target;
+    const { assignments } = assignDivision({
+      teams: fixedTeams.map((t) => ({ id: t.id, coachId: t.coachId, isPlaceholder: t.isPlaceholder })),
+      players: groupPlayers,
+      targetSize,
+      protectedCoachIds,
+    });
 
-    // Name + persist each team, then assign players.
-    let n = 0;
-    for (const t of grouped) {
-      n++;
-      const name = t.teamNameId
-        ? teamName.get(t.teamNameId) ?? `Team ${n}`
-        : t.coachId
-        ? `${coachName.get(t.coachId) ?? "Coach"}'s team`
-        : `${division.name} — Team ${n}`;
-
-      const { data: team, error } = await supabase
-        .from("tb_teams")
-        .insert({
-          season_id: seasonId,
-          division_id: division.id,
-          name,
-          practice_night: t.night,
-          position: n,
-        })
-        .select("id")
-        .single();
-      if (error || !team) throw new Error(error?.message ?? "Failed to create team");
-
-      if (t.playerIds.length > 0) {
-        const { error: upErr } = await supabase
-          .from("tb_players")
-          .update({ team_id: team.id })
-          .in("id", t.playerIds);
-        if (upErr) throw new Error(upErr.message);
+    const currentNight = new Map(fixedTeams.map((t) => [t.id, t.night]));
+    for (const a of assignments) {
+      if (a.playerIds.length > 0) {
+        const { error } = await supabase.from("tb_players").update({ team_id: a.teamId }).in("id", a.playerIds);
+        if (error) throw new Error(error.message);
+      }
+      // Suggest a practice night only when the team has none yet — never clobber
+      // a night the coach already set in the schedule builder.
+      if (a.night && !currentNight.get(a.teamId)) {
+        const { error } = await supabase.from("tb_teams").update({ practice_night: a.night }).eq("id", a.teamId);
+        if (error) throw new Error(error.message);
       }
     }
   }

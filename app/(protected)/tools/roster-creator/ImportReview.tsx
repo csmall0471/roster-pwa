@@ -54,19 +54,23 @@ export default function ImportReview({
   defaultName,
   filename,
   onCancel,
+  lockedSeasonId,
 }: {
   parsed: ParsedSheet;
   seasons: SeasonOption[];
   defaultName: string;
   filename: string;
   onCancel: () => void;
+  // When set, players import straight into this season (the new coach-first
+  // flow uploads players from the season page) — no new/existing chooser.
+  lockedSeasonId?: string;
 }) {
   const router = useRouter();
   const [mapping, setMapping] = useState<ColumnMapping>(() => parsed.mapping);
-  const [mode, setMode] = useState<"new" | "existing">(seasons.length ? "new" : "new");
+  const [mode, setMode] = useState<"new" | "existing">(lockedSeasonId ? "existing" : "new");
   const [seasonName, setSeasonName] = useState(defaultName);
   const [sport, setSport] = useState("");
-  const [existingSeasonId, setExistingSeasonId] = useState(seasons[0]?.id ?? "");
+  const [existingSeasonId, setExistingSeasonId] = useState(lockedSeasonId ?? seasons[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -192,6 +196,7 @@ export default function ImportReview({
       </details>
 
       {/* Target season */}
+      {!lockedSeasonId && (
       <section>
         <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
           Import into
@@ -248,6 +253,7 @@ export default function ImportReview({
           )}
         </div>
       </section>
+      )}
 
       {/* Column mapping */}
       <section>

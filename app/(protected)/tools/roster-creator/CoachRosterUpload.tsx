@@ -1,12 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import ImportReview, { type SeasonOption } from "./ImportReview";
-import { parseSheet, type ParsedSheet } from "./parse";
+import { parseCoachWorkbook, type ParsedCoachRoster } from "./coach-roster";
+import CoachRosterReview from "./CoachRosterReview";
 
-const ACCEPT = ".csv,.xlsx,.xls";
+const ACCEPT = ".xlsx,.xls";
 const ACCEPT_MIME = [
-  "text/csv",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ];
@@ -14,26 +13,18 @@ const ACCEPT_MIME = [
 function isAccepted(file: File) {
   const name = file.name.toLowerCase();
   return (
-    name.endsWith(".csv") ||
     name.endsWith(".xlsx") ||
     name.endsWith(".xls") ||
     ACCEPT_MIME.includes(file.type)
   );
 }
 
-export default function UploadCard({
-  seasons,
-  lockedSeason,
-}: {
-  seasons: SeasonOption[];
-  // When set, the player file imports straight into this season (coach-first flow).
-  lockedSeason?: SeasonOption;
-}) {
+export default function CoachRosterUpload() {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [parsed, setParsed] = useState<ParsedSheet | null>(null);
-  const [filename, setFilename] = useState("");
+  const [parsed, setParsed] = useState<ParsedCoachRoster | null>(null);
+  const [defaultName, setDefaultName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFiles(files: FileList | null) {
@@ -41,17 +32,17 @@ export default function UploadCard({
     const file = files?.[0];
     if (!file) return;
     if (!isAccepted(file)) {
-      setError("Please upload a CSV or Excel file (.csv, .xlsx, .xls).");
+      setError("Please upload an Excel file (.xlsx or .xls).");
       return;
     }
     setBusy(true);
     try {
-      const sheet = await parseSheet(file);
-      if (sheet.headers.length === 0 || sheet.rows.length === 0) {
-        throw new Error("Couldn't find any data rows in that file.");
+      const result = await parseCoachWorkbook(file);
+      if (result.divisions.length === 0) {
+        throw new Error("Couldn't find any divisions/sheets in that workbook.");
       }
-      setFilename(file.name);
-      setParsed(sheet);
+      setDefaultName(file.name.replace(/\.[^.]+$/, ""));
+      setParsed(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong parsing the file.");
     } finally {
@@ -62,15 +53,13 @@ export default function UploadCard({
 
   if (parsed) {
     return (
-      <ImportReview
+      <CoachRosterReview
         parsed={parsed}
-        seasons={lockedSeason ? [lockedSeason] : seasons}
-        lockedSeasonId={lockedSeason?.id}
-        defaultName={filename.replace(/\.[^.]+$/, "")}
-        filename={filename}
+        defaultName={defaultName}
         onCancel={() => {
           setParsed(null);
-          setFilename("");
+          setDefaultName("");
+          setError(null);
         }}
       />
     );
@@ -78,6 +67,15 @@ export default function UploadCard({
 
   return (
     <div>
+      <div className="mb-4">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+          Start a season — upload your coaches &amp; teams
+        </h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          One sheet per division, one row per team (a coach name, or &ldquo;Team N&rdquo; for an open slot).
+        </p>
+      </div>
+
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -98,14 +96,35 @@ export default function UploadCard({
             : "border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600 bg-white dark:bg-gray-900"
         }`}
       >
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" className="text-gray-400 mb-3" aria-hidden="true">
-          <path d="M12 16V4m0 0L8 8m4-4l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <svg
+          width="40"
+          height="40"
+          viewBox="0 0 24 24"
+          fill="none"
+          className="text-gray-400 mb-3"
+          aria-hidden="true"
+        >
+          <path
+            d="M12 16V4m0 0L8 8m4-4l4 4"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
         <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-          {busy ? "Reading file…" : "Drag and drop a file here, or click to browse"}
+          {busy ? "Reading workbook…" : "Drag and drop a file here, or click to browse"}
         </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">CSV or Excel (.csv, .xlsx, .xls)</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Excel only (.xlsx, .xls)
+        </p>
         <input
           ref={inputRef}
           type="file"
@@ -115,7 +134,9 @@ export default function UploadCard({
         />
       </div>
 
-      {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {error && (
+        <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>
+      )}
     </div>
   );
 }

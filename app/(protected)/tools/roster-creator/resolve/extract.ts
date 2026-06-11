@@ -19,6 +19,9 @@ export type RawPlayer = {
   nights: string;
   school: string;
   division: string;
+  // Authoritative coach names for this player's division (admin-uploaded). When
+  // present, Claude maps each requested coach to the exact matching name.
+  coachCandidates?: string[];
 };
 
 export type ExtractedIntent = {
@@ -34,6 +37,7 @@ const SYSTEM = `You normalize youth-sports signup requests. Parents typed these 
 
 Return, per player:
 - coaches: the coach name(s) requested, normalized to "First Last". If the parent gives ALTERNATIVES ("Brent or Kevin Clissold or Green", "Todd (or Kirby) Martin", "Coach Todd Martin or Coach Kirby Martin") return EACH as a separate option: ["Brent Clissold","Kevin Green"] / ["Todd Martin","Kirby Martin"]. A single co-coaching staff written together ("Tony/Jon Galietti/Valentine", "Nef & Cody Lizarraga and Lenhart", "Matthew and rj Hernandez") is ONE option, kept as written but tidied. Strip prefixes like "Coach".
+- When a line includes "known coaches in division: ...", that is the authoritative roster of coaches for that player's division. Map each requested coach to the EXACT matching name from that list when you're confident — fixing nicknames, typos, and partial names (a bare surname or first name) to the full listed name. If a requested coach clearly is NOT in that list, still return it as written; the caller treats it as an unhonored request. Always return coaches as "First Last".
 - team: the requested team name, normalized (fix casing/typos: "Battle cats"->"Battle Cats", "Lil' Bulldogs"->"Little Bulldogs"). "" if none.
 - buddies: teammates/friends/siblings the player wants to be with, as "First Last" where possible. Parse multi-name cells, positionally-aligned first/last columns, "&"/"and"/comma lists, and names buried in prose. Drop a buddy you can't name.
 - playUp: true if the request mentions playing up an age, an older sibling in a higher division, or a specific higher age bracket (e.g. "U10", "10U", "play up", "older brother in 10U").
@@ -80,10 +84,13 @@ async function extractBatch(
   signal?: AbortSignal
 ): Promise<ExtractedIntent[]> {
   const lines = batch
-    .map(
-      (p) =>
-        `id=${p.id} | coach: ${p.coachFirst} ${p.coachLast} | team: ${p.team} | teammates: ${p.buddyFirst} / ${p.buddyLast} | nights: ${p.nights} | school: ${p.school} | division: ${p.division}`
-    )
+    .map((p) => {
+      let line = `id=${p.id} | coach: ${p.coachFirst} ${p.coachLast} | team: ${p.team} | teammates: ${p.buddyFirst} / ${p.buddyLast} | nights: ${p.nights} | school: ${p.school} | division: ${p.division}`;
+      if (p.coachCandidates && p.coachCandidates.length > 0) {
+        line += ` | known coaches in division: ${p.coachCandidates.join(", ")}`;
+      }
+      return line;
+    })
     .join("\n");
 
   const byId = new Map(batch.map((p) => [p.id, emptyIntent(p.id)]));

@@ -166,7 +166,7 @@ export default function ConfirmView({
       <div className="rounded-lg border border-green-200 dark:border-green-900/50 bg-green-50/50 dark:bg-green-950/20 p-4">
         <p className="text-sm font-semibold text-green-800 dark:text-green-300">Applied automatically</p>
         <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
-          {r.summary.players} players · {r.summary.divisions} divisions · {r.summary.teams} team names ·{" "}
+          {r.summary.players} players · {r.summary.divisions} divisions · {r.summary.teams} teams ·{" "}
           {r.summary.coaches} coaches · {r.summary.buddyLinks} buddy links.
         </p>
       </div>
@@ -178,11 +178,10 @@ export default function ConfirmView({
             Double-check these ({flagged.length})
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-            Parents spell coach and team names inconsistently. We <strong>automatically combined</strong> the
-            slightly-different spellings below into one coach/team. Almost always that&rsquo;s correct (typos,
-            capitalization). Skim each one: if the spellings are the <strong>same person/team</strong>, hit{" "}
-            <em>Looks right</em> to clear it. If two <strong>different</strong> people got merged, fix it on the
-            Build-teams board (rename the team or drag the players apart) — it won&rsquo;t hurt anything here.
+            We matched each player&rsquo;s request to a coach on your roster. The teams below drew a player we
+            couldn&rsquo;t pin to a <strong>single</strong> coach — usually two coaches share a surname (e.g. two
+            Wilsons), so we made a best guess. Skim each one: if it looks right, hit <em>Looks right</em> to
+            clear it. To move someone, drag them on the Build-teams board — it won&rsquo;t hurt anything here.
           </p>
           <ul className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 divide-y divide-amber-100 dark:divide-amber-900/30">
             {flagged.map((t, i) => (
@@ -193,7 +192,7 @@ export default function ConfirmView({
                   <span className="ml-2 text-xs text-gray-400">{shortDiv(t.division)} · {t.count}</span>
                   {t.variants.length > 0 && (
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      combined spellings: {t.variants.map((v) => `“${v}”`).join(" · ")}
+                      players to check: {t.variants.map((v) => `“${v}”`).join(" · ")}
                     </p>
                   )}
                 </div>
@@ -204,6 +203,33 @@ export default function ConfirmView({
                 >
                   Looks right
                 </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Coach requests that matched no one on the roster */}
+      {r.unmatchedCoaches.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+            Requests we couldn&rsquo;t match ({r.unmatchedCoaches.length})
+          </h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            These players asked for a coach who isn&rsquo;t on your roster for their division, so the request
+            can&rsquo;t be honored — they&rsquo;ll be placed onto an open team when you build. Check for a typo in
+            the coach list, or just let the balancer seat them.
+          </p>
+          <ul className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
+            {r.unmatchedCoaches.map((u, i) => (
+              <li key={i} className="flex items-start justify-between gap-3 px-4 py-2 text-sm">
+                <span className="min-w-0">
+                  <span className="font-medium text-gray-900 dark:text-white">{u.playerName}</span>
+                  <span className="ml-2 text-xs text-gray-400">{shortDiv(u.division)}</span>
+                </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400 text-right shrink-0">
+                  asked for {u.requested.map((c) => `“${c}”`).join(", ")}
+                </span>
               </li>
             ))}
           </ul>

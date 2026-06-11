@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import SeasonView, { type DivisionRow, type PlayerRow } from "./SeasonView";
+import UploadCard from "../UploadCard";
 import { selectAll } from "../db";
 
 export default async function SeasonPage({
@@ -20,12 +21,14 @@ export default async function SeasonPage({
 
   if (!season) notFound();
 
-  const [{ data: divisions }, players] = await Promise.all([
+  const [{ data: divisions }, { data: teams }, { data: coaches }, players] = await Promise.all([
     supabase
       .from("tb_divisions")
       .select("id, name, position")
       .eq("season_id", id)
       .order("position", { ascending: true }),
+    supabase.from("tb_teams").select("id, is_placeholder").eq("season_id", id),
+    supabase.from("tb_coaches").select("id").eq("season_id", id),
     selectAll((from, to) =>
       supabase
         .from("tb_players")
@@ -38,6 +41,14 @@ export default async function SeasonPage({
         .range(from, to)
     ),
   ]);
+
+  const playerCount = (players ?? []).length;
+  const teamRows = teams ?? [];
+  const openCount = teamRows.filter((t) => t.is_placeholder).length;
+  const setupSummary =
+    `${(divisions ?? []).length} divisions · ${teamRows.length} teams ` +
+    `(${teamRows.length - openCount} coached · ${openCount} open) · ${(coaches ?? []).length} coaches`;
+  const seasonOption = { id: season.id as string, name: season.name as string };
 
   return (
     <div>
@@ -55,11 +66,25 @@ export default async function SeasonPage({
           )}
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {(divisions ?? []).length} divisions · {(players ?? []).length} players imported
+          {setupSummary} · {playerCount} {playerCount === 1 ? "player" : "players"} imported
         </p>
       </div>
 
-      {(players ?? []).length > 0 && (
+      {playerCount === 0 && (divisions ?? []).length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+            Add players
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+            Your divisions, coaches, and teams are set up. Now import the signup export (CSV or
+            Excel) — each player is matched into the division you created and onto the coach they
+            requested.
+          </p>
+          <UploadCard seasons={[seasonOption]} lockedSeason={seasonOption} />
+        </div>
+      )}
+
+      {playerCount > 0 && (
         <>
           <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
             Next steps
