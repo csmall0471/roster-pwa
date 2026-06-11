@@ -1194,3 +1194,45 @@ export async function deleteAllSeasons(): Promise<{ ok: boolean; error?: string 
     return { ok: false, error: e instanceof Error ? e.message : "Failed to delete seasons." };
   }
 }
+
+// Set a division's TOTAL team count by adding/removing open placeholder slots to
+// match. Coached teams are never removed — the count is clamped to at least the
+// number of coaches (remove a coach individually to go lower).
+export async function setDivisionTeamCount(seasonId: string, divisionId: string, count: number) {
+  const { supabase } = await requireOwner();
+  const { data: teams, error: selErr } = await supabase
+    .from("tb_teams")
+    .select("id, is_placeholder, position")
+    .eq("division_id", divisionId)
+    .order("position");
+  if (selErr) throw new Error(selErr.message);
+  const list = teams ?? [];
+  const coachedCount = list.filter((t) => !t.is_placeholder).length;
+  const placeholders = list.filter((t) => t.is_placeholder);
+  const current = list.length;
+  const desired = Math.max(Math.round(count) || 0, coachedCount);
+
+  if (desired > current) {
+    const rows = [];
+    for (let i = current; i < desired; i++) {
+      rows.push({
+        season_id: seasonId,
+        division_id: divisionId,
+        name: `Team ${i + 1}`,
+        coach_id: null,
+        is_placeholder: true,
+        position: i,
+      });
+    }
+    const { error } = await supabase.from("tb_teams").insert(rows);
+    if (error) throw new Error(error.message);
+  } else if (desired < current) {
+    // Drop the trailing open slots (highest positions first).
+    const toRemove = placeholders.slice(placeholders.length - (current - desired)).map((t) => t.id as string);
+    if (toRemove.length > 0) {
+      const { error } = await supabase.from("tb_teams").delete().in("id", toRemove);
+      if (error) throw new Error(error.message);
+    }
+  }
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}

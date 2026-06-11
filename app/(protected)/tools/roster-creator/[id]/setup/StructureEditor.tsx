@@ -11,6 +11,7 @@ import {
   deleteDivision,
   deleteTeam,
   renameDivision,
+  setDivisionTeamCount,
   setTeamPracticeNight,
   updateTeamCoach,
 } from "../../actions";
@@ -288,6 +289,24 @@ function DivisionCard({
         >
           + Open slot
         </button>
+        <label
+          className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+          title="Set the total number of teams — adds or removes open slots (coached teams are kept)"
+        >
+          Teams
+          <input
+            key={division.teams.length}
+            type="number"
+            min={coached}
+            defaultValue={division.teams.length}
+            disabled={busy}
+            onBlur={(e) => {
+              const n = parseInt(e.target.value, 10);
+              if (!isNaN(n) && n !== division.teams.length) run(() => setDivisionTeamCount(seasonId, division.id, n));
+            }}
+            className="w-14 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-1.5 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-50"
+          />
+        </label>
       </div>
     </div>
   );
