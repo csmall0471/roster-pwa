@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import NewSeasonButton from "./NewSeasonButton";
 import DeleteSeasonButton from "./DeleteSeasonButton";
+import DeleteAllSeasonsButton from "./DeleteAllSeasonsButton";
 
 export default async function RosterCreatorPage() {
   const supabase = await createClient();
@@ -39,9 +40,12 @@ export default async function RosterCreatorPage() {
 
       {rows.length > 0 ? (
         <div>
-          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            Seasons
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              Seasons
+            </h2>
+            <DeleteAllSeasonsButton count={rows.length} />
+          </div>
           <ul className="divide-y divide-gray-200 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             {rows.map((s) => {
               const players = s.tb_players?.[0]?.count ?? 0;

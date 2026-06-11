@@ -1171,3 +1171,12 @@ export async function deletePlayer(seasonId: string, playerId: string) {
   if (error) throw new Error(error.message);
   revalidatePath(`/tools/roster-creator/${seasonId}/players`);
 }
+
+// Delete EVERY season the owner has (cascades to divisions, teams, coaches,
+// players, buddy links, imports). Destructive — the UI confirms first.
+export async function deleteAllSeasons() {
+  const { supabase, user } = await requireOwner();
+  const { error } = await supabase.from("tb_seasons").delete().eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/tools/roster-creator");
+}
