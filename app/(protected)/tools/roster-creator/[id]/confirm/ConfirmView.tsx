@@ -129,11 +129,12 @@ export default function ConfirmView({
     return (
       <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <p className="text-sm text-gray-700 dark:text-gray-300">
-          This season has already been analyzed. Re-run to review what Claude flagged, or continue.
+          Run the analysis to match every signup&rsquo;s coach &amp; buddy requests against your roster.
+          Re-run it any time you add or edit players, then continue to build teams.
         </p>
         <div className="mt-4 flex gap-3">
           <button type="button" onClick={run} className="inline-flex items-center rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700">
-            Re-run analysis
+            Analyze signups
           </button>
           <Link href={`/tools/roster-creator/${seasonId}/teams`} className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
             Build teams →

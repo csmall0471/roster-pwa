@@ -139,10 +139,14 @@ export default function ImportReview({
         rows: parsed.rows,
         groupingConfig: { target, weights },
       });
-      // Continue to the analyze/confirm step — that's where the live progress
-      // bar runs as Claude reads every signup. (Edit individual players anytime
-      // from the Players step via the stepper.)
-      router.push(`/tools/roster-creator/${seasonId}/confirm`);
+      // Locked (coach-first flow): stay on the Players tab and auto-run the
+      // analyze inline (?analyze=1) so the progress bar shows without leaving the
+      // page. Legacy flow continues to the standalone confirm step.
+      router.push(
+        lockedSeasonId
+          ? `/tools/roster-creator/${seasonId}/players?analyze=1`
+          : `/tools/roster-creator/${seasonId}/confirm`
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to import.");
       setBusy(false);

@@ -382,8 +382,9 @@ export default function TeamsBoard({
 
         <div className="mt-4 flex items-center gap-3">
           <button type="button" onClick={generate} disabled={busy}
-            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-            {busy ? "Working…" : "Generate teams"}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+            {busy && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />}
+            {busy ? "Generating…" : "Generate teams"}
           </button>
           <button type="button" onClick={saveSettings} disabled={busy}
             className="text-sm font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">

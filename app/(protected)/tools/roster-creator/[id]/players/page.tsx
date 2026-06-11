@@ -4,10 +4,18 @@ import { createClient } from "@/lib/supabase/server";
 import Stepper from "../../Stepper";
 import UploadCard from "../../UploadCard";
 import { selectAll } from "../../db";
+import ConfirmView from "../confirm/ConfirmView";
 import PlayerEditor, { type EditPlayer, type EditDivision } from "./PlayerEditor";
 
-export default async function PlayersPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PlayersPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ analyze?: string }>;
+}) {
   const { id } = await params;
+  const autoRun = (await searchParams)?.analyze === "1";
   const supabase = await createClient();
 
   const { data: season } = await supabase.from("tb_seasons").select("id, name").eq("id", id).maybeSingle();
@@ -67,15 +75,18 @@ export default async function PlayersPage({ params }: { params: Promise<{ id: st
 
       <PlayerEditor seasonId={id} divisions={editDivisions} players={editPlayers} />
 
-      <div className="sticky bottom-0 -mx-4 mt-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50/95 dark:bg-gray-950/95 px-4 py-3 backdrop-blur flex items-center gap-3">
-        <Link
-          href={`/tools/roster-creator/${id}/confirm`}
-          className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-        >
-          Continue to build teams →
-        </Link>
-        <span className="text-xs text-gray-400">{editPlayers.length} players</span>
-      </div>
+      {editPlayers.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">
+            Analyze &amp; build
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+            Claude reads every signup and matches each coach, buddy, and practice-night request against
+            your roster. Run it here, then continue to build teams.
+          </p>
+          <ConfirmView seasonId={id} autoRun={autoRun} />
+        </section>
+      )}
     </div>
   );
 }
