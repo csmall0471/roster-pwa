@@ -1261,3 +1261,29 @@ export async function setDivisionTeamCount(seasonId: string, divisionId: string,
   }
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
+
+// ── Assistant / co-coaches (a team can have more than one coach) ─────────────
+
+export async function addAssistantCoach(seasonId: string, teamId: string, coachName: string) {
+  const { supabase } = await requireOwner();
+  const n = coachName.trim();
+  if (!n) throw new Error("Coach name is required");
+  const coachId = await coachIdForName(supabase, seasonId, n);
+  const { error } = await supabase
+    .from("tb_team_coaches")
+    .insert({ season_id: seasonId, team_id: teamId, coach_id: coachId });
+  if (error && error.code !== "23505") throw new Error(error.message); // ignore duplicate
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+export async function removeAssistantCoach(seasonId: string, teamId: string, coachId: string) {
+  const { supabase } = await requireOwner();
+  const { error } = await supabase
+    .from("tb_team_coaches")
+    .delete()
+    .eq("season_id", seasonId)
+    .eq("team_id", teamId)
+    .eq("coach_id", coachId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}

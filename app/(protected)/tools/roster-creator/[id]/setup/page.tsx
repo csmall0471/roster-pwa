@@ -15,7 +15,7 @@ export default async function SetupPage({ params }: { params: Promise<{ id: stri
     .maybeSingle();
   if (!season) notFound();
 
-  const [{ data: divisions }, { data: teams }, { data: coaches }] = await Promise.all([
+  const [{ data: divisions }, { data: teams }, { data: coaches }, { data: assists }] = await Promise.all([
     supabase.from("tb_divisions").select("id, name, position").eq("season_id", id).order("position"),
     supabase
       .from("tb_teams")
@@ -23,9 +23,16 @@ export default async function SetupPage({ params }: { params: Promise<{ id: stri
       .eq("season_id", id)
       .order("position"),
     supabase.from("tb_coaches").select("id, name").eq("season_id", id),
+    supabase.from("tb_team_coaches").select("team_id, coach_id").eq("season_id", id),
   ]);
 
   const coachName = new Map((coaches ?? []).map((c) => [c.id as string, c.name as string]));
+  const assistantsByTeam = new Map<string, { id: string; name: string }[]>();
+  for (const a of assists ?? []) {
+    const tid = a.team_id as string;
+    if (!assistantsByTeam.has(tid)) assistantsByTeam.set(tid, []);
+    assistantsByTeam.get(tid)!.push({ id: a.coach_id as string, name: coachName.get(a.coach_id as string) ?? "" });
+  }
   const editorDivisions: EditorDivision[] = (divisions ?? []).map((d) => ({
     id: d.id as string,
     name: d.name as string,
@@ -36,6 +43,7 @@ export default async function SetupPage({ params }: { params: Promise<{ id: stri
         coachName: t.coach_id ? coachName.get(t.coach_id as string) ?? "" : "",
         isPlaceholder: !!t.is_placeholder,
         night: (t.practice_night as string | null) ?? null,
+        assistants: assistantsByTeam.get(t.id as string) ?? [],
       })),
   }));
 

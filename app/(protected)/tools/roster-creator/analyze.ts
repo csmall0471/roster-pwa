@@ -94,23 +94,38 @@ export async function runAnalysis(
   onProgress?.(0, rows.length);
 
   // ── Authoritative roster: divisions + coached teams → per-division candidates
-  const [{ data: divisions }, { data: teams }, { data: coaches }] = await Promise.all([
+  const [{ data: divisions }, { data: teams }, { data: coaches }, { data: teamCoaches }] = await Promise.all([
     supabase.from("tb_divisions").select("id, name").eq("season_id", seasonId),
     supabase.from("tb_teams").select("id, division_id, coach_id").eq("season_id", seasonId),
     supabase.from("tb_coaches").select("id, name").eq("season_id", seasonId),
+    supabase.from("tb_team_coaches").select("team_id, coach_id").eq("season_id", seasonId),
   ]);
   const coachNameById = new Map((coaches ?? []).map((c) => [c.id as string, c.name as string]));
   const divNameById = new Map((divisions ?? []).map((d) => [d.id as string, d.name as string]));
 
-  // division_id -> the coaches who lead a team in that division.
+  // division_id -> candidate coaches. A candidate's `id` is the HEAD coach of a
+  // team, so a request matching the head OR an assistant resolves to that team.
   const candidatesByDiv = new Map<string, CoachCandidate[]>();
+  const teamHead = new Map<string, { coachId: string; divisionId: string }>(); // team_id -> head
+  const addCand = (dz: string, id: string, name: string) => {
+    if (!name) return;
+    if (!candidatesByDiv.has(dz)) candidatesByDiv.set(dz, []);
+    const list = candidatesByDiv.get(dz)!;
+    if (!list.some((c) => c.id === id && normalize(c.name) === normalize(name))) list.push({ id, name });
+  };
+  // Head coaches first (a head match beats an assistant of the same name).
   for (const t of teams ?? []) {
     const cid = t.coach_id as string | null;
     if (!cid) continue;
     const dz = t.division_id as string;
-    if (!candidatesByDiv.has(dz)) candidatesByDiv.set(dz, []);
-    const list = candidatesByDiv.get(dz)!;
-    if (!list.some((c) => c.id === cid)) list.push({ id: cid, name: coachNameById.get(cid) ?? "" });
+    teamHead.set(t.id as string, { coachId: cid, divisionId: dz });
+    addCand(dz, cid, coachNameById.get(cid) ?? "");
+  }
+  // Assistant / co-coaches resolve to their team's HEAD coach (same team).
+  for (const a of teamCoaches ?? []) {
+    const head = teamHead.get(a.team_id as string);
+    if (!head) continue; // assistant on a placeholder (no head coach) — skip
+    addCand(head.divisionId, head.coachId, coachNameById.get(a.coach_id as string) ?? "");
   }
 
   const idOf = (p: Record<string, unknown>) => p.id as string;
@@ -306,7 +321,14 @@ export async function runAnalysis(
   const pairings: DivisionPairing[] = (divisions ?? [])
     .map((d) => {
       const dz = d.id as string;
-      const cands = candidatesByDiv.get(dz) ?? [];
+      // One row per team (head coach). Candidates include assistant names that
+      // share the head's id — dedup so a team doesn't list twice.
+      const seenCoach = new Set<string>();
+      const cands = (candidatesByDiv.get(dz) ?? []).filter((c) => {
+        if (seenCoach.has(c.id)) return false;
+        seenCoach.add(c.id);
+        return true;
+      });
       const counts = countByDiv.get(dz) ?? new Map<string, number>();
       const amb = ambiguousByDiv.get(dz) ?? new Map<string, string[]>();
       const tlist: TeamPairing[] = cands

@@ -4,12 +4,14 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  addAssistantCoach,
   addCoachTeam,
   addDivision,
   addPlaceholderTeam,
   addRosterToSeason,
   deleteDivision,
   deleteTeam,
+  removeAssistantCoach,
   renameDivision,
   setDivisionTeamCount,
   setTeamPracticeNight,
@@ -18,7 +20,13 @@ import {
 import { NIGHTS } from "../../group/engine";
 import { parseCoachWorkbook } from "../../coach-roster";
 
-export type EditorTeam = { id: string; coachName: string; isPlaceholder: boolean; night: string | null };
+export type EditorTeam = {
+  id: string;
+  coachName: string;
+  isPlaceholder: boolean;
+  night: string | null;
+  assistants: { id: string; name: string }[];
+};
 export type EditorDivision = { id: string; name: string; teams: EditorTeam[] };
 
 export default function StructureEditor({
@@ -224,43 +232,46 @@ function DivisionCard({
 
       <ul className="divide-y divide-gray-100 dark:divide-gray-800">
         {division.teams.map((t) => (
-          <li key={t.id} className="flex items-center gap-2 px-4 py-2">
-            <input
-              defaultValue={t.coachName}
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                if (v !== t.coachName) run(() => updateTeamCoach(seasonId, t.id, v));
-              }}
-              placeholder="open slot — type a coach name"
-              className={`flex-1 min-w-0 rounded-md border px-2 py-1 text-sm bg-white dark:bg-gray-950 ${
-                t.isPlaceholder
-                  ? "border-dashed border-gray-300 dark:border-gray-700 text-gray-500 placeholder-gray-400"
-                  : "border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-              }`}
-            />
-            <select
-              value={t.night ?? ""}
-              disabled={busy}
-              onChange={(e) => run(() => setTeamPracticeNight(seasonId, t.id, e.target.value || null))}
-              className="shrink-0 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1 text-xs text-gray-600 dark:text-gray-300"
-              title="Practice day"
-            >
-              <option value="">— day —</option>
-              {NIGHTS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(() => deleteTeam(seasonId, t.id))}
-              className="shrink-0 text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50"
-              title="Remove team"
-            >
-              ✕
-            </button>
+          <li key={t.id} className="px-4 py-2">
+            <div className="flex items-center gap-2">
+              <input
+                defaultValue={t.coachName}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v !== t.coachName) run(() => updateTeamCoach(seasonId, t.id, v));
+                }}
+                placeholder="open slot — type a coach name"
+                className={`flex-1 min-w-0 rounded-md border px-2 py-1 text-sm bg-white dark:bg-gray-950 ${
+                  t.isPlaceholder
+                    ? "border-dashed border-gray-300 dark:border-gray-700 text-gray-500 placeholder-gray-400"
+                    : "border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                }`}
+              />
+              <select
+                value={t.night ?? ""}
+                disabled={busy}
+                onChange={(e) => run(() => setTeamPracticeNight(seasonId, t.id, e.target.value || null))}
+                className="shrink-0 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1 text-xs text-gray-600 dark:text-gray-300"
+                title="Practice day"
+              >
+                <option value="">— day —</option>
+                {NIGHTS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run(() => deleteTeam(seasonId, t.id))}
+                className="shrink-0 text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50"
+                title="Remove team"
+              >
+                ✕
+              </button>
+            </div>
+            {!t.isPlaceholder && <AssistantRow seasonId={seasonId} team={t} busy={busy} run={run} />}
           </li>
         ))}
       </ul>
@@ -308,6 +319,55 @@ function DivisionCard({
           />
         </label>
       </div>
+    </div>
+  );
+}
+
+function AssistantRow({
+  seasonId,
+  team,
+  busy,
+  run,
+}: {
+  seasonId: string;
+  team: EditorTeam;
+  busy: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  function add() {
+    const n = name.trim();
+    if (!n) return;
+    setName("");
+    run(() => addAssistantCoach(seasonId, team.id, n));
+  }
+  return (
+    <div className="ml-1 mt-1.5 flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] text-gray-400">assistants:</span>
+      {team.assistants.map((a) => (
+        <span
+          key={a.id}
+          className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+        >
+          {a.name}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(() => removeAssistantCoach(seasonId, team.id, a.id))}
+            className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+            title="Remove assistant"
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && add()}
+        placeholder="+ assistant coach"
+        className="w-32 rounded border border-dashed border-gray-300 dark:border-gray-700 bg-transparent px-1.5 py-0.5 text-[11px] text-gray-700 dark:text-gray-200"
+      />
     </div>
   );
 }
