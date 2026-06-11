@@ -101,6 +101,9 @@ export default function TeamsBoard({
     setAssign(new Map(players.map((p) => [p.id, p.teamId])));
   }
   const [busy, setBusy] = useState(false);
+  // Per-player division move — kept separate from `busy` (settings/generate) so
+  // moving one play-up player doesn't grey out every button or the Generate one.
+  const [movingId, setMovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newTeamName, setNewTeamName] = useState("");
 
@@ -188,7 +191,7 @@ export default function TeamsBoard({
   // lands Unassigned in the target division (movePlayer clears their team).
   async function moveDivision(playerId: string, newDivisionId: string) {
     setSelectedId(null);
-    setBusy(true);
+    setMovingId(playerId);
     setError(null);
     try {
       await movePlayer(seasonId, playerId, newDivisionId);
@@ -196,7 +199,7 @@ export default function TeamsBoard({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to move player.");
     } finally {
-      setBusy(false);
+      setMovingId(null);
     }
   }
 
@@ -318,17 +321,18 @@ export default function TeamsBoard({
                       {p.suggestedDivisionId && divName.get(p.suggestedDivisionId) && (
                         <button
                           type="button"
-                          disabled={busy}
+                          disabled={movingId === p.playerId}
                           onClick={() => moveDivision(p.playerId, p.suggestedDivisionId!)}
                           className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
                         >
-                          Move up to {divName.get(p.suggestedDivisionId)}
+                          {movingId === p.playerId ? "Moving…" : `Move up to ${divName.get(p.suggestedDivisionId)}`}
                         </button>
                       )}
                       <select
                         value=""
+                        disabled={movingId === p.playerId}
                         onChange={(e) => e.target.value && moveDivision(p.playerId, e.target.value)}
-                        className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
+                        className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1 text-xs text-gray-900 dark:text-gray-100 disabled:opacity-50"
                       >
                         <option value="">Other division…</option>
                         {divisions

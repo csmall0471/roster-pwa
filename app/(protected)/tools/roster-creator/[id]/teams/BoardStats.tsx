@@ -92,7 +92,7 @@ function topCounts(
 type Block = {
   hasTeams: boolean;
   sat: Sat | null;
-  vol: { players: number; coach: number; team: number; buddy: number; night: number };
+  vol: { players: number; teams: number; coaches: number; coach: number; team: number; buddy: number; night: number };
   topCoaches: TopRow[];
   topTeams: TopRow[];
   topBuddies: TopRow[];
@@ -132,6 +132,8 @@ function computeBlock(
     sat: hasTeams ? satisfaction(players, assign, teamById, teamCoach, teamNames) : null,
     vol: {
       players: players.length,
+      teams: teamsList.length,
+      coaches: new Set(teamsList.map((t) => t.coachId).filter(Boolean)).size,
       coach: players.filter((p) => p.coachReq).length,
       team: players.filter((p) => p.teamNameId).length,
       buddy: players.filter((p) => p.buddyIds.length).length,
@@ -264,7 +266,10 @@ export default function BoardStats({
                 {subtitle && <span className="ml-1 font-normal text-gray-400">{subtitle}</span>}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {v.players} players · {v.coach} coach · {v.buddy} buddy · {v.night} practice-night requests
+                {v.players} players · {v.teams} teams · {v.coaches} coaches
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {v.coach} coach · {v.buddy} buddy · {v.night} practice-night requests
               </p>
             </div>
             {block.sat ? (

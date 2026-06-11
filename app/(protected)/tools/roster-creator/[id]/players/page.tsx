@@ -66,17 +66,9 @@ export default async function PlayersPage({
         </p>
       )}
 
-      <section className="mb-6">
-        <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-          Import a signup file
-        </h2>
-        <UploadCard seasons={[seasonOption]} lockedSeason={seasonOption} />
-      </section>
-
-      <PlayerEditor seasonId={id} divisions={editDivisions} players={editPlayers} />
-
+      {/* Analyze & build — kept at the TOP so the progress bar is in view */}
       {editPlayers.length > 0 && (
-        <section className="mt-8">
+        <section className="mb-6">
           <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">
             Analyze &amp; build
           </h2>
@@ -87,6 +79,27 @@ export default async function PlayersPage({
           <ConfirmView seasonId={id} autoRun={autoRun} />
         </section>
       )}
+
+      {/* Import — hidden while an analyze is running (?analyze=1), otherwise
+          collapsed once players exist so it's out of the way but available. */}
+      {!autoRun && (
+        <details
+          open={editPlayers.length === 0}
+          className="mb-6 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+        >
+          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            Import a signup file
+            {editPlayers.length > 0 && (
+              <span className="font-normal normal-case text-xs text-gray-400">— import another file</span>
+            )}
+          </summary>
+          <div className="px-4 pb-4">
+            <UploadCard seasons={[seasonOption]} lockedSeason={seasonOption} />
+          </div>
+        </details>
+      )}
+
+      <PlayerEditor seasonId={id} divisions={editDivisions} players={editPlayers} />
     </div>
   );
 }
