@@ -155,15 +155,18 @@ export function assignDivision(input: AssignInput): AssignResult {
   }
 
   // 4. Buddies: pull a free agent onto a team already holding one of their
-  //    requested buddies. Like a coach request, honoring a buddy is worth going
-  //    a bit over target — otherwise a kid whose buddies are all on a full team
-  //    gets stranded elsewhere. Process in input order for determinism.
+  //    requested buddies. Honoring a buddy is worth nudging a team a little over
+  //    target (so a kid whose buddies are on a full team isn't stranded) — but
+  //    NOT onto an already-oversized team. A popular coach can draw 21 requesters
+  //    on his own; piling buddies on top ballooned one team to 29. Cap the
+  //    buddy overflow so it stops well before that. Process in input order.
+  const buddyCap = target + Math.max(2, Math.round(target / 4));
   const stillFree: GroupPlayer[] = [];
   for (const p of free) {
     let host: WorkingTeam | null = null;
     for (const bid of p.buddyIds) {
       const bt = teamOf.get(bid);
-      if (bt) {
+      if (bt && bt.members.length < buddyCap) {
         host = bt;
         break;
       }
