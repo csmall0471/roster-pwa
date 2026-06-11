@@ -125,7 +125,7 @@ function computeBlock(
   for (const p of players) for (const b of p.buddyIds) if (nameById.has(b)) buddyCount.set(b, (buddyCount.get(b) ?? 0) + 1);
   const topBuddies: TopRow[] = [...buddyCount.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
+    .slice(0, 5)
     .map(([id, n]) => ({ label: nameById.get(id) ?? "—", count: n }));
   return {
     hasTeams,
@@ -139,7 +139,7 @@ function computeBlock(
       buddy: players.filter((p) => p.buddyIds.length).length,
       night: players.filter((p) => p.nights.length).length,
     },
-    topCoaches: topCounts(players, (p) => p.coachId, (id) => coachNames[id] ?? "—", divName),
+    topCoaches: topCounts(players, (p) => p.coachId, (id) => coachNames[id] ?? "—", divName, 5),
     topTeams: topCounts(players, (p) => p.teamNameId, (id) => teamNames[id] ?? "—", divName),
     topBuddies,
   };
