@@ -147,6 +147,9 @@ export default function ImportReview({
           ? `/tools/roster-creator/${seasonId}/players?analyze=1`
           : `/tools/roster-creator/${seasonId}/confirm`
       );
+      // Soft-navigation keeps this component mounted, so clear the upload UI —
+      // otherwise its "Importing…" panel lingers next to the inline analyze.
+      onCancel();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to import.");
       setBusy(false);

@@ -104,6 +104,13 @@ export default function ConfirmView({
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     const rate = done > 0 ? elapsed / done : 0; // sec per player
     const eta = rate > 0 && total > 0 ? rate * (total - done) : NaN;
+    // Claude spends most of each batch THINKING (no streamed text), so real
+    // progress lands in a few big jumps. Blend in a time-based creep that
+    // asymptotes toward ~92% so the bar always advances like a real progress
+    // bar. It snaps up to the real count when that's further along, and only the
+    // "done" phase shows 100%.
+    const creep = Math.round(92 * (1 - Math.exp(-elapsed / 40)));
+    const barPct = Math.max(pct, creep, 4);
     return (
       <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="flex items-center gap-3 mb-3">
@@ -111,12 +118,10 @@ export default function ConfirmView({
           <p className="text-sm font-medium text-gray-900 dark:text-white">Analyzing signups with Claude…</p>
         </div>
         <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
-          <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${total > 0 ? pct : 8}%` }} />
+          <div className="h-full bg-blue-600 transition-all duration-500 ease-out" style={{ width: `${barPct}%` }} />
         </div>
         <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-          <span>
-            {total > 0 ? `${done} / ${total} players (${pct}%)` : "Starting…"}
-          </span>
+          <span>{total > 0 ? `${done} / ${total} players` : "Starting…"}</span>
           <span>
             {fmtTime(elapsed)} elapsed{total > 0 && done > 0 ? ` · ~${fmtTime(eta)} left` : ""}
           </span>
