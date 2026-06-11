@@ -1173,10 +1173,24 @@ export async function deletePlayer(seasonId: string, playerId: string) {
 }
 
 // Delete EVERY season the owner has (cascades to divisions, teams, coaches,
-// players, buddy links, imports). Destructive — the UI confirms first.
-export async function deleteAllSeasons() {
-  const { supabase, user } = await requireOwner();
-  const { error } = await supabase.from("tb_seasons").delete().eq("user_id", user.id);
-  if (error) throw new Error(error.message);
-  revalidatePath("/tools/roster-creator");
+// players, buddy links, imports). Destructive — the UI confirms first. Returns
+// the result rather than throwing so any DB error surfaces (Next sanitizes
+// thrown server-action errors to a generic message in production).
+export async function deleteAllSeasons(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { supabase } = await requireOwner();
+    // Mirror the working single-delete path: select the owner's ids (RLS-scoped)
+    // then delete by id, one season at a time so one bad row can't fail them all.
+    const { data: seasons, error: selErr } = await supabase.from("tb_seasons").select("id");
+    if (selErr) return { ok: false, error: selErr.message };
+    const ids = (seasons ?? []).map((s) => s.id as string);
+    for (const id of ids) {
+      const { error } = await supabase.from("tb_seasons").delete().eq("id", id);
+      if (error) return { ok: false, error: `Season ${id}: ${error.message}` };
+    }
+    revalidatePath("/tools/roster-creator");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to delete seasons." };
+  }
 }

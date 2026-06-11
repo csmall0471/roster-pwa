@@ -18,7 +18,12 @@ export default function DeleteAllSeasonsButton({ count }: { count: number }) {
       return;
     setBusy(true);
     try {
-      await deleteAllSeasons();
+      const res = await deleteAllSeasons();
+      if (!res.ok) {
+        alert(res.error ?? "Failed to delete seasons.");
+        setBusy(false);
+        return;
+      }
       router.refresh();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to delete seasons.");
