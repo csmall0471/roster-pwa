@@ -85,6 +85,25 @@ type WorkingTeam = {
   members: GroupPlayer[];
 };
 
+// How well a unit (a single player or a buddy cluster) fits a team's EMERGING
+// practice night. A team's final night is bestNight(members), and a player's
+// night is "met" when they're free on it — so matching against the team's
+// current bestNight directly optimizes night satisfaction. Returns a 0..2 score
+// that dominates the small fullness tiebreak used alongside it:
+//   • all members free on the team's night  → 2  (great fit)
+//   • empty team                            → 1.2 ("open" — the unit sets its night)
+//   • nobody free on the team's night        → 0  (avoid)
+// Members with no night preference are ignored; a unit with none returns a
+// neutral 1 so consolidation (fullness) alone decides where they land.
+function nightFit(members: GroupPlayer[], team: WorkingTeam): number {
+  const withPref = members.filter((m) => m.nights.length > 0);
+  if (withPref.length === 0) return 1;
+  const night = bestNight(team.members);
+  if (!night) return 1.2;
+  const free = withPref.filter((m) => m.nights.includes(night)).length / withPref.length;
+  return 2 * free;
+}
+
 // Assign every player into the FIXED set of input.teams. Pure & deterministic:
 // same input → same output (no DB, no randomness, no Date.now). Every team in
 // input.teams appears in the result — even empty placeholders — so they persist
@@ -152,8 +171,9 @@ export function assignDivision(input: AssignInput): AssignResult {
   //     must land together. Find the connected components among the still-free
   //     players (buddy adjacency, restricted to still-free members) and seat
   //     each multi-member component as a UNIT into the team that keeps them
-  //     together — preferring a team with just enough room under target, then
-  //     the fuller one (consolidate). Singletons fall through to the fill below.
+  //     together — preferring a team with room under target, then the best
+  //     practice-night fit, then the fuller one (consolidate). Singletons fall
+  //     through to the fill below.
   const stillFreeSet = new Set(stillFree.map((p) => p.id));
   const byId = new Map(stillFree.map((p) => [p.id, p]));
   const seenComp = new Set<string>();
@@ -178,14 +198,19 @@ export function assignDivision(input: AssignInput): AssignResult {
       continue;
     }
     // Seat the whole component into one team. Teams that fit the group under
-    // target win decisively; among those the fuller team consolidates. If none
-    // fits under target, pick the team that overflows the least.
+    // target win decisively; among those, prefer the best practice-night fit,
+    // then the fuller team (consolidate). If none fits under target, pick the
+    // team that overflows the least.
     let best: WorkingTeam | null = null;
     let bestScore = -Infinity;
     for (const wt of teams) {
       const room = target - wt.members.length;
       const fits = room >= comp.length;
-      const score = (fits ? 100 : 0) + wt.members.length / target - (fits ? 0 : comp.length - room);
+      const score =
+        (fits ? 100 : 0) +
+        nightFit(comp, wt) +
+        (wt.members.length / target) * 0.5 -
+        (fits ? 0 : comp.length - room);
       if (score > bestScore) {
         bestScore = score;
         best = wt;
@@ -195,20 +220,19 @@ export function assignDivision(input: AssignInput): AssignResult {
   }
 
   // 5. Remaining free agents (singletons) fill open placeholders and any
-  //    under-target coached teams toward the target. Prefer the FULLER team
-  //    (consolidate) and a matching practice night (GroupConfig.weights.night
-  //    idea). Never push a team over target — UNLESS every team is already
-  //    at/over target, in which case drop into the least-full team so nobody is
-  //    left unassigned.
+  //    under-target coached teams toward the target. Practice-night fit leads
+  //    (route a Thursday-only kid toward a Thursday-leaning team / a fresh open
+  //    team rather than a Monday team); the FULLER team breaks ties to keep
+  //    consolidating. Never push a team over target — UNLESS every team is
+  //    already at/over target, in which case drop into the least-full team so
+  //    nobody is left unassigned.
   for (const p of singles) {
     let best: WorkingTeam | null = null;
     let bestScore = -Infinity;
     for (const wt of teams) {
       if (wt.members.length >= target) continue;
-      const night = bestNight(wt.members);
-      const nightScore = night && p.nights.includes(night) ? 1 : 0;
-      // fuller-first (consolidate) plus a nudge for a matching night.
-      const score = nightScore + wt.members.length / target;
+      // Night fit (0..2) dominates; fullness is a small consolidation tiebreak.
+      const score = nightFit([p], wt) + (wt.members.length / target) * 0.5;
       if (score > bestScore) {
         bestScore = score;
         best = wt;
