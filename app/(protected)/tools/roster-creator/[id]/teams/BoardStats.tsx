@@ -36,9 +36,9 @@ function satisfaction(
   for (const p of players) {
     const tid = assign.get(p.id) ?? null;
     const team = tid ? teamById.get(tid) ?? null : null;
-    if (p.coachId) {
+    if (p.coachReq) {
       s.coach[1]++;
-      if (team && teamCoach.get(tid!) === p.coachId) s.coach[0]++;
+      if (team && p.coachId && teamCoach.get(tid!) === p.coachId) s.coach[0]++;
     }
     if (p.teamNameId) {
       s.team[1]++;
@@ -132,7 +132,7 @@ function computeBlock(
     sat: hasTeams ? satisfaction(players, assign, teamById, teamCoach, teamNames) : null,
     vol: {
       players: players.length,
-      coach: players.filter((p) => p.coachId).length,
+      coach: players.filter((p) => p.coachReq).length,
       team: players.filter((p) => p.teamNameId).length,
       buddy: players.filter((p) => p.buddyIds.length).length,
       night: players.filter((p) => p.nights.length).length,

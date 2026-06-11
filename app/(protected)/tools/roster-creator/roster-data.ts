@@ -3,7 +3,7 @@ import type { RosterRow } from "./export-csv";
 import { selectAll } from "./db";
 import { parseNights } from "./group/engine";
 import { fmtTime } from "./schedule";
-import { accountNameOf, isCoachChild } from "./fields";
+import { accountNameOf, isCoachChild, isNoRequest } from "./fields";
 
 // Flat roster rows for a season, ordered division → team → last name. Shared by
 // the CSV download, the print view, and the email action. Plain server helper
@@ -27,7 +27,7 @@ export async function fetchRosterRows(
         supabase
           .from("tb_players")
           .select(
-            "id, first_name, last_name, age_group, school, division_id, team_id, resolved_coach_id, resolved_team_name_id, practice_nights, raw"
+            "id, first_name, last_name, age_group, school, division_id, team_id, resolved_coach_id, resolved_team_name_id, practice_nights, raw, coach_first, coach_last"
           )
           .eq("season_id", seasonId)
           .order("id")
@@ -105,6 +105,14 @@ export async function fetchRosterRows(
 
     const reqCoachId = (p.resolved_coach_id as string | null) ?? null;
     const reqTeamId = (p.resolved_team_name_id as string | null) ?? null;
+    // What the family actually asked for (raw) — so an UNMATCHED coach request
+    // (a coach not on the roster) counts as a request and shows as unmet, rather
+    // than vanishing from the stats.
+    const rawCoachText = [p.coach_first, p.coach_last]
+      .filter((v) => v && !isNoRequest(v as string))
+      .join(" ")
+      .trim();
+    const askedCoach = rawCoachText.length > 0;
     const tCoachId = tid ? teamMeta.get(tid)?.coachId ?? "" : "";
     const tTeamId = tid ? teamTeamId.get(tid) ?? "" : "";
 
@@ -130,9 +138,9 @@ export async function fetchRosterRows(
       age: (p.age_group as string) ?? "",
       school: (p.school as string) ?? "",
 
-      coachReq: reqCoachId ? coachName.get(reqCoachId) ?? "" : "",
+      coachReq: reqCoachId ? coachName.get(reqCoachId) ?? "" : rawCoachText,
       coachAssigned: tCoachId ? coachName.get(tCoachId) ?? "" : "",
-      coachMet: !tid || !reqCoachId ? "" : yn(reqCoachId === tCoachId),
+      coachMet: !tid || !askedCoach ? "" : yn(!!reqCoachId && reqCoachId === tCoachId),
       teamReq: reqTeamId ? teamNameOf.get(reqTeamId) ?? "" : "",
       teamMet: !tid || !reqTeamId ? "" : yn(reqTeamId === tTeamId),
       buddiesReq: reqBuddies.length ? String(reqBuddies.length) : "",

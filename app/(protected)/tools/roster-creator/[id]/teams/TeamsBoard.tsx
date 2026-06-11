@@ -23,7 +23,8 @@ export type BoardPlayer = {
   name: string;
   divisionId: string;
   teamId: string | null;
-  coachId: string | null;
+  coachId: string | null; // the MATCHED roster coach (null if they asked for someone not on it)
+  coachReq: boolean; // they asked for a coach at all (matched or not) — the honest denominator
   teamNameId: string | null;
   nights: string[];
   buddyIds: string[];
