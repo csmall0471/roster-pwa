@@ -191,9 +191,11 @@ export default function ConfirmView({
                   {t.coach && <span className="text-xs text-gray-500 dark:text-gray-400"> · {t.coach}</span>}
                   <span className="ml-2 text-xs text-gray-400">{shortDiv(t.division)} · {t.count}</span>
                   {t.variants.length > 0 && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      players to check: {t.variants.map((v) => `“${v}”`).join(" · ")}
-                    </p>
+                    <ul className="text-xs text-gray-500 dark:text-gray-400 mt-1 space-y-0.5">
+                      {t.variants.map((v, k) => (
+                        <li key={k}>• {v}</li>
+                      ))}
+                    </ul>
                   )}
                 </div>
                 <button

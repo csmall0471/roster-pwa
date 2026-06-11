@@ -179,6 +179,7 @@ export async function runAnalysis(
 
     let coachId: string | null = null;
     let ambiguous = false;
+    let reason = ""; // why it's ambiguous — shown on the confirm screen
 
     // 1) Coach's-kid wins — a coach's child is always on their parent's team.
     const account = accountNameOf(p.raw);
@@ -192,6 +193,7 @@ export async function runAnalysis(
       const disamb = matchCoachOptions([...(intent?.coaches ?? []), account], kidMatches);
       coachId = disamb?.coachId ?? kidMatches[0].id;
       ambiguous = !disamb || disamb.ambiguous;
+      if (ambiguous) reason = `shares the ${last} surname with ${kidMatches.length} coaches`;
     }
 
     // 2) Otherwise match the explicit coach request(s) to the roster.
@@ -200,6 +202,10 @@ export async function runAnalysis(
       if (m) {
         coachId = m.coachId;
         ambiguous = m.ambiguous;
+        if (ambiguous) {
+          const req = (intent?.coaches ?? []).join(" / ");
+          reason = req ? `requested “${req}” — matches more than one coach` : "matches more than one coach";
+        }
       } else if ((intent?.coaches ?? []).length > 0) {
         unmatchedCoaches.push({
           playerId: pid,
@@ -213,7 +219,7 @@ export async function runAnalysis(
     if (coachId) {
       coachAssign.set(pid, coachId);
       bump(countByDiv, dz, coachId);
-      if (ambiguous) flagAmbiguous(dz, coachId, nameById.get(pid) ?? "");
+      if (ambiguous) flagAmbiguous(dz, coachId, `${nameById.get(pid) ?? ""} — ${reason}`);
     }
   }
 
