@@ -4,7 +4,7 @@ import { selectAll } from "./db";
 import { extractIntent, type RawPlayer } from "./resolve/extract";
 import { normalize, jaroWinkler } from "./resolve/similarity";
 import { matchCoachOptions, type CoachCandidate } from "./resolve/match-coach";
-import { isCoachChild, accountNameOf } from "./fields";
+import { isCoachChild, accountNameOf, isNoRequest } from "./fields";
 
 export type TeamPairing = {
   name: string; // the team's coach (authoritative roster name)
@@ -112,8 +112,21 @@ export async function runAnalysis(
   const idOf = (p: Record<string, unknown>) => p.id as string;
   const nameById = new Map(rows.map((p) => [idOf(p), `${p.first_name} ${p.last_name}`.trim()]));
 
+  // ── Skip rows with NO request at all (every request field is a no-request
+  //    token). Claude can extract nothing from them, so don't spend a call — a
+  //    pure speedup with zero quality change. Rows with ANY content (even messy
+  //    noise like "Jone" or "last season") still go to Claude, which discards
+  //    what isn't a real request. ──────────────────────────────────────────────
+  const hasRequest = (p: Record<string, unknown>) =>
+    [p.coach_first, p.coach_last, p.team_name, p.buddy_first, p.buddy_last].some(
+      (v) => !isNoRequest((v as string) ?? "")
+    );
+  const needRows = rows.filter(hasRequest);
+  const skipped = rows.length - needRows.length;
+  console.error(`[analyze] ${skipped} no-request rows skipped; ${needRows.length} → Claude`);
+
   // ── Roster-aware extraction: feed each player their division's coach names ──
-  const raw: RawPlayer[] = rows.map((p) => {
+  const raw: RawPlayer[] = needRows.map((p) => {
     const dz = p.division_id as string | null;
     const cand = dz ? candidatesByDiv.get(dz) ?? [] : [];
     return {
@@ -130,7 +143,12 @@ export async function runAnalysis(
     };
   });
 
-  const intents = await extractIntent(raw, onProgress, signal);
+  // Progress stays denominated over ALL players (skipped rows are instantly done).
+  const intents = await extractIntent(
+    raw,
+    (done, total) => onProgress?.(skipped + done, skipped + total),
+    signal
+  );
   console.error(`[analyze] extraction done in ${((Date.now() - t0) / 1000).toFixed(1)}s; matching…`);
   const intentById = new Map(intents.map((i) => [i.id, i]));
 

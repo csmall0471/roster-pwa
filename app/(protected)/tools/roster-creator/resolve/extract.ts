@@ -6,8 +6,12 @@ import Anthropic from "@anthropic-ai/sdk";
 // junk, and discarding noise. Opus + thinking; cost is intentionally secondary
 // to quality here.
 const MODEL = "claude-opus-4-8";
+// 30 players/batch keeps each request small enough to avoid output truncation
+// (quality) while CONCURRENCY fans the batches out in parallel for speed. The
+// SDK retries 429s with backoff (maxRetries below), so a higher concurrency
+// safely absorbs rate-limit bumps; lower this if the API account is a small tier.
 const BATCH_SIZE = 30;
-const CONCURRENCY = 8;
+const CONCURRENCY = 16;
 
 export type RawPlayer = {
   id: string;
