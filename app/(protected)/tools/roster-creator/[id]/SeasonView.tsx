@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { addDivision, movePlayer } from "../actions";
+import { addDivision, movePlayer, mergeDivision } from "../actions";
 import { isNoRequest } from "../fields";
 
 export type DivisionRow = { id: string; name: string; position: number };
@@ -80,6 +80,28 @@ export default function SeasonView({
     }
   }
 
+  async function handleMerge(fromId: string, intoId: string) {
+    if (!intoId) return;
+    const fromName = divisions.find((d) => d.id === fromId)?.name ?? "this division";
+    const intoName = divisions.find((d) => d.id === intoId)?.name ?? "the target";
+    if (
+      !confirm(
+        `Merge “${fromName}” into “${intoName}”?\n\nIts players move into “${intoName}” (their team assignments are cleared, so re-build teams after), and “${fromName}” is deleted. This can't be undone.`
+      )
+    )
+      return;
+    setError(null);
+    setBusy(true);
+    try {
+      await mergeDivision(seasonId, fromId, intoId);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to merge division.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const byDivision = new Map<string, PlayerRow[]>();
   byDivision.set(UNASSIGNED, []);
   for (const d of divisions) byDivision.set(d.id, []);
@@ -104,8 +126,9 @@ export default function SeasonView({
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Players were sorted into divisions automatically from the &ldquo;package&rdquo; column of
           your signup. If someone landed in the wrong one — e.g. a kid playing up an age group — move
-          them to the right division below. If everything looks right, you can skip this and go
-          straight to <strong>Resolve requests</strong>.
+          them to the right division below, or use <strong>Merge into…</strong> to fold a stray
+          division into the right one. If everything looks right, skip this and go straight to{" "}
+          <strong>Confirm coaches &amp; teams</strong>.
         </p>
 
         {/* Add division */}
@@ -140,21 +163,41 @@ export default function SeasonView({
             const hasMore = all.length > PREVIEW_LIMIT;
             return (
               <div key={section.id} className="rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => toggle(section.id)}
-                  className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 text-left"
-                >
-                  <span className="flex items-center gap-2">
-                    <svg width="12" height="12" viewBox="0 0 12 12" className={`text-gray-400 transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden="true">
-                      <path d="M4 2.5L7.5 6L4 9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                    </svg>
-                    <span className="font-semibold text-gray-900 dark:text-white">{section.name}</span>
-                  </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {all.length} {all.length === 1 ? "player" : "players"}
-                  </span>
-                </button>
+                <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/50">
+                  <button
+                    type="button"
+                    onClick={() => toggle(section.id)}
+                    className="flex flex-1 min-w-0 items-center justify-between gap-2 hover:opacity-80 text-left"
+                  >
+                    <span className="flex items-center gap-2">
+                      <svg width="12" height="12" viewBox="0 0 12 12" className={`text-gray-400 transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden="true">
+                        <path d="M4 2.5L7.5 6L4 9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </svg>
+                      <span className="font-semibold text-gray-900 dark:text-white">{section.name}</span>
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {all.length} {all.length === 1 ? "player" : "players"}
+                    </span>
+                  </button>
+                  {section.id !== UNASSIGNED && divisions.length > 1 && (
+                    <select
+                      value=""
+                      disabled={busy}
+                      onChange={(e) => handleMerge(section.id, e.target.value)}
+                      title="Merge this division into another"
+                      className="shrink-0 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-1.5 py-1 text-xs text-gray-600 dark:text-gray-300 disabled:opacity-50"
+                    >
+                      <option value="">Merge into…</option>
+                      {divisions
+                        .filter((d) => d.id !== section.id)
+                        .map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                </div>
 
                 {all.length > 0 && (
                   <div className="relative">

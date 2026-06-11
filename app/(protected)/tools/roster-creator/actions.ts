@@ -29,10 +29,14 @@ import { rosterToCsv } from "./export-csv";
 import { fetchRosterRows } from "./roster-data";
 import { normalize, jaroWinkler } from "./resolve/similarity";
 
-// Map a player file's free-text division string (package_name, e.g. "Boys 8U")
-// onto the closest authoritative division created from the coach workbook (e.g.
-// "8u Boys"). Token overlap (Jaccard) dominates so word-order/case differences
-// don't matter; Jaro-Winkler breaks ties. Returns the best division + score.
+// Map a player file's free-text division string (package_name, e.g. "Peoria 8U
+// Boys") onto the closest authoritative division created from the coach workbook
+// (e.g. "8u Boys"). Primary signal is ASYMMETRIC coverage: what fraction of the
+// DIVISION's name tokens appear in the package. Division labels are short ("6u",
+// "8u boys") and packages add prefixes ("Peoria …"), so coverage stays 1.0 for a
+// real match even when the package is much longer — unlike symmetric Jaccard,
+// which sank "Peoria 6U Coed" → "6u" to 0.23 and spawned a rogue division.
+// Jaro-Winkler is a light tiebreak. Returns the best division + score.
 function bestDivisionMatch(
   pkg: string,
   divisions: { id: string; name: string }[]
@@ -40,12 +44,11 @@ function bestDivisionMatch(
   const pkgTokens = new Set(normalize(pkg).split(" ").filter(Boolean));
   let best: { id: string; score: number } | null = null;
   for (const d of divisions) {
-    const dTokens = new Set(normalize(d.name).split(" ").filter(Boolean));
-    const inter = [...pkgTokens].filter((t) => dTokens.has(t)).length;
-    const union = new Set([...pkgTokens, ...dTokens]).size;
-    const jacc = union ? inter / union : 0;
+    const dTokens = [...new Set(normalize(d.name).split(" ").filter(Boolean))];
+    if (dTokens.length === 0) continue;
+    const covered = dTokens.filter((t) => pkgTokens.has(t)).length / dTokens.length;
     const jw = jaroWinkler(normalize(pkg), normalize(d.name));
-    const score = jacc * 0.7 + jw * 0.3;
+    const score = covered * 0.8 + jw * 0.2;
     if (!best || score > best.score) best = { id: d.id, score };
   }
   return best;
@@ -140,7 +143,9 @@ export async function commitImport(input: CommitImportInput): Promise<string> {
     const unmatched: string[] = [];
     for (const pkg of packages) {
       const m = bestDivisionMatch(pkg, existingDivs);
-      if (m && m.score >= 0.4) divisionIdByPackage.set(pkg, m.id);
+      // A real match has full division-token coverage (≥0.8). 0.5 cleanly
+      // separates those from a package with no corresponding division.
+      if (m && m.score >= 0.5) divisionIdByPackage.set(pkg, m.id);
       else unmatched.push(pkg);
     }
     if (unmatched.length > 0) {
@@ -301,6 +306,36 @@ export async function addDivision(seasonId: string, name: string) {
     throw new Error(error.message);
   }
   revalidatePath(`/tools/roster-creator/${seasonId}`);
+}
+
+// Merge one division into another: move the source division's players into the
+// target (clearing their team_id, since the target's teams differ), delete the
+// source division's teams, then delete the source division. Fixes a stray
+// division created when a player file's package_name didn't match the roster
+// (e.g. "Peoria 6U Coed" landing beside the authoritative "6u").
+export async function mergeDivision(seasonId: string, fromDivisionId: string, intoDivisionId: string) {
+  const { supabase } = await requireOwner();
+  if (!fromDivisionId || !intoDivisionId || fromDivisionId === intoDivisionId) {
+    throw new Error("Pick a different target division to merge into.");
+  }
+
+  const { error: pErr } = await supabase
+    .from("tb_players")
+    .update({ division_id: intoDivisionId, team_id: null })
+    .eq("season_id", seasonId)
+    .eq("division_id", fromDivisionId);
+  if (pErr) throw new Error(pErr.message);
+
+  await supabase.from("tb_teams").delete().eq("season_id", seasonId).eq("division_id", fromDivisionId);
+  const { error: dErr } = await supabase
+    .from("tb_divisions")
+    .delete()
+    .eq("season_id", seasonId)
+    .eq("id", fromDivisionId);
+  if (dErr) throw new Error(dErr.message);
+
+  revalidatePath(`/tools/roster-creator/${seasonId}`);
+  revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }
 
 export async function updateScheduleConfig(seasonId: string, config: ScheduleConfig) {
