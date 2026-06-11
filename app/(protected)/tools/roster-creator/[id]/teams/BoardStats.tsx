@@ -256,7 +256,7 @@ export default function BoardStats({
       </button>
 
       {open && (
-        <div className="px-4 pb-4 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="px-4 pb-4 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-3">
             <div>
               <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
@@ -264,13 +264,12 @@ export default function BoardStats({
                 {subtitle && <span className="ml-1 font-normal text-gray-400">{subtitle}</span>}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {v.players} players · {v.coach} coach · {v.team} team · {v.buddy} buddy · {v.night} practice-night requests
+                {v.players} players · {v.coach} coach · {v.buddy} buddy · {v.night} practice-night requests
               </p>
             </div>
             {block.sat ? (
               <div className="space-y-1.5">
                 <StatRow label="Coach" met={block.sat.coach[0]} req={block.sat.coach[1]} color="bg-red-400" />
-                <StatRow label="Team" met={block.sat.team[0]} req={block.sat.team[1]} color="bg-purple-400" />
                 <StatRow label="Buddy" met={block.sat.buddy[0]} req={block.sat.buddy[1]} color="bg-amber-400" />
                 <StatRow label="Practice night" met={block.sat.night[0]} req={block.sat.night[1]} color="bg-blue-400" />
               </div>
@@ -279,7 +278,6 @@ export default function BoardStats({
             )}
           </div>
           <TopChart title="Top requested coaches" rows={block.topCoaches} />
-          <TopChart title="Top requested teams" rows={block.topTeams} />
           <TopChart title="Most-requested teammates" rows={block.topBuddies} />
         </div>
       )}
