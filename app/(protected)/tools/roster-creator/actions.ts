@@ -676,7 +676,7 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
       selectAll((from, to) =>
         supabase
           .from("tb_players")
-          .select("id, last_name, division_id, resolved_coach_id, practice_nights, raw")
+          .select("id, last_name, division_id, resolved_coach_id, practice_nights, raw, team_name")
           .eq("season_id", seasonId)
           .order("id")
           .range(from, to)
@@ -707,6 +707,25 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
 
   const rows = players;
   const divisionOf = new Map(rows.map((p) => [p.id as string, p.division_id as string | null]));
+  const reqTeamName = new Map(rows.map((p) => [p.id as string, ((p.team_name as string) ?? "").trim()]));
+
+  // If a team's members agree on a team name (≥3 asked for the same one), use it
+  // as the team's name — the coach link stays attached.
+  function consensusName(playerIds: string[]): string | null {
+    const counts = new Map<string, { count: number; display: string }>();
+    for (const pid of playerIds) {
+      const tn = reqTeamName.get(pid) ?? "";
+      if (!tn || isNoRequest(tn)) continue;
+      const key = normalize(tn);
+      if (!key) continue;
+      const e = counts.get(key) ?? { count: 0, display: tn };
+      e.count++;
+      counts.set(key, e);
+    }
+    let best: { count: number; display: string } | null = null;
+    for (const e of counts.values()) if (!best || e.count > best.count) best = e;
+    return best && best.count >= 3 ? best.display : null;
+  }
 
   // Reset prior assignments (regenerate). Teams PERSIST — only players move.
   await supabase.from("tb_players").update({ team_id: null }).eq("season_id", seasonId);
@@ -771,6 +790,12 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
       // a night the coach already set in the schedule builder.
       if (a.night && !currentNight.get(a.teamId)) {
         const { error } = await supabase.from("tb_teams").update({ practice_night: a.night }).eq("id", a.teamId);
+        if (error) throw new Error(error.message);
+      }
+      // Name the team by member consensus when there is one.
+      const name = consensusName(a.playerIds);
+      if (name) {
+        const { error } = await supabase.from("tb_teams").update({ name }).eq("id", a.teamId);
         if (error) throw new Error(error.message);
       }
     }
