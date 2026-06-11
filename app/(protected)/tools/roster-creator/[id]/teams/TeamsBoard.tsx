@@ -219,6 +219,24 @@ export default function TeamsBoard({
   const membersOf = (teamId: string | null) =>
     divisionPlayers.filter((p) => (assign.get(p.id) ?? null) === teamId);
 
+  // Coaches requested in THIS division but not on its roster (so those kids are
+  // free agents). Grouped by the requested name, 3+ families — the ones you'd
+  // most want to cluster onto a team here, or add to the roster.
+  const missingCoaches = useMemo(() => {
+    const m = new Map<string, { name: string; players: string[] }>();
+    for (const p of divisionPlayers) {
+      if (!p.coachReq || p.coachId) continue; // matched, or no request
+      const text = (p.coachReqText ?? "").trim();
+      if (!text) continue;
+      const key = text.toLowerCase().replace(/^coach\s+/, "").replace(/\s+/g, " ").trim();
+      if (!m.has(key)) m.set(key, { name: text, players: [] });
+      m.get(key)!.players.push(p.name);
+    }
+    return [...m.values()]
+      .filter((x) => x.players.length >= 3)
+      .sort((a, b) => b.players.length - a.players.length);
+  }, [divisionPlayers]);
+
   // Dominant coach per team — used to flag players not on their requested coach.
   const teamCoach = useMemo(() => {
     const map = new Map<string, string | null>();
@@ -452,6 +470,33 @@ export default function TeamsBoard({
         coachNames={coachNames}
         teamNames={teamNames}
       />
+
+      {/* Requested coaches not on this division's roster — actionable here */}
+      {missingCoaches.length > 0 && (
+        <section className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20 p-4">
+          <h2 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+            Requested coaches not on this division&rsquo;s roster ({missingCoaches.length})
+          </h2>
+          <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+            3+ families asked for these coaches, who aren&rsquo;t in {divName.get(divisionId) ?? "this division"}.
+            Those kids are free agents — add the coach in <strong>Structure</strong> &amp; re-analyze, or drag
+            them onto one team below.
+          </p>
+          <ul className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-gray-900 divide-y divide-amber-100 dark:divide-amber-900/30 max-h-56 overflow-y-auto">
+            {missingCoaches.map((m, i) => (
+              <li key={i} className="flex items-start justify-between gap-3 px-3 py-2 text-sm">
+                <span className="min-w-0">
+                  <span className="font-medium text-gray-900 dark:text-white">{m.name}</span>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{m.players.join(", ")}</p>
+                </span>
+                <span className="shrink-0 tabular-nums text-xs font-semibold text-amber-700 dark:text-amber-300">
+                  {m.players.length} families
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Board */}
       <div className="flex gap-3 overflow-x-auto pb-4">
