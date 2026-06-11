@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { BoardPlayer, BoardTeam } from "./TeamsBoard";
+import { normalize, jaroWinkler } from "../../resolve/similarity";
 
 type Ev = { coach?: boolean; team?: boolean; buddy?: boolean; night?: boolean };
 type Suggestion = { teamId: string; label: string; tradeoffs: string[] };
@@ -13,11 +14,13 @@ type Line = {
   status: "met" | "unmet" | "na";
   explanation: string;
   suggestion?: Suggestion;
+  divisionMove?: { divisionId: string; label: string }; // move to another division (e.g. where the requested coach is)
 };
 
 export default function PlayerDetail({
   player,
   divisionTeams,
+  allTeams,
   divisions,
   allPlayers,
   assign,
@@ -30,6 +33,7 @@ export default function PlayerDetail({
 }: {
   player: BoardPlayer;
   divisionTeams: BoardTeam[];
+  allTeams: BoardTeam[];
   divisions: { id: string; name: string }[];
   allPlayers: BoardPlayer[];
   assign: Map<string, string | null>;
@@ -88,12 +92,30 @@ export default function PlayerDetail({
       suggestion,
     });
   } else if (player.coachReq && player.coachReqText) {
-    // Requested a coach who isn't on this division's roster — can't be matched.
+    // Requested a coach who isn't on THIS division's roster. Check whether that
+    // coach runs a team in another division (a common play-up/sibling case).
+    const reqNorm = normalize(player.coachReqText);
+    const divsWithCoach = new Map<string, string>(); // divisionId -> name
+    for (const t of allTeams) {
+      if (!t.coachId || t.divisionId === player.divisionId) continue;
+      const cname = coachNames[t.coachId] ?? "";
+      if (cname && jaroWinkler(reqNorm, normalize(cname)) >= 0.84) {
+        divsWithCoach.set(t.divisionId, divName.get(t.divisionId) ?? "another division");
+      }
+    }
+    const otherDivs = [...divsWithCoach.values()];
+    const first = player.name.split(" ")[0];
     lines.push({
       key: "coach",
       label: `Coach — ${player.coachReqText}`,
       status: "unmet",
-      explanation: `“${player.coachReqText}” isn't on this division's coach roster, so the request couldn't be matched — add them in Structure and re-analyze, or this player stays a free agent.`,
+      explanation: otherDivs.length
+        ? `${player.coachReqText} doesn't coach ${divName.get(player.divisionId) ?? "this division"}, but does coach ${otherDivs.join(", ")}. If ${first} should play there, move them to that division.`
+        : `“${player.coachReqText}” isn't on any division's coach roster, so the request couldn't be matched — add them in Structure and re-analyze, or this player stays a free agent.`,
+      divisionMove:
+        divsWithCoach.size === 1
+          ? { divisionId: [...divsWithCoach.keys()][0], label: otherDivs[0] }
+          : undefined,
     });
   }
 
@@ -247,6 +269,20 @@ export default function PlayerDetail({
                   ) : (
                     <p className="text-xs text-green-700 dark:text-green-400 mt-1">No other request would be broken.</p>
                   )}
+                </div>
+              )}
+              {l.divisionMove && (
+                <div className="ml-4 mt-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => { onMoveDivision(player.id, l.divisionMove!.divisionId); onClose(); }}
+                    className="text-sm font-semibold text-amber-700 dark:text-amber-300 hover:underline"
+                  >
+                    Move {player.name.split(" ")[0]} to {l.divisionMove.label}
+                  </button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Their requested coach runs a team there — re-analyze after to rematch.
+                  </p>
                 </div>
               )}
             </div>

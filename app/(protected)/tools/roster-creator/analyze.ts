@@ -43,17 +43,21 @@ const EMPTY: AnalyzeResult = {
 
 function matchBuddyName(
   name: string,
-  roster: { id: string; full: string }[],
+  roster: { id: string; full: string; last: string }[],
   selfId: string,
   threshold = 0.86
 ): string | null {
   const target = normalize(name);
   if (!target) return null;
+  const singleToken = target.split(" ").filter(Boolean).length === 1;
   let best: string | null = null;
   let bestScore = threshold;
   for (const r of roster) {
     if (r.id === selfId) continue;
-    const score = jaroWinkler(target, r.full);
+    // Whole-name match; for a bare surname ("Clissold") also match on the last
+    // name so a "put me with a teammate of this surname" request finds a sibling.
+    let score = jaroWinkler(target, r.full);
+    if (singleToken && r.last) score = Math.max(score, jaroWinkler(target, r.last));
     if (score >= bestScore) {
       bestScore = score;
       best = r.id;
@@ -242,15 +246,28 @@ export async function runAnalysis(
   }
 
   // ── Buddy links (deterministic name match against the full roster) ─────────
-  const roster = rows.map((p) => ({ id: idOf(p), full: normalize(nameById.get(idOf(p)) ?? "") }));
+  const roster = rows.map((p) => {
+    const full = normalize(nameById.get(idOf(p)) ?? "");
+    const parts = full.split(" ").filter(Boolean);
+    return { id: idOf(p), full, last: parts[parts.length - 1] ?? "" };
+  });
   const links: { season_id: string; from_player_id: string; to_player_id: string }[] = [];
   const seen = new Set<string>();
   const unmatchedBuddies: AnalyzeResult["unmatchedBuddies"] = [];
   for (const p of rows) {
     const intent = intentById.get(idOf(p));
-    if (!intent?.buddies.length) continue;
+    // "None Clissold" — a surname with no usable first name — means "put me with
+    // a teammate of that surname" (usually a sibling). Supplement the cleaned
+    // buddies with that surname so it resolves by last name.
+    const bFirst = (p.buddy_first as string) ?? "";
+    const bLast = (p.buddy_last as string) ?? "";
+    const surnameOnly =
+      isNoRequest(bFirst) && !isNoRequest(bLast) && bLast.trim().length >= 2 ? bLast.trim() : "";
+    const names = [...(intent?.buddies ?? [])];
+    if (surnameOnly && !names.some((n) => normalize(n) === normalize(surnameOnly))) names.push(surnameOnly);
+    if (names.length === 0) continue;
     const misses: string[] = [];
-    for (const name of intent.buddies) {
+    for (const name of names) {
       const toId = matchBuddyName(name, roster, idOf(p));
       if (!toId) {
         misses.push(name);

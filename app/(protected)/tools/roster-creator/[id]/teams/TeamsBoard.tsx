@@ -511,6 +511,7 @@ export default function TeamsBoard({
         <PlayerDetail
           player={selectedPlayer}
           divisionTeams={divisionTeams}
+          allTeams={teams}
           divisions={divisions}
           allPlayers={players}
           assign={assign}
