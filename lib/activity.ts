@@ -25,6 +25,9 @@ export type ActivityEvent =
   | "card_save_failed"
   | "card_flipped"
   | "card_deleted"
+  // Events / signup pages
+  | "event_link_opened"
+  | "event_signup"
 
 export async function logActivity(
   parentId: string,

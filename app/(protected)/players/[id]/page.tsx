@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
 import PhotoGallery from "./_components/PhotoGallery";
 import EligibilityBar from "@/app/parent/_components/EligibilityBar";
+import SiblingsSection from "@/app/_components/SiblingsSection";
+import { dedupeSiblings } from "@/app/_components/dedupe-siblings";
 
 function calcAge(dob: string): number {
   const birth = new Date(dob + "T00:00:00");
@@ -69,6 +71,20 @@ export default async function PlayerDetailPage({
       parents: { id: string; first_name: string; last_name: string; email: string; phone: string | null };
     }>
   ).map((pp) => pp.parents);
+
+  // Family siblings (stored per guardian; coach can read all via RLS).
+  const parentIds = parentRows.map((p) => p.id);
+  const [{ data: sibRows }, { data: allPlayers }] = await Promise.all([
+    parentIds.length
+      ? supabase.from("siblings").select("name, attributes, player_id").in("parent_id", parentIds)
+      : Promise.resolve({ data: [] as { name: string; attributes: Record<string, string | number | boolean> | null; player_id: string | null }[] }),
+    supabase.from("players").select("id, first_name, last_name").neq("id", id).order("last_name"),
+  ]);
+  const siblings = dedupeSiblings(sibRows);
+  const linkablePlayers = (allPlayers ?? []).map((p) => ({
+    id: p.id as string,
+    name: `${p.first_name} ${p.last_name}`.trim(),
+  }));
 
   return (
     <div className="max-w-2xl">
@@ -176,6 +192,11 @@ export default async function PlayerDetailPage({
           </div>
         </section>
       )}
+
+      {/* Siblings */}
+      <div className="mb-6">
+        <SiblingsSection playerId={id} initialSiblings={siblings} linkablePlayers={linkablePlayers} />
+      </div>
 
       {/* Season history */}
       {seasons && seasons.length > 0 && (

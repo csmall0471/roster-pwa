@@ -1,5 +1,18 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+
+// Service-role client: bypasses RLS. Only use server-side, and only after you
+// have independently authorized the caller. Used to resolve a parent + kids by
+// the phone the visitor just verified via OTP (phone formats in `parents` are
+// inconsistent, so RLS phone-matching is unreliable for prefill).
+export function createServiceClient() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  );
+}
 
 export async function createClient() {
   const cookieStore = await cookies();

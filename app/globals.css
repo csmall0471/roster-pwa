@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: `dark:` utilities respond to a `.dark` class on <html>.
+   An inline script in the root layout sets it from localStorage, falling back to
+   the OS preference — so the default still follows the system, with a manual
+   toggle on top. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -12,11 +18,9 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 body {
@@ -40,10 +44,139 @@ body {
   box-shadow: 0 0 0 1px #3b82f6;
 }
 
-@media (prefers-color-scheme: dark) {
-  .input {
-    background-color: rgb(31 41 55); /* gray-800 */
-    border-color: rgb(75 85 99); /* gray-600 */
-    color: white;
-  }
+.dark .input {
+  background-color: rgb(31 41 55); /* gray-800 */
+  border-color: rgb(75 85 99); /* gray-600 */
+  color: white;
+}
+
+/* Rendered markdown (event descriptions / builder preview).
+
+   These rules are intentionally UNLAYERED. Tailwind v4's preflight resets
+   headings (`font-size: inherit; font-weight: inherit`), unstyles lists, etc.
+   inside `@layer base`. Cascade-layer precedence beats selector specificity,
+   and with CSS chunking (next.config `experimental.cssChunking`) the order in
+   which the `base`/`components` layers are first registered across chunks is
+   not guaranteed per-route — so a `@layer components` block can lose to base
+   preflight on some pages (e.g. the admin manage page) while winning on
+   others. Unlayered rules always outrank ANY @layer, so headings/tables/etc.
+   render consistently everywhere.
+
+   Colors are kept inheritance-friendly: headings/body/code/table text inherit
+   the container color (admin uses gray on dark, public uses gray on light),
+   so markdown stays readable in both light and dark mode. Only the few
+   decorative colors (links, borders, code/th backgrounds) are pinned, with a
+   prefers-color-scheme override to match this app's dark mode. */
+.markdown-body {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: inherit;
+}
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+.markdown-body p {
+  margin: 0 0 0.6rem;
+  font-size: 0.875rem;
+  color: inherit;
+}
+/* `#` -> h2 is the document title: clearly the largest, dominant heading. */
+.markdown-body h2 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.2;
+  margin: 1.1rem 0 0.55rem;
+  color: inherit;
+}
+.markdown-body h3 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0.95rem 0 0.35rem;
+  color: inherit;
+}
+.markdown-body h4 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0.8rem 0 0.25rem;
+  color: inherit;
+}
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0.6rem 0 0.25rem;
+  color: inherit;
+}
+.markdown-body ul {
+  list-style: disc;
+  padding-left: 1.3rem;
+  margin: 0 0 0.6rem;
+}
+.markdown-body ol {
+  list-style: decimal;
+  padding-left: 1.3rem;
+  margin: 0 0 0.6rem;
+}
+.markdown-body li {
+  margin: 0 0 0.2rem;
+}
+.markdown-body a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+.markdown-body strong {
+  font-weight: 700;
+}
+.markdown-body em {
+  font-style: italic;
+}
+.markdown-body code {
+  background: #f3f4f6;
+  color: inherit;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  margin: 1rem 0;
+}
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6rem 0;
+  font-size: 0.875rem;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #e5e7eb;
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+  color: inherit;
+}
+.markdown-body th {
+  background: #f9fafb;
+  font-weight: 700;
+}
+.dark .markdown-body a {
+  color: #60a5fa;
+}
+.dark .markdown-body code {
+  background: #1f2937;
+}
+.dark .markdown-body hr {
+  border-top-color: #374151;
+}
+.dark .markdown-body th,
+.dark .markdown-body td {
+  border-color: #374151;
+}
+.dark .markdown-body th {
+  background: #111827;
 }

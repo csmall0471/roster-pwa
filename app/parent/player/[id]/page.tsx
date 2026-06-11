@@ -7,6 +7,8 @@ import SeasonHistory from "../_components/SeasonHistory";
 import PhotoCardGallery from "../_components/PhotoCardGallery";
 import PlayerInfoForm from "./_components/PlayerInfoForm";
 import GuardiansSection from "./_components/GuardiansSection";
+import SiblingsSection from "@/app/_components/SiblingsSection";
+import { dedupeSiblings } from "@/app/_components/dedupe-siblings";
 
 function calcAge(dob: string) {
   const birth = new Date(dob + "T00:00:00");
@@ -83,6 +85,18 @@ export default async function ParentPlayerPage({
 
   const kidCount = myKidIds.size;
 
+  // The family's saved siblings (a parent can read their own rows via RLS).
+  const { data: sibRows } = await supabase
+    .from("siblings")
+    .select("name, attributes, player_id")
+    .eq("parent_id", myParentId);
+  const siblings = dedupeSiblings(sibRows);
+
+  // Parents can only create NEW (free-text) siblings, never link existing
+  // roster players. Free-text siblings fan out to all the parent's kids (stored
+  // per guardian / family), so no linkablePlayers are passed here. Linking is a
+  // coach-only ability on the coach player page.
+
   const sortedPhotos = [...(photos ?? [])].sort((a, b) => {
     if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
     const da = (a.teams as unknown as { season_start: string | null } | null)?.season_start ?? a.created_at;
@@ -157,6 +171,9 @@ export default async function ParentPlayerPage({
         myParentId={myParentId}
         kidCount={kidCount}
       />
+
+      {/* Siblings */}
+      <SiblingsSection playerId={player.id} initialSiblings={siblings} />
 
       {/* Season history */}
       {seasons && seasons.length > 0 && (

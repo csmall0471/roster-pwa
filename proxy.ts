@@ -41,7 +41,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // Unauthenticated → /login (allow the auth callback through)
-  if (!user && pathname !== "/" && pathname !== "/login" && pathname !== "/admin" && !pathname.startsWith("/auth") && !pathname.startsWith("/api/cron") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/sms-opt-in" && pathname !== "/no-access" && pathname !== "/house") {
+  if (!user && pathname !== "/" && pathname !== "/login" && pathname !== "/admin" && !pathname.startsWith("/auth") && !pathname.startsWith("/api/cron") && !pathname.startsWith("/event/") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/sms-opt-in" && pathname !== "/no-access" && pathname !== "/house") {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname + (request.nextUrl.search ?? ""));

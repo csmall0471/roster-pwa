@@ -12,14 +12,18 @@ export default function MessageComposer({
   channel,
   onClose,
   teamContext,
+  initialSubject = "",
+  initialBody = "",
 }: {
   recipients: Recipient[];
   channel: "email" | "text";
   onClose: () => void;
   teamContext?: TeamContext;
+  initialSubject?: string;
+  initialBody?: string;
 }) {
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [subject, setSubject] = useState(initialSubject);
+  const [body, setBody] = useState(initialBody);
   const [aiPrompt, setAiPrompt] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [gmailError, setGmailError] = useState<string | null>(null);

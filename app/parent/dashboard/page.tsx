@@ -3,6 +3,21 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import CalendarView from "./_components/CalendarView";
 import type { CalEvent } from "./_components/CalendarView";
+import { getParentEvents } from "./actions";
+
+// Split a timestamptz into a local YYYY-MM-DD date and HH:MM time for the calendar.
+function splitTimestamp(iso: string): { date: string; time: string } {
+  const d = new Date(iso);
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return { date, time };
+}
+
+function fmtEventDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric",
+  });
+}
 
 function fmtDate(iso: string) {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
@@ -171,6 +186,21 @@ export default async function DashboardPage() {
   }
   calEvents.sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time ?? "").localeCompare(b.time ?? ""))
 
+  // Event RSVPs + invitations (service-role action, authorized by this session)
+  const { rsvped: rsvpedEvents, invited: invitedEvents } = await getParentEvents();
+  for (const ev of rsvpedEvents) {
+    const { date, time } = splitTimestamp(ev.starts_at);
+    calEvents.push({
+      date, time,
+      emoji: "🎟️",
+      label: ev.title,
+      sublabel: ev.location ? `RSVP'd · ${ev.location}` : "RSVP'd",
+      href: `/event/${ev.slug}`,
+      playerIds: [],
+    })
+  }
+  calEvents.sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time ?? "").localeCompare(b.time ?? ""))
+
   const calPlayers = (players ?? []).map((p) => ({ id: p.id, firstName: p.first_name }))
 
   const playerMap = new Map((players ?? []).map((p) => [p.id, p]));
@@ -314,6 +344,76 @@ export default async function DashboardPage() {
           <div className="space-y-4">
             {futureEntries.map(({ team, playerIds: pids }) => (
               <TeamCard key={team.id} team={team} pids={pids} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {invitedEvents.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+            Pending invitations
+          </h2>
+          <div className="space-y-3">
+            {invitedEvents.map((ev) => (
+              <Link
+                key={ev.id}
+                href={`/event/${ev.slug}`}
+                className="block bg-white dark:bg-gray-900 rounded-2xl border border-amber-300 dark:border-amber-800 px-5 py-4 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-base mt-0.5">✉️</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-gray-900 dark:text-white">{ev.title}</p>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400">
+                        Invitation
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {fmtEventDate(ev.starts_at)}{ev.location ? ` · ${ev.location}` : ""}
+                    </p>
+                    <p className="text-sm text-amber-700 dark:text-amber-400 font-medium mt-1">
+                      Tap to RSVP →
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {rsvpedEvents.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+            Your events
+          </h2>
+          <div className="space-y-3">
+            {rsvpedEvents.map((ev) => (
+              <Link
+                key={ev.id}
+                href={`/event/${ev.slug}`}
+                className="block bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-base mt-0.5">🎟️</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-gray-900 dark:text-white">{ev.title}</p>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">
+                        Going
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {fmtEventDate(ev.starts_at)}{ev.location ? ` · ${ev.location}` : ""}
+                    </p>
+                    <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mt-1">
+                      View or edit your RSVP →
+                    </p>
+                  </div>
+                </div>
+              </Link>
             ))}
           </div>
         </section>
