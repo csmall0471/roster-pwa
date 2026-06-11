@@ -17,7 +17,7 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
     .maybeSingle();
   if (!season) notFound();
 
-  const [{ data: divisions }, { data: teams }, players, links, { data: coaches }, { data: teamNamesRows }] =
+  const [{ data: divisions }, { data: teams }, players, links, { data: coaches }, { data: teamNamesRows }, { data: assists }] =
     await Promise.all([
       supabase.from("tb_divisions").select("id, name, position").eq("season_id", id).order("position"),
       supabase
@@ -45,10 +45,21 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
       ),
       supabase.from("tb_coaches").select("id, name").eq("season_id", id),
       supabase.from("tb_team_names").select("id, name").eq("season_id", id),
+      supabase.from("tb_team_coaches").select("team_id, coach_id").eq("season_id", id),
     ]);
 
   const coachNames: Record<string, string> = Object.fromEntries((coaches ?? []).map((c) => [c.id as string, c.name as string]));
   const teamNames: Record<string, string> = Object.fromEntries((teamNamesRows ?? []).map((t) => [t.id as string, t.name as string]));
+
+  // Assistant coach names per team (head stays tb_teams.coach_id).
+  const assistantsByTeam = new Map<string, string[]>();
+  for (const a of assists ?? []) {
+    const tid = a.team_id as string;
+    const name = coachNames[a.coach_id as string] ?? "";
+    if (!name) continue;
+    if (!assistantsByTeam.has(tid)) assistantsByTeam.set(tid, []);
+    assistantsByTeam.get(tid)!.push(name);
+  }
 
   // Directed: a player's buddyIds are only the kids THEY requested (outgoing).
   // A kid named by someone else, who requested nobody, shouldn't be flagged for
@@ -85,6 +96,7 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
     name: t.name as string,
     night: (t.practice_night as string | null) ?? null,
     coachId: (t.coach_id as string | null) ?? null,
+    assistants: assistantsByTeam.get(t.id as string) ?? [],
   }));
 
   const config = normalizeConfig(season.grouping_config as Parameters<typeof normalizeConfig>[0]);

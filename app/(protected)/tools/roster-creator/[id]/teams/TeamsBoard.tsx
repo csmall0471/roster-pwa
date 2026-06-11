@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  addAssistantCoach,
   addCoachTeam,
   addTeam,
   emailRoster,
@@ -32,7 +33,7 @@ export type BoardPlayer = {
   buddyIds: string[];
   raw: Record<string, unknown> | null; // the original CSV row, for the detail view
 };
-export type BoardTeam = { id: string; divisionId: string; name: string; night: string | null; coachId: string | null };
+export type BoardTeam = { id: string; divisionId: string; name: string; night: string | null; coachId: string | null; assistants: string[] };
 export type PlayUpFlag = {
   playerId: string;
   name: string;
@@ -251,6 +252,19 @@ export default function TeamsBoard({
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add coach.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addAssistant(teamId: string, name: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await addAssistantCoach(seasonId, teamId, name);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add assistant.");
     } finally {
       setBusy(false);
     }
@@ -498,8 +512,8 @@ export default function TeamsBoard({
           </h2>
           <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
             Asked for in {divName.get(divisionId) ?? "this division"} but not on its roster (3+ families, plus any
-            parent volunteering). <strong>Add coach</strong> creates a team for them here — then re-analyze to
-            match those kids and re-generate.
+            parent volunteering). Give them a <strong>New team</strong>, or add as an <strong>Assistant</strong> on
+            an existing team — then re-analyze &amp; re-generate to match those kids.
           </p>
           <ul className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-gray-900 divide-y divide-amber-100 dark:divide-amber-900/30 max-h-56 overflow-y-auto">
             {missingCoaches.map((m, i) => (
@@ -522,9 +536,26 @@ export default function TeamsBoard({
                     disabled={busy}
                     onClick={() => addCoach(m.name)}
                     className="rounded-md bg-amber-600 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                    title="Create a new team for this coach"
                   >
-                    + Add coach
+                    + New team
                   </button>
+                  <select
+                    value=""
+                    disabled={busy}
+                    onChange={(e) => e.target.value && addAssistant(e.target.value, m.name)}
+                    title="Add this coach as an assistant on an existing team"
+                    className="rounded-md border border-amber-300 dark:border-amber-800 bg-white dark:bg-gray-950 px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 disabled:opacity-50"
+                  >
+                    <option value="">Assistant to…</option>
+                    {divisionTeams
+                      .filter((t) => t.coachId)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                  </select>
                 </div>
               </li>
             ))}
@@ -545,7 +576,10 @@ export default function TeamsBoard({
                   className="font-semibold text-sm bg-transparent text-gray-900 dark:text-white w-full focus:outline-none focus:border-b border-gray-300" />
                 <span className={`text-xs font-semibold ${sizeColor}`} title={`target ${target}`}>{members.length}/{target}</span>
               </div>
-              <p className="text-[11px] text-gray-400 mb-1 truncate">{coach ? coachNames[coach] ?? "" : "no coach"}</p>
+              <p className="text-[11px] text-gray-400 mb-1 truncate">
+                {coach ? coachNames[coach] ?? "" : "no coach"}
+                {t.assistants.length > 0 && <span> + {t.assistants.join(", ")}</span>}
+              </p>
               <select value={t.night ?? ""} onChange={(e) => {
                   const v = e.target.value || null;
                   setTeams((ts) => ts.map((x) => (x.id === t.id ? { ...x, night: v } : x)));
