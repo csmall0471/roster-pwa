@@ -207,12 +207,13 @@ export async function runAnalysis(
     if (kidMatches.length === 1) {
       coachId = kidMatches[0].id;
     } else if (kidMatches.length > 1) {
-      // Two coaches share the surname (e.g. two Wilsons). Disambiguate by the
-      // requested coach / registering account; flag if still unclear.
+      // Two coaches share the surname (e.g. two Wilsons). Only treat this as a
+      // coach's kid if the request OR the registering parent clearly singles one
+      // out. A bare surname coincidence with no request is NOT a coach kid —
+      // leave them a free agent rather than guess and flag. (A real ambiguous
+      // REQUEST is still flagged below via the explicit-request path.)
       const disamb = matchCoachOptions([...(intent?.coaches ?? []), account], kidMatches);
-      coachId = disamb?.coachId ?? kidMatches[0].id;
-      ambiguous = !disamb || disamb.ambiguous;
-      if (ambiguous) reason = `shares the ${last} surname with ${kidMatches.length} coaches`;
+      if (disamb && !disamb.ambiguous) coachId = disamb.coachId;
     }
 
     // 2) Otherwise match the explicit coach request(s) to the roster.
