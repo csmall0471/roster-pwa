@@ -101,16 +101,15 @@ export default function ConfirmView({
   }, [phase]);
 
   if (phase === "running") {
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const pct = total > 0 ? (done / total) * 100 : 0;
     const rate = done > 0 ? elapsed / done : 0; // sec per player
     const eta = rate > 0 && total > 0 ? rate * (total - done) : NaN;
-    // Claude spends most of each batch THINKING (no streamed text), so real
-    // progress lands in a few big jumps. Blend in a time-based creep that
-    // asymptotes toward ~92% so the bar always advances like a real progress
-    // bar. It snaps up to the real count when that's further along, and only the
-    // "done" phase shows 100%.
-    const creep = Math.round(92 * (1 - Math.exp(-elapsed / 40)));
-    const barPct = Math.max(pct, creep, 4);
+    // The bar tracks the REAL count — `done / total`. The only embellishment is
+    // a tiny warm-up nudge before the first players resolve (capped low) so the
+    // bar isn't dead-empty at the very start; the moment real progress arrives
+    // it follows the count exactly and never runs ahead of it.
+    const warmup = done === 0 ? Math.min(8, elapsed * 0.5) : 0;
+    const barPct = Math.max(pct, warmup, 2);
     return (
       <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="flex items-center gap-3 mb-3">
