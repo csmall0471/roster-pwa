@@ -87,6 +87,9 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
     teamNameId: (p.resolved_team_name_id as string | null) ?? null,
     nights: parseNights((p.practice_nights as string) ?? ""),
     buddyIds: [...(buddies.get(p.id as string) ?? [])],
+    // Did they name a buddy at all (matched or not)? Counts the raw request so
+    // the stat's denominator isn't limited to buddies we could resolve.
+    buddyReq: !isNoRequest((p.buddy_first as string) ?? "") || !isNoRequest((p.buddy_last as string) ?? ""),
     raw: (p.raw as Record<string, unknown> | null) ?? null,
   }));
 

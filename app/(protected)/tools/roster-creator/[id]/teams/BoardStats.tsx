@@ -44,7 +44,7 @@ function satisfaction(
       s.team[1]++;
       if (team && team.name === teamNames[p.teamNameId]) s.team[0]++;
     }
-    if (p.buddyIds.length) {
+    if (p.buddyReq) {
       s.buddy[1]++;
       if (tid && p.buddyIds.some((b) => (assign.get(b) ?? null) === tid)) s.buddy[0]++;
     }
@@ -136,7 +136,7 @@ function computeBlock(
       coaches: new Set(teamsList.map((t) => t.coachId).filter(Boolean)).size,
       coach: players.filter((p) => p.coachReq).length,
       team: players.filter((p) => p.teamNameId).length,
-      buddy: players.filter((p) => p.buddyIds.length).length,
+      buddy: players.filter((p) => p.buddyReq).length,
       night: players.filter((p) => p.nights.length).length,
     },
     topCoaches: topCounts(players, (p) => p.coachId, (id) => coachNames[id] ?? "—", divName, 5),

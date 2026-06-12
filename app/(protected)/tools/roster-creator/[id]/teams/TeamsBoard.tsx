@@ -17,8 +17,18 @@ import {
   updateGroupingConfig,
 } from "../../actions";
 import { type GroupConfig, type Weights, NIGHTS, flagsFor } from "../../group/engine";
+import { normalize } from "../../resolve/similarity";
 import PlayerDetail from "./PlayerDetail";
 import BoardStats from "./BoardStats";
+
+// Group key for a requested coach name. Normalizes punctuation/case, then glues
+// consecutive single-letter initials so "T.J. Gennaro" and "TJ Gennaro" collapse
+// to the same key ("tj gennaro") instead of showing as two separate coaches.
+function coachGroupKey(text: string): string {
+  return normalize(text)
+    .replace(/^coach /, "")
+    .replace(/\b(\p{L}) (?=\p{L}\b)/gu, "$1");
+}
 
 export type BoardPlayer = {
   id: string;
@@ -30,7 +40,8 @@ export type BoardPlayer = {
   coachReqText: string; // what they typed (for unmatched requests: the coach not on the roster)
   teamNameId: string | null;
   nights: string[];
-  buddyIds: string[];
+  buddyIds: string[]; // MATCHED buddies (resolved to a roster player)
+  buddyReq: boolean; // they named a buddy at all (matched or not) — the honest denominator
   raw: Record<string, unknown> | null; // the original CSV row, for the detail view
 };
 export type BoardTeam = { id: string; divisionId: string; name: string; night: string | null; coachId: string | null; assistants: string[] };
@@ -230,7 +241,7 @@ export default function TeamsBoard({
       if (!p.coachReq || p.coachId) continue; // matched, or no request
       const text = (p.coachReqText ?? "").trim();
       if (!text) continue;
-      const key = text.toLowerCase().replace(/^coach\s+/, "").replace(/\s+/g, " ").trim();
+      const key = coachGroupKey(text);
       if (!m.has(key)) m.set(key, { name: text, players: [], playerIds: [], volunteer: false });
       const e = m.get(key)!;
       e.players.push(p.name);
