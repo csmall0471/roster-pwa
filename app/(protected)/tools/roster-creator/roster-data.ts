@@ -3,7 +3,7 @@ import type { RosterRow } from "./export-csv";
 import { selectAll } from "./db";
 import { parseNights } from "./group/engine";
 import { fmtTime } from "./schedule";
-import { accountNameOf, isCoachChild, isNoRequest } from "./fields";
+import { accountNameOf, isCoachChild, isNoRequest, looksLikeCoachName } from "./fields";
 
 // Flat roster rows for a season, ordered division → team → last name. Shared by
 // the CSV download, the print view, and the email action. Plain server helper
@@ -112,7 +112,9 @@ export async function fetchRosterRows(
       .filter((v) => v && !isNoRequest(v as string))
       .join(" ")
       .trim();
-    const askedCoach = rawCoachText.length > 0;
+    // Only count it as a coach request if it looks like a NAME (not a note that
+    // landed in the coach field).
+    const askedCoach = looksLikeCoachName(rawCoachText);
     const tCoachId = tid ? teamMeta.get(tid)?.coachId ?? "" : "";
     const tTeamId = tid ? teamTeamId.get(tid) ?? "" : "";
 
@@ -138,7 +140,7 @@ export async function fetchRosterRows(
       age: (p.age_group as string) ?? "",
       school: (p.school as string) ?? "",
 
-      coachReq: reqCoachId ? coachName.get(reqCoachId) ?? "" : rawCoachText,
+      coachReq: reqCoachId ? coachName.get(reqCoachId) ?? "" : askedCoach ? rawCoachText : "",
       coachAssigned: tCoachId ? coachName.get(tCoachId) ?? "" : "",
       coachMet: !tid || !askedCoach ? "" : yn(!!reqCoachId && reqCoachId === tCoachId),
       teamReq: reqTeamId ? teamNameOf.get(reqTeamId) ?? "" : "",

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { parseNights, normalizeConfig } from "../../group/engine";
 import { selectAll } from "../../db";
-import { isNoRequest } from "../../fields";
+import { isNoRequest, looksLikeCoachName } from "../../fields";
 import { crossDivisionFlag } from "../../resolve/hints";
 import TeamsBoard, { type BoardPlayer, type BoardTeam, type PlayUpFlag } from "./TeamsBoard";
 
@@ -77,13 +77,13 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
     divisionId: (p.division_id as string | null) ?? "",
     teamId: (p.team_id as string | null) ?? null,
     coachId: (p.resolved_coach_id as string | null) ?? null,
-    // They asked for a coach if either name field holds a real (non-"none") value —
-    // counts unmatched requests too, so satisfaction isn't inflated to 100%.
-    coachReq: !isNoRequest((p.coach_first as string) ?? "") || !isNoRequest((p.coach_last as string) ?? ""),
-    coachReqText: [p.coach_first, p.coach_last]
-      .filter((v) => v && !isNoRequest(v as string))
-      .join(" ")
-      .trim(),
+    // They asked for a coach only when the coach field actually looks like a
+    // coach NAME — not a note that landed there ("same practice night as his
+    // brother"). Counts unmatched requests, but not data-in-the-wrong-field.
+    coachReq: looksLikeCoachName([p.coach_first, p.coach_last].filter((v) => v && !isNoRequest(v as string)).join(" ")),
+    coachReqText: looksLikeCoachName([p.coach_first, p.coach_last].filter((v) => v && !isNoRequest(v as string)).join(" "))
+      ? [p.coach_first, p.coach_last].filter((v) => v && !isNoRequest(v as string)).join(" ").trim()
+      : "",
     teamNameId: (p.resolved_team_name_id as string | null) ?? null,
     nights: parseNights((p.practice_nights as string) ?? ""),
     buddyIds: [...(buddies.get(p.id as string) ?? [])],

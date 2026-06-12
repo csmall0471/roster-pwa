@@ -97,6 +97,19 @@ export function isNoRequest(value: string | undefined | null): boolean {
   return NO_REQUEST.has(value.trim().toLowerCase());
 }
 
+// Heuristic: does a raw coach-field value actually look like a coach NAME, vs a
+// note that landed in the coach field ("Same practice night as his brother")?
+// Used so data-in-the-wrong-field isn't counted/shown as a coach request.
+const NOT_A_COACH =
+  /\b(night|practice|same|brother|sister|cousin|sibling|twin|available|prefer|play\s*up|playup|whoever|anyone|last\s*season|monday|tuesday|wednesday|thursday|friday|saturday|sunday|idk|tbd)\b/i;
+export function looksLikeCoachName(value: string | undefined | null): boolean {
+  const v = (value ?? "").trim();
+  if (!v || isNoRequest(v)) return false;
+  if (NOT_A_COACH.test(v)) return false;
+  // Names are short — a long phrase is a sentence, not a coach.
+  return v.split(/\s+/).filter(Boolean).length <= 4;
+}
+
 export type RowData = Record<string, string>;
 
 // Pull a canonical field's value out of a raw row via the mapping.
