@@ -127,16 +127,22 @@ export default function TeamsBoard({
   const [emailTo, setEmailTo] = useState("");
   const [emailing, setEmailing] = useState(false);
   const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   async function downloadCsv() {
-    const csv = await exportRosterCsv(seasonId);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "rosters.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    setDownloading(true);
+    try {
+      const csv = await exportRosterCsv(seasonId);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "rosters.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
   }
 
   async function sendEmail() {
@@ -689,9 +695,10 @@ export default function TeamsBoard({
           Export rosters
         </h2>
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={downloadCsv}
-            className="inline-flex items-center rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">
-            Download CSV
+          <button type="button" onClick={downloadCsv} disabled={downloading}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60">
+            {downloading && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />}
+            {downloading ? "Preparing…" : "Download CSV"}
           </button>
           <Link href={`/tools/roster-creator/${seasonId}/teams/print`} target="_blank"
             className="inline-flex items-center rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">
