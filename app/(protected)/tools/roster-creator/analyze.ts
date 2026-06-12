@@ -6,6 +6,18 @@ import { normalize, jaroWinkler } from "./resolve/similarity";
 import { matchCoachOptions, type CoachCandidate } from "./resolve/match-coach";
 import { isCoachChild, accountNameOf, isNoRequest } from "./fields";
 
+// Bounded-concurrency runner — the persist phase used to do its DB writes one
+// sequential round-trip at a time (one per coach, then one PER multi-coach
+// player), which left the progress bar parked at 100% for ~30s after Claude had
+// already finished. Fan them out instead.
+async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) await fn(items[i++]);
+  });
+  await Promise.all(workers);
+}
+
 export type TeamPairing = {
   name: string; // the team's coach (authoritative roster name)
   coach: string; // kept for shape compatibility; "" — the name IS the coach
@@ -256,10 +268,10 @@ export async function runAnalysis(
     if (!idsByCoach.has(cid)) idsByCoach.set(cid, []);
     idsByCoach.get(cid)!.push(pid);
   }
-  for (const [cid, ids] of idsByCoach) {
+  await pool([...idsByCoach.entries()], 16, async ([cid, ids]) => {
     const { error } = await supabase.from("tb_players").update({ resolved_coach_id: cid }).in("id", ids);
     if (error) throw new Error(error.message);
-  }
+  });
 
   // ── Buddy links (deterministic name match against the full roster) ─────────
   const roster = rows.map((p) => {
@@ -304,13 +316,12 @@ export async function runAnalysis(
   // Keep the ordered coach options (fallbacks) for players who listed more than
   // one. Non-fatal if migration 037 (coach_options column) isn't applied.
   try {
-    for (const p of rows) {
-      const intent = intentById.get(idOf(p));
-      if (intent && intent.coaches.length > 1) {
-        const { error } = await supabase.from("tb_players").update({ coach_options: intent.coaches }).eq("id", idOf(p));
-        if (error) throw error;
-      }
-    }
+    const multi = rows.filter((p) => (intentById.get(idOf(p))?.coaches.length ?? 0) > 1);
+    await pool(multi, 16, async (p) => {
+      const intent = intentById.get(idOf(p))!;
+      const { error } = await supabase.from("tb_players").update({ coach_options: intent.coaches }).eq("id", idOf(p));
+      if (error) throw error;
+    });
   } catch (e) {
     console.error("[analyze] skipped coach_options (apply migration 037?):", e instanceof Error ? e.message : e);
   }

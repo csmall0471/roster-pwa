@@ -101,20 +101,24 @@ export default function ConfirmView({
   }, [phase]);
 
   if (phase === "running") {
-    const pct = total > 0 ? (done / total) * 100 : 0;
     const rate = done > 0 ? elapsed / done : 0; // sec per player
     const eta = rate > 0 && total > 0 ? rate * (total - done) : NaN;
-    // The bar tracks the REAL count — `done / total`. The only embellishment is
-    // a tiny warm-up nudge before the first players resolve (capped low) so the
-    // bar isn't dead-empty at the very start; the moment real progress arrives
-    // it follows the count exactly and never runs ahead of it.
+    // The bar tracks the REAL count — `done / total` — but maps it to 0–95% so
+    // the last sliver is reserved for the brief match-&-save step after Claude
+    // finishes. Once every player is counted we hold at 95% under a "saving"
+    // label rather than parking at a frozen 100%. A tiny capped warm-up keeps
+    // the bar from being dead-empty before the first players resolve.
+    const finishing = total > 0 && done >= total;
+    const counted = total > 0 ? (done / total) * 95 : 0;
     const warmup = done === 0 ? Math.min(8, elapsed * 0.5) : 0;
-    const barPct = Math.max(pct, warmup, 2);
+    const barPct = Math.max(counted, warmup, 2);
     return (
       <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="flex items-center gap-3 mb-3">
           <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-          <p className="text-sm font-medium text-gray-900 dark:text-white">Analyzing signups with Claude…</p>
+          <p className="text-sm font-medium text-gray-900 dark:text-white">
+            {finishing ? "Matching & saving results…" : "Analyzing signups with Claude…"}
+          </p>
         </div>
         <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
           <div className="h-full bg-blue-600 transition-all duration-500 ease-out" style={{ width: `${barPct}%` }} />
@@ -122,7 +126,7 @@ export default function ConfirmView({
         <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
           <span>{total > 0 ? `${done} / ${total} players` : "Starting…"}</span>
           <span>
-            {fmtTime(elapsed)} elapsed{total > 0 && done > 0 ? ` · ~${fmtTime(eta)} left` : ""}
+            {fmtTime(elapsed)} elapsed{total > 0 && done > 0 && !finishing ? ` · ~${fmtTime(eta)} left` : ""}
           </span>
         </div>
       </div>
@@ -164,30 +168,6 @@ export default function ConfirmView({
     d.teams.filter((t) => t.needsReview).map((t) => ({ division: d.division, ...t }))
   );
   const flagged = flaggedAll.filter((t) => !dismissed.has(`${t.division}::${t.name}`));
-
-  // Aggregate the unmatched requests by the coach asked for (per division), so a
-  // coach that 7 families requested but isn't on the roster stands out — almost
-  // always a real coach left off the workbook. Light-normalized for grouping.
-  const missingCoaches = (() => {
-    const m = new Map<string, { coach: string; division: string; count: number; players: string[] }>();
-    for (const u of r.unmatchedCoaches) {
-      const primary = (u.requested[0] ?? "").trim();
-      if (!primary) continue;
-      const norm = primary.toLowerCase().replace(/^coach\s+/, "").replace(/\s+/g, " ").trim();
-      const key = `${u.division}||${norm}`;
-      if (!m.has(key)) m.set(key, { coach: primary, division: u.division, count: 0, players: [] });
-      const e = m.get(key)!;
-      e.count++;
-      e.players.push(u.playerName);
-    }
-    return [...m.values()].sort((a, b) => b.count - a.count || a.division.localeCompare(b.division));
-  })();
-  // Only surface coaches several families asked for — those are almost certainly
-  // real coaches left off the roster. One-offs are usually last year's coach or
-  // a typo and just add noise.
-  const MIN_FAMILIES = 3;
-  const missingCoachesShown = missingCoaches.filter((m) => m.count >= MIN_FAMILIES);
-  const missingCoachesHidden = missingCoaches.length - missingCoachesShown.length;
 
   return (
     <div className="space-y-6">
@@ -240,37 +220,8 @@ export default function ConfirmView({
         </section>
       )}
 
-      {/* Coaches requested but not on the roster — aggregated, 3+ families only */}
-      {missingCoachesShown.length > 0 && (
-        <section>
-          <h2 className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-            Coaches requested but not on your roster ({missingCoachesShown.length})
-          </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-            Requested by <strong>{MIN_FAMILIES}+ families</strong> but not in the coaches workbook for their
-            division — <strong>almost always a real coach you forgot to list</strong>. Add them to the workbook
-            and re-set up the season; otherwise those players are seated as free agents.
-            {missingCoachesHidden > 0 && ` (${missingCoachesHidden} other names were asked for by just 1–2 families and are hidden.)`}
-          </p>
-          <ul className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 divide-y divide-amber-100 dark:divide-amber-900/30 max-h-80 overflow-y-auto">
-            {missingCoachesShown.map((m, i) => (
-              <li key={i} className="flex items-start justify-between gap-3 px-4 py-2 text-sm">
-                <span className="min-w-0">
-                  <span className="font-medium text-gray-900 dark:text-white">{m.coach}</span>
-                  <span className="ml-2 text-xs text-gray-400">{shortDiv(m.division)}</span>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">
-                    {m.players.slice(0, 6).join(", ")}
-                    {m.players.length > 6 ? ` +${m.players.length - 6} more` : ""}
-                  </p>
-                </span>
-                <span className="shrink-0 tabular-nums text-xs font-semibold text-amber-700 dark:text-amber-300">
-                  {m.count} {m.count === 1 ? "family" : "families"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {/* The "coaches requested but not on your roster" list lives per-division
+          on the Build-teams board now (where you can act on it), not here. */}
 
       {/* Teams by division — collapsed; expand to inspect */}
       <section>
