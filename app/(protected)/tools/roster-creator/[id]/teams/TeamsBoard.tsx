@@ -225,15 +225,16 @@ export default function TeamsBoard({
   // free agents). Grouped by the requested name, 3+ families — the ones you'd
   // most want to cluster onto a team here, or add to the roster.
   const missingCoaches = useMemo(() => {
-    const m = new Map<string, { name: string; players: string[]; volunteer: boolean }>();
+    const m = new Map<string, { name: string; players: string[]; playerIds: string[]; volunteer: boolean }>();
     for (const p of divisionPlayers) {
       if (!p.coachReq || p.coachId) continue; // matched, or no request
       const text = (p.coachReqText ?? "").trim();
       if (!text) continue;
       const key = text.toLowerCase().replace(/^coach\s+/, "").replace(/\s+/g, " ").trim();
-      if (!m.has(key)) m.set(key, { name: text, players: [], volunteer: false });
+      if (!m.has(key)) m.set(key, { name: text, players: [], playerIds: [], volunteer: false });
       const e = m.get(key)!;
       e.players.push(p.name);
+      e.playerIds.push(p.id);
       // Requested coach shares this kid's surname → a parent volunteering to coach.
       const last = p.name.trim().split(/\s+/).pop()?.toLowerCase() ?? "";
       if (last.length >= 3 && key.includes(last)) e.volunteer = true;
@@ -244,29 +245,35 @@ export default function TeamsBoard({
       .sort((a, b) => Number(b.volunteer) - Number(a.volunteer) || b.players.length - a.players.length);
   }, [divisionPlayers]);
 
-  async function addCoach(name: string) {
-    setBusy(true);
+  // Adding a coach/assistant from the missing-coaches panel seats the requesting
+  // kids onto the new/assisted team, then auto-regenerates so the board reflects
+  // it immediately — no separate "Generate" click. `generating` blanks the board
+  // while it runs, same as the manual button.
+  async function addCoach(name: string, playerIds: string[]) {
+    setGenerating(true);
     setError(null);
     try {
-      await addCoachTeam(seasonId, divisionId, name);
+      await addCoachTeam(seasonId, divisionId, name, playerIds);
+      await generateTeams(seasonId, config);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add coach.");
     } finally {
-      setBusy(false);
+      setGenerating(false);
     }
   }
 
-  async function addAssistant(teamId: string, name: string) {
-    setBusy(true);
+  async function addAssistant(teamId: string, name: string, playerIds: string[]) {
+    setGenerating(true);
     setError(null);
     try {
-      await addAssistantCoach(seasonId, teamId, name);
+      await addAssistantCoach(seasonId, teamId, name, playerIds);
+      await generateTeams(seasonId, config);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add assistant.");
     } finally {
-      setBusy(false);
+      setGenerating(false);
     }
   }
 
@@ -513,7 +520,7 @@ export default function TeamsBoard({
           <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
             Asked for in {divName.get(divisionId) ?? "this division"} but not on its roster (3+ families, plus any
             parent volunteering). Give them a <strong>New team</strong>, or add as an <strong>Assistant</strong> on
-            an existing team — then re-analyze &amp; re-generate to match those kids.
+            an existing team — the requesting kids are seated and the board re-generates automatically.
           </p>
           <ul className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-gray-900 divide-y divide-amber-100 dark:divide-amber-900/30 max-h-56 overflow-y-auto">
             {missingCoaches.map((m, i) => (
@@ -534,16 +541,16 @@ export default function TeamsBoard({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => addCoach(m.name)}
+                    onClick={() => addCoach(m.name, m.playerIds)}
                     className="rounded-md bg-amber-600 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-                    title="Create a new team for this coach"
+                    title="Create a new team for this coach and seat their families"
                   >
                     + New team
                   </button>
                   <select
                     value=""
                     disabled={busy}
-                    onChange={(e) => e.target.value && addAssistant(e.target.value, m.name)}
+                    onChange={(e) => e.target.value && addAssistant(e.target.value, m.name, m.playerIds)}
                     title="Add this coach as an assistant on an existing team"
                     className="rounded-md border border-amber-300 dark:border-amber-800 bg-white dark:bg-gray-950 px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 disabled:opacity-50"
                   >

@@ -985,7 +985,15 @@ async function nextTeamPosition(
 }
 
 // Add a coached team (a coach name) to a division.
-export async function addCoachTeam(seasonId: string, divisionId: string, coachName: string) {
+export async function addCoachTeam(
+  seasonId: string,
+  divisionId: string,
+  coachName: string,
+  // When added from the build board's "requested coaches not on roster" panel,
+  // the kids who asked for this coach come along — point their resolved coach at
+  // the new coach so the next generate clusters them onto this team.
+  attachPlayerIds?: string[]
+) {
   const { supabase } = await requireOwner();
   const n = coachName.trim();
   if (!n) throw new Error("Coach name is required");
@@ -1000,6 +1008,14 @@ export async function addCoachTeam(seasonId: string, divisionId: string, coachNa
     position,
   });
   if (error) throw new Error(error.message);
+  if (attachPlayerIds?.length) {
+    const { error: upErr } = await supabase
+      .from("tb_players")
+      .update({ resolved_coach_id: coachId })
+      .in("id", attachPlayerIds)
+      .eq("season_id", seasonId);
+    if (upErr) throw new Error(upErr.message);
+  }
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
@@ -1264,7 +1280,15 @@ export async function setDivisionTeamCount(seasonId: string, divisionId: string,
 
 // ── Assistant / co-coaches (a team can have more than one coach) ─────────────
 
-export async function addAssistantCoach(seasonId: string, teamId: string, coachName: string) {
+export async function addAssistantCoach(
+  seasonId: string,
+  teamId: string,
+  coachName: string,
+  // From the build board: the kids who asked for this (assistant) coach come
+  // along. Generate clusters by the team's HEAD coach, so point them there to
+  // seat them onto the team they're assisting.
+  attachPlayerIds?: string[]
+) {
   const { supabase } = await requireOwner();
   const n = coachName.trim();
   if (!n) throw new Error("Coach name is required");
@@ -1273,6 +1297,23 @@ export async function addAssistantCoach(seasonId: string, teamId: string, coachN
     .from("tb_team_coaches")
     .insert({ season_id: seasonId, team_id: teamId, coach_id: coachId });
   if (error && error.code !== "23505") throw new Error(error.message); // ignore duplicate
+  if (attachPlayerIds?.length) {
+    const { data: team } = await supabase
+      .from("tb_teams")
+      .select("coach_id")
+      .eq("id", teamId)
+      .eq("season_id", seasonId)
+      .maybeSingle();
+    const headId = (team?.coach_id as string | null) ?? null;
+    if (headId) {
+      const { error: upErr } = await supabase
+        .from("tb_players")
+        .update({ resolved_coach_id: headId })
+        .in("id", attachPlayerIds)
+        .eq("season_id", seasonId);
+      if (upErr) throw new Error(upErr.message);
+    }
+  }
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
