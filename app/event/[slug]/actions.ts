@@ -10,6 +10,7 @@ import {
   infoTable,
 } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
+import { venmoPayLink, eventPayNote } from "@/lib/event-pay";
 import type {
   AttendeeStatus,
   SavedSibling,
@@ -34,26 +35,6 @@ async function familyParentIds(service: ServiceClient, parentId: string): Promis
     .select("parent_id")
     .in("player_id", playerIds);
   return [...new Set([parentId, ...((co ?? []).map((r) => r.parent_id as string))])];
-}
-
-// Turn a Venmo profile/pay link into a one-tap payment link with the amount and
-// a note (kid names + event) prefilled. Non-Venmo links pass through untouched.
-function venmoPayLink(payUrl: string | null, note: string, amountCents: number): string | null {
-  if (!payUrl) return null;
-  try {
-    const u = new URL(payUrl);
-    if (!/(^|\.)venmo\.com$/i.test(u.hostname)) return payUrl;
-    // Handle = last path segment, ignoring a leading "u" (…/u/Handle).
-    const segs = u.pathname.split("/").filter((s) => s && s.toLowerCase() !== "u");
-    const handle = segs[segs.length - 1];
-    if (!handle) return payUrl;
-    const params = new URLSearchParams({ txn: "pay" });
-    if (amountCents > 0) params.set("amount", (amountCents / 100).toFixed(2));
-    if (note) params.set("note", note);
-    return `https://venmo.com/${handle}?${params.toString()}`;
-  } catch {
-    return payUrl;
-  }
 }
 
 // The parent's existing RSVP for the current event, returned so the form can be
@@ -367,11 +348,9 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
 
   // Prefill the Venmo note (kid names + event) and amount so the coach can match
   // the payment without the parent typing anything.
-  const kidNames = attendees
-    .filter((a) => a.is_player && a.status !== "declined" && a.name)
-    .map((a) => a.name as string);
-  const payNote = `${kidNames.length ? kidNames.join(", ") : name} - ${event.title}`;
-  const payUrl = declined ? null : venmoPayLink(event.pay_url, payNote, total_cents);
+  const payUrl = declined
+    ? null
+    : venmoPayLink(event.pay_url, eventPayNote(attendees, name, event.title), total_cents);
 
   const email = input.email.trim() || null;
   const phone = input.phone.trim() || null;

@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js"
 import { Resend } from "resend"
+import { buildEmailHtml, btn, infoRow, infoTable } from "@/lib/email-template"
+import { venmoPayLink, eventPayNote } from "@/lib/event-pay"
+import type { SignupAttendee } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 
@@ -47,6 +50,17 @@ export async function GET(request: Request) {
   const tomorrow = new Date()
   tomorrow.setDate(tomorrow.getDate() + 1)
   const targetDate = dateOverride ?? tomorrow.toISOString().split("T")[0]
+
+  // Event reminders fire 2 days out (snack/training are next-day). Separate
+  // override (?eventDate=) so the 1-day and 2-day windows can be tested apart.
+  const twoOut = new Date()
+  twoOut.setDate(twoOut.getDate() + 2)
+  const eventDate = url.searchParams.get("eventDate") ?? twoOut.toISOString().split("T")[0]
+  const eventDayAfter = (() => {
+    const d = new Date(`${eventDate}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + 1)
+    return d.toISOString().split("T")[0]
+  })()
 
   let emailsSent = 0
   const errors: string[] = []
@@ -155,6 +169,75 @@ export async function GET(request: Request) {
           else {
             emailsSent++
             sentSummary.push({ to: parent.email, subject })
+          }
+        }
+      }
+    }
+  }
+
+  // ── Event reminders (2 days out) ──────────────────────────────────────────
+  // Remind everyone who RSVP'd "going" to a published event happening in 2 days.
+  // Include the Venmo pay link ONLY for those who still owe (unpaid, balance > 0).
+
+  const { data: events, error: eventErr } = await supabase
+    .from("events")
+    .select(`
+      id, title, slug, starts_at, location, pay_url, status,
+      teams(name),
+      event_signups(id, name, email, attendees, total_cents, paid, declined)
+    `)
+    .eq("status", "published")
+    .gte("starts_at", `${eventDate}T00:00:00`)
+    .lt("starts_at", `${eventDayAfter}T00:00:00`)
+
+  debug.eventsFound = events?.length ?? 0
+
+  if (eventErr) {
+    errors.push(`event query: ${eventErr.message}`)
+  } else {
+    for (const ev of events ?? []) {
+      const teamName = (ev.teams as any)?.name as string | undefined
+      const whenStr = ev.starts_at
+        ? new Date(ev.starts_at as string).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })
+        : ""
+      const money = (c: number) => `$${(c / 100).toFixed(2)}`
+
+      for (const s of (ev.event_signups as any[]) ?? []) {
+        if (s.declined || !s.email) continue
+        const first = String(s.name ?? "there").split(" ")[0] || "there"
+        const total = (s.total_cents as number) ?? 0
+        const owes = !s.paid && total > 0
+        const payUrl = owes
+          ? venmoPayLink(ev.pay_url as string | null, eventPayNote((s.attendees ?? []) as SignupAttendee[], s.name ?? "", ev.title as string), total)
+          : null
+
+        const subject = `Reminder: ${ev.title} is in 2 days`
+        const html = buildEmailHtml({
+          teamName,
+          htmlBody:
+            `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${first},</p>` +
+            `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Just a reminder — <strong>${ev.title}</strong> is in 2 days.</p>` +
+            infoTable(infoRow("When", whenStr) + (ev.location ? infoRow("Where", ev.location as string) : "")) +
+            (owes
+              ? `<p style="margin:14px 0 12px;font-size:15px;color:#111827;">Our records show a balance of <strong>${money(total)}</strong>.</p>` +
+                (payUrl ? `<div style="margin:0 0 12px;">${btn(`Pay now · ${money(total)}`, payUrl, "#16a34a")}</div>` : "")
+              : "") +
+            `<p style="margin:14px 0 0;font-size:15px;color:#111827;">See you there!</p>`,
+        })
+        const text =
+          `Hi ${first}, reminder: ${ev.title} is in 2 days (${whenStr}).` +
+          (ev.location ? ` Location: ${ev.location}.` : "") +
+          (owes ? `\n\nBalance due: ${money(total)}.${payUrl ? ` Pay: ${payUrl}` : ""}` : "") +
+          `\n\nSee you there!\n— Coach Connor`
+
+        if (dry) {
+          preview.push({ to: s.email, subject, body: text })
+        } else {
+          const { error } = await resend.emails.send({ from, to: s.email, subject, html, text })
+          if (error) errors.push(`event email ${s.email}: ${error.message}`)
+          else {
+            emailsSent++
+            sentSummary.push({ to: s.email, subject })
           }
         }
       }
