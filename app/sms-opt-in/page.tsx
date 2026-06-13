@@ -79,11 +79,15 @@ export default function SmsOptInPage() {
                   className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
                 />
                 <label htmlFor="consent" className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-                  I agree to receive SMS reminder messages from CS Sports AZ about
-                  upcoming games, snack duties, and training sessions for my player&apos;s
-                  team. Message frequency varies (typically 1–3 messages per week during
-                  the season). Message &amp; data rates may apply. Reply{" "}
-                  <strong>STOP</strong> to cancel or <strong>HELP</strong> for help.
+                  I agree to receive recurring automated SMS reminder messages from
+                  <strong> CS Sports AZ</strong> about upcoming games, snack duties, and
+                  training sessions for my player&apos;s team. Message frequency varies
+                  (typically 1–3 messages per week during the season). Message &amp; data
+                  rates may apply. Reply <strong>STOP</strong> to cancel or{" "}
+                  <strong>HELP</strong> for help. Consent is not a condition of any purchase.
+                  See our{" "}
+                  <a href="/sms-terms" className="text-blue-600 underline">SMS Terms</a> and{" "}
+                  <a href="/privacy" className="text-blue-600 underline">Privacy Policy</a>.
                 </label>
               </div>
 

@@ -44,6 +44,13 @@ export default function PrivacyPage() {
           We do not sell, share, or disclose personal information to any third parties.
           Information is never used for marketing purposes unrelated to team communications.
         </p>
+        <p className="mt-3 text-gray-700 leading-relaxed font-medium">
+          Mobile information (your phone number and SMS opt-in) is never shared with
+          third parties or affiliates for marketing or promotional purposes. Text-messaging
+          originator opt-in data and consent are not shared with any third parties. Phone
+          numbers are used only to deliver the team reminders described below and to send the
+          one-time code used to sign in.
+        </p>
       </section>
 
       <section className="mb-8">
