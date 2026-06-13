@@ -164,6 +164,7 @@ export default function EventBuilder({
           field_type: f.field_type,
           options: f.options ?? [],
           required: f.required,
+          price_adjust_cents: f.price_adjust_cents ?? 0,
         })),
     }));
     // Every event always has a Player tier (kids map to it). Seed one for new
@@ -251,7 +252,7 @@ export default function EventBuilder({
               ...x,
               fields: [
                 ...x.fields,
-                { key: newKey(), label: "", field_type: "text", options: [], required: false },
+                { key: newKey(), label: "", field_type: "text", options: [], required: false, price_adjust_cents: 0 },
               ],
             }
           : x
@@ -333,6 +334,7 @@ export default function EventBuilder({
           field_type: f.field_type,
           options: f.field_type === "select" ? f.options.filter((o) => o.trim()) : [],
           required: f.required,
+          price_adjust_cents: f.price_adjust_cents ?? 0,
         })),
       })),
     };
@@ -621,6 +623,25 @@ export default function EventBuilder({
                           updateTierField(t.key, tf.key, { options: e.target.value.split("\n") })
                         }
                       />
+                    )}
+                    {(tf.field_type === "yesno" || tf.field_type === "checkbox") && (
+                      <div className="flex flex-wrap items-center gap-1.5 pl-1 text-xs text-gray-600 dark:text-gray-400">
+                        <span>Add to this attendee&rsquo;s price when {tf.field_type === "yesno" ? "Yes" : "checked"}:</span>
+                        <span className="text-gray-500">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className={inputBase + " w-24"}
+                          placeholder="0.00"
+                          value={tf.price_adjust_cents ? (tf.price_adjust_cents / 100).toString() : ""}
+                          onChange={(e) =>
+                            updateTierField(t.key, tf.key, {
+                              price_adjust_cents: Math.round((parseFloat(e.target.value) || 0) * 100),
+                            })
+                          }
+                        />
+                        <span className="text-gray-400">(negative = discount)</span>
+                      </div>
                     )}
                   </div>
                 ))}

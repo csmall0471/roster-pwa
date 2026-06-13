@@ -27,6 +27,7 @@ type GenericField = {
   field_type: EventFieldType;
   options: string[];
   required: boolean;
+  priceAdjustCents?: number; // +/- to the attendee's price when yes/checked (tier fields only)
 };
 
 type AttendeeDraft = {
@@ -94,6 +95,7 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
               field_type: f.field_type,
               options: f.options ?? [],
               required: f.required,
+              priceAdjustCents: f.price_adjust_cents ?? 0,
             }));
           // Common-attribute pseudo-fields (grade/shirt size/birthdate) for any
           // tier. Keyed by their label so the stored value is self-describing
@@ -107,6 +109,7 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
               field_type: c.field_type,
               options: [],
               required: false,
+              priceAdjustCents: 0,
             }));
           return { ...t, attendeeFields: [...commonFields, ...custom] };
         }),
@@ -246,10 +249,21 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
   const total = useMemo(() => {
     let sum = 0;
     for (const t of tiers) {
-      const units = t.collect_attendees
-        ? (attendees[t.id] ?? []).filter((a) => a.status !== "declined").length
-        : counts[t.id] ?? 0;
-      sum += t.amount_cents * units;
+      if (t.collect_attendees) {
+        // Per attendee: base + adjustments for yes/checked priced fields (≥ 0).
+        for (const a of attendees[t.id] ?? []) {
+          if (a.status === "declined") continue;
+          let adj = 0;
+          for (const f of t.attendeeFields) {
+            if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes[f.id] === true) {
+              adj += f.priceAdjustCents ?? 0;
+            }
+          }
+          sum += Math.max(0, t.amount_cents + adj);
+        }
+      } else {
+        sum += t.amount_cents * (counts[t.id] ?? 0);
+      }
     }
     return sum;
   }, [tiers, attendees, counts]);
@@ -906,6 +920,12 @@ function FieldInput({
   onChange: (v: string | number | boolean) => void;
 }) {
   const req = field.required ? " *" : "";
+  // Price hint shown on the toggle fields that adjust the attendee's price.
+  const adj = field.priceAdjustCents || 0;
+  const priceHint =
+    adj && (field.field_type === "yesno" || field.field_type === "checkbox")
+      ? ` (${adj > 0 ? "+" : "−"}${money(Math.abs(adj))})`
+      : "";
   if (field.field_type === "textarea") {
     return (
       <div>
@@ -939,14 +959,14 @@ function FieldInput({
     return (
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-        {field.label}{req}
+        {field.label}{req}{priceHint && <span className="text-gray-500">{priceHint}</span>}
       </label>
     );
   }
   if (field.field_type === "yesno") {
     return (
       <div>
-        <label className={labelCls}>{field.label}{req}</label>
+        <label className={labelCls}>{field.label}{req}{priceHint && <span className="text-gray-500">{priceHint}</span>}</label>
         <div className="flex gap-2">
           {[true, false].map((v) => (
             <button

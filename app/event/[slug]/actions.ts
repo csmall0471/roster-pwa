@@ -297,7 +297,7 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   // amounts/labels (never trust the client). Each input attendee = one paid unit.
   // Attribute keys are remapped from field id → label so stored data is
   // self-describing for the coach dashboard.
-  type TierFieldRow = { id: string; label: string };
+  type TierFieldRow = { id: string; label: string; field_type: string; price_adjust_cents: number };
   type TierRow = {
     id: string;
     label: string;
@@ -324,10 +324,19 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     }
     const trimmedName = a.name?.trim() || null;
     const status: AttendeeStatus = a.status === "declined" ? "declined" : "attending";
+    // Per-attendee price = tier base + adjustments for any Yes/No or checkbox
+    // field answered yes/checked (clamped at $0). Authoritative server-side.
+    let adjust = 0;
+    for (const f of t.event_tier_fields ?? []) {
+      if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes?.[f.id] === true) {
+        adjust += f.price_adjust_cents ?? 0;
+      }
+    }
+    const unitAmount = Math.max(0, t.amount_cents + adjust);
     attendees.push({
       tier_id: t.id,
       tier_label: t.label,
-      amount_cents: t.amount_cents,
+      amount_cents: unitAmount,
       is_player: t.is_player,
       name: trimmedName,
       attributes: labeled,
@@ -336,7 +345,7 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     // Declined attendees are recorded (so the coach sees who's out) but never
     // charged.
     if (status === "attending") {
-      total_cents += t.amount_cents;
+      total_cents += unitAmount;
       attendingUnits++;
     }
     if (t.is_sibling && trimmedName) siblingDrafts.push({ name: trimmedName, attributes: labeled });
