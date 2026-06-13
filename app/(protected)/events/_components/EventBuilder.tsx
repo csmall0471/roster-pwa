@@ -165,6 +165,7 @@ export default function EventBuilder({
           options: f.options ?? [],
           required: f.required,
           price_adjust_cents: f.price_adjust_cents ?? 0,
+          option_prices: (f.options ?? []).map((_, i) => f.option_prices?.[i] ?? 0),
         })),
     }));
     // Every event always has a Player tier (kids map to it). Seed one for new
@@ -252,7 +253,7 @@ export default function EventBuilder({
               ...x,
               fields: [
                 ...x.fields,
-                { key: newKey(), label: "", field_type: "text", options: [], required: false, price_adjust_cents: 0 },
+                { key: newKey(), label: "", field_type: "text", options: [], required: false, price_adjust_cents: 0, option_prices: [] },
               ],
             }
           : x
@@ -328,14 +329,24 @@ export default function EventBuilder({
         collect_attendees: t.collect_attendees,
         player_attributes: t.player_attributes,
         is_sibling: t.is_sibling,
-        fields: t.fields.map((f) => ({
-          id: f.id,
-          label: f.label,
-          field_type: f.field_type,
-          options: f.field_type === "select" ? f.options.filter((o) => o.trim()) : [],
-          required: f.required,
-          price_adjust_cents: f.price_adjust_cents ?? 0,
-        })),
+        fields: t.fields.map((f) => {
+          // Drop blank option rows, keeping each option's price aligned.
+          const pairs =
+            f.field_type === "select"
+              ? f.options
+                  .map((o, i) => ({ o: o.trim(), p: Math.round(f.option_prices[i] ?? 0) }))
+                  .filter((x) => x.o)
+              : [];
+          return {
+            id: f.id,
+            label: f.label,
+            field_type: f.field_type,
+            options: pairs.map((x) => x.o),
+            required: f.required,
+            price_adjust_cents: f.price_adjust_cents ?? 0,
+            option_prices: pairs.map((x) => x.p),
+          };
+        }),
       })),
     };
     start(async () => {
@@ -614,15 +625,60 @@ export default function EventBuilder({
                       </button>
                     </div>
                     {tf.field_type === "select" && (
-                      <textarea
-                        className={input}
-                        rows={2}
-                        placeholder="One choice per line (e.g. YS, YM, YL)"
-                        value={tf.options.join("\n")}
-                        onChange={(e) =>
-                          updateTierField(t.key, tf.key, { options: e.target.value.split("\n") })
-                        }
-                      />
+                      <div className="space-y-1.5 pl-1">
+                        {tf.options.map((opt, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <input
+                              className={inputBase + " flex-1 min-w-0"}
+                              placeholder={`Choice ${i + 1} (e.g. Standard)`}
+                              value={opt}
+                              onChange={(e) => {
+                                const options = [...tf.options];
+                                options[i] = e.target.value;
+                                updateTierField(t.key, tf.key, { options });
+                              }}
+                            />
+                            <span className="shrink-0 text-xs text-gray-500">+$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className={inputBase + " w-20 shrink-0"}
+                              placeholder="0"
+                              value={tf.option_prices[i] ? (tf.option_prices[i] / 100).toString() : ""}
+                              onChange={(e) => {
+                                const option_prices = tf.options.map((_, j) =>
+                                  j === i ? Math.round((parseFloat(e.target.value) || 0) * 100) : tf.option_prices[j] ?? 0
+                                );
+                                updateTierField(t.key, tf.key, { option_prices });
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateTierField(t.key, tf.key, {
+                                  options: tf.options.filter((_, j) => j !== i),
+                                  option_prices: tf.option_prices.filter((_, j) => j !== i),
+                                })
+                              }
+                              className="shrink-0 px-1 text-gray-400 hover:text-red-600"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateTierField(t.key, tf.key, {
+                              options: [...tf.options, ""],
+                              option_prices: [...tf.option_prices, 0],
+                            })
+                          }
+                          className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                        >
+                          + Add choice
+                        </button>
+                      </div>
                     )}
                     {(tf.field_type === "yesno" || tf.field_type === "checkbox") && (
                       <div className="flex flex-wrap items-center gap-1.5 pl-1 text-xs text-gray-600 dark:text-gray-400">

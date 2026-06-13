@@ -51,6 +51,7 @@ export type EventTierFieldInput = {
   options: string[];
   required: boolean;
   price_adjust_cents: number; // applied when a Yes/No or checkbox field is yes/checked
+  option_prices: number[]; // for select fields: cents per option (index-aligned)
 };
 
 export type EventTierInput = {
@@ -193,6 +194,7 @@ export async function saveEvent(payload: EventPayload): Promise<SaveEventResult>
             f.field_type === "yesno" || f.field_type === "checkbox"
               ? Math.round(f.price_adjust_cents || 0)
               : 0,
+          option_prices: f.field_type === "select" ? (f.option_prices ?? []).map((c) => Math.round(c || 0)) : [],
         },
       }))
     );

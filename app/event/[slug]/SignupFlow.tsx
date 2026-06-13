@@ -28,6 +28,7 @@ type GenericField = {
   options: string[];
   required: boolean;
   priceAdjustCents?: number; // +/- to the attendee's price when yes/checked (tier fields only)
+  optionPrices?: number[]; // for select fields: cents per option, index-aligned with options
 };
 
 type AttendeeDraft = {
@@ -96,6 +97,7 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
               options: f.options ?? [],
               required: f.required,
               priceAdjustCents: f.price_adjust_cents ?? 0,
+              optionPrices: f.option_prices ?? [],
             }));
           // Common-attribute pseudo-fields (grade/shirt size/birthdate) for any
           // tier. Keyed by their label so the stored value is self-describing
@@ -257,6 +259,9 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
           for (const f of t.attendeeFields) {
             if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes[f.id] === true) {
               adj += f.priceAdjustCents ?? 0;
+            } else if (f.field_type === "select" && (f.optionPrices?.length ?? 0) > 0) {
+              const idx = f.options.indexOf(a.attributes[f.id] as string);
+              if (idx >= 0) adj += f.optionPrices![idx] ?? 0;
             }
           }
           sum += Math.max(0, t.amount_cents + adj);
@@ -948,9 +953,12 @@ function FieldInput({
         <label className={labelCls}>{field.label}{req}</label>
         <select className={inputCls} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)}>
           <option value="">— Select —</option>
-          {field.options.map((o) => (
-            <option key={o} value={o}>{o}</option>
-          ))}
+          {field.options.map((o, i) => {
+            const p = field.optionPrices?.[i] ?? 0;
+            return (
+              <option key={o} value={o}>{o}{p ? ` (${p > 0 ? "+" : "−"}${money(Math.abs(p))})` : ""}</option>
+            );
+          })}
         </select>
       </div>
     );

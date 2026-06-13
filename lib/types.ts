@@ -166,6 +166,9 @@ export interface EventTierField {
   // Adjusts the attendee's price when this Yes/No or checkbox field is answered
   // yes/checked (cents; may be negative for a discount). Ignored for other types.
   price_adjust_cents: number;
+  // For select fields: cents per option, index-aligned with `options`. Picking
+  // an option adds its amount to the attendee's price.
+  option_prices: number[];
 }
 
 // Roster attributes that can be prefilled per kid on the Player tier.

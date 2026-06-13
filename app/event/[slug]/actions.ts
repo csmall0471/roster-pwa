@@ -297,7 +297,14 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   // amounts/labels (never trust the client). Each input attendee = one paid unit.
   // Attribute keys are remapped from field id → label so stored data is
   // self-describing for the coach dashboard.
-  type TierFieldRow = { id: string; label: string; field_type: string; price_adjust_cents: number };
+  type TierFieldRow = {
+    id: string;
+    label: string;
+    field_type: string;
+    price_adjust_cents: number;
+    options: string[];
+    option_prices: number[];
+  };
   type TierRow = {
     id: string;
     label: string;
@@ -330,6 +337,9 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     for (const f of t.event_tier_fields ?? []) {
       if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes?.[f.id] === true) {
         adjust += f.price_adjust_cents ?? 0;
+      } else if (f.field_type === "select" && (f.option_prices?.length ?? 0) > 0) {
+        const idx = (f.options ?? []).indexOf(a.attributes?.[f.id] as string);
+        if (idx >= 0) adjust += f.option_prices[idx] ?? 0;
       }
     }
     const unitAmount = Math.max(0, t.amount_cents + adjust);
