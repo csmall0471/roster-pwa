@@ -13,10 +13,13 @@ export function venmoPayLink(payUrl: string | null, note: string, amountCents: n
     const segs = u.pathname.split("/").filter((s) => s && s.toLowerCase() !== "u");
     const handle = segs[segs.length - 1];
     if (!handle) return payUrl;
-    const params = new URLSearchParams({ txn: "pay" });
-    if (amountCents > 0) params.set("amount", (amountCents / 100).toFixed(2));
-    if (note) params.set("note", note);
-    return `https://venmo.com/${handle}?${params.toString()}`;
+    // Build the query with percent-encoding (encodeURIComponent → spaces as
+    // %20). URLSearchParams uses form-encoding (spaces as "+"), which Venmo's
+    // note field renders literally as plus signs.
+    const parts = ["txn=pay"];
+    if (amountCents > 0) parts.push(`amount=${(amountCents / 100).toFixed(2)}`);
+    if (note) parts.push(`note=${encodeURIComponent(note)}`);
+    return `https://venmo.com/${handle}?${parts.join("&")}`;
   } catch {
     return payUrl;
   }
