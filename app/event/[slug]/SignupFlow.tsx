@@ -37,9 +37,20 @@ type AttendeeDraft = {
   playerId: string | null;
   attributes: Record<string, string | number | boolean>;
   status: AttendeeStatus;
+  // Sibling tier only: first/last edited separately (last is pre-filled with the
+  // family surname). `name` stays the combined source of truth for submit.
+  firstName?: string;
+  lastName?: string;
 };
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+const splitName = (full: string): { firstName: string; lastName: string } => {
+  const parts = (full ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { firstName: parts[0] ?? "", lastName: "" };
+  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
+};
+const joinName = (first: string, last: string) => `${(first ?? "").trim()} ${(last ?? "").trim()}`.trim();
 
 let keySeq = 0;
 const newKey = () => `a${keySeq++}`;
@@ -75,6 +86,8 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
   // form — attendees per tier
   const [attendees, setAttendees] = useState<Record<string, AttendeeDraft[]>>({});
   const [counts, setCounts] = useState<Record<string, number>>({});
+  // Family surname (from the kids/parent), pre-filled as a new sibling's last name.
+  const [familyLast, setFamilyLast] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -141,6 +154,11 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
   const applyIdentified = useCallback(
     (parent: IdentifiedParent, fallbackPhone: string | null) => {
       setParentId(parent.parent_id);
+
+      // Family surname for pre-filling a new sibling's last name: prefer the
+      // kids' surname, else the parent's.
+      const kidLast = parent.players[0]?.name.trim().split(/\s+/).pop() ?? "";
+      setFamilyLast(kidLast || parent.last_name || "");
 
       const existing = parent.existing_signup;
       // A prior DECLINE shouldn't lock them into an empty form — show the banner
@@ -219,7 +237,8 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
               const fid = labelToId.get(labelKey);
               if (fid !== undefined) attrs[fid] = v;
             }
-            return { key: newKey(), name: s.name, playerId: null, attributes: attrs, status: "attending" as const };
+            const { firstName, lastName } = splitName(s.name);
+            return { key: newKey(), name: s.name, firstName, lastName, playerId: null, attributes: attrs, status: "attending" as const };
           }),
         }));
       }
@@ -328,12 +347,14 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
   }
 
   // Attendee helpers
-  const addAttendee = (tierId: string) =>
+  const addAttendee = (tier: { id: string; is_sibling: boolean }) =>
     setAttendees((a) => ({
       ...a,
-      [tierId]: [
-        ...(a[tierId] ?? []),
-        { key: newKey(), name: "", playerId: null, attributes: {}, status: "attending" },
+      [tier.id]: [
+        ...(a[tier.id] ?? []),
+        tier.is_sibling
+          ? { key: newKey(), name: familyLast, firstName: "", lastName: familyLast, playerId: null, attributes: {}, status: "attending" as const }
+          : { key: newKey(), name: "", playerId: null, attributes: {}, status: "attending" as const },
       ],
     }));
   const removeAttendee = (tierId: string, key: string) =>
@@ -601,22 +622,52 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
                     <div className="mt-2 space-y-3">
                       {(attendees[t.id] ?? []).map((a) => {
                         const declined = a.status === "declined";
+                        // Roster players (prefilled from the family) are fixed: name
+                        // is read-only and they can't be removed — only attend/decline.
+                        const lockedPlayer = t.is_player && a.playerId != null;
+                        const nameCls = `${inputCls} ${declined ? "text-gray-400 line-through" : ""}`;
+                        const split = splitName(a.name);
+                        const fn = a.firstName ?? split.firstName;
+                        const ln = a.lastName ?? split.lastName;
                         return (
                           <div key={a.key} className="rounded-lg bg-gray-50 p-2.5">
                             <div className="flex items-center gap-2">
-                              <input
-                                className={`${inputCls} ${declined ? "text-gray-400 line-through" : ""}`}
-                                placeholder={`${t.label} name`}
-                                value={a.name}
-                                onChange={(e) => updateAttendee(t.id, a.key, { name: e.target.value })}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removeAttendee(t.id, a.key)}
-                                className="shrink-0 px-1 text-gray-400 hover:text-red-600"
-                              >
-                                ✕
-                              </button>
+                              {t.is_sibling ? (
+                                <div className="flex flex-1 gap-2">
+                                  <input
+                                    className={nameCls}
+                                    placeholder="First name"
+                                    value={fn}
+                                    onChange={(e) => updateAttendee(t.id, a.key, { firstName: e.target.value, lastName: ln, name: joinName(e.target.value, ln) })}
+                                  />
+                                  <input
+                                    className={nameCls}
+                                    placeholder="Last name"
+                                    value={ln}
+                                    onChange={(e) => updateAttendee(t.id, a.key, { firstName: fn, lastName: e.target.value, name: joinName(fn, e.target.value) })}
+                                  />
+                                </div>
+                              ) : lockedPlayer ? (
+                                <div className={`flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm ${declined ? "text-gray-400 line-through" : "text-gray-900"}`}>
+                                  {a.name}
+                                </div>
+                              ) : (
+                                <input
+                                  className={nameCls}
+                                  placeholder={`${t.label} name`}
+                                  value={a.name}
+                                  onChange={(e) => updateAttendee(t.id, a.key, { name: e.target.value })}
+                                />
+                              )}
+                              {!lockedPlayer && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeAttendee(t.id, a.key)}
+                                  className="shrink-0 px-1 text-gray-400 hover:text-red-600"
+                                >
+                                  ✕
+                                </button>
+                              )}
                             </div>
                             <div className="mt-2 inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-xs font-medium">
                               {(["attending", "declined"] as const).map((s) => (
@@ -653,7 +704,7 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
                       })}
                       <button
                         type="button"
-                        onClick={() => addAttendee(t.id)}
+                        onClick={() => addAttendee({ id: t.id, is_sibling: t.is_sibling })}
                         className="text-sm font-medium text-blue-600 hover:text-blue-800"
                       >
                         + Add {t.label.toLowerCase()}

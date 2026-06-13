@@ -406,12 +406,16 @@ async function sendInviteEmail(
       `<p style="margin:0 0 12px;font-size:15px;color:#111827;">You're invited to <strong>${esc(title)}</strong>.</p>` +
       details +
       `<div style="margin:18px 0;">${btn("RSVP / Sign up", url)}</div>` +
+      `<table role="presentation" width="100%" style="margin:0 0 14px;border-collapse:collapse;"><tr><td style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.55;color:#1e3a8a;">` +
+      `<strong>New here?</strong> It&rsquo;s quick — just enter your phone number on the signup page and your info (and all your players) fills in automatically. No account or password to set up.` +
+      `</td></tr></table>` +
       `<p style="margin:0;font-size:13px;color:#6b7280;">Or open this link: <a href="${url}" style="color:#2563eb;">${esc(url)}</a></p>`,
   });
   const text =
     `Hi ${parent.first_name}, you're invited to ${title}.\n\n` +
     (description?.trim() ? `${description.trim()}\n\n` : "") +
-    `RSVP / sign up: ${url}`;
+    `RSVP / sign up: ${url}\n\n` +
+    `New here? Just enter your phone number on the signup page and your info (and all your players) fills in automatically — no account or password needed.`;
 
   const { Resend } = await import("resend");
   const resend = new Resend(process.env.RESEND_API_KEY);
