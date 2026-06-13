@@ -402,3 +402,89 @@ async function sendInviteEmail(
   });
   if (error) throw new Error(error.message);
 }
+
+// ── AI pre-fill ───────────────────────────────────────────────────────────────
+// Paste a raw event email/flyer; Claude distills it into the form fields a parent
+// needs (title, parent-relevant description, location, dates). Internal/marketing
+// fluff (fundraising asks, unrelated promos) is dropped. Dates only when clearly
+// present — never guessed.
+
+export type EventDraft = {
+  title: string;
+  description: string;
+  location: string;
+  starts_at: string; // "YYYY-MM-DDTHH:MM" (local) or "" — feeds <input type=datetime-local>
+  ends_at: string;
+  signup_deadline: string;
+};
+export type ExtractDraftResult = { ok: true; draft: EventDraft } | { error: string };
+
+export async function extractEventDraft(rawText: string): Promise<ExtractDraftResult> {
+  const supabase = await createClient();
+  if (!(await requireCoach(supabase))) return { error: "Not authorized" };
+
+  const text = (rawText ?? "").trim();
+  if (text.length < 20) return { error: "Paste a bit more text to work from." };
+
+  const today = new Date().toISOString().split("T")[0];
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 3 });
+
+  const SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      title: { type: "string", description: "Short, clear event name." },
+      description: {
+        type: "string",
+        description:
+          "Markdown. ONLY the details an attending parent/volunteer needs to show up prepared: what it is, key logistics (arrive-early, dress code, age/ratio rules, parking/carpool, what to bring), and a contact. Short paragraphs + bullet lists. Omit fundraising asks, donation solicitations, unrelated promos, and anything not actionable for attendees.",
+      },
+      location: { type: "string", description: "Venue and/or address, or \"\" if none stated." },
+      starts_at: { type: "string", description: "\"YYYY-MM-DDTHH:MM\" (24h, local) if a concrete start date/time is present, else \"\". Never guess." },
+      ends_at: { type: "string", description: "\"YYYY-MM-DDTHH:MM\" or \"\"." },
+      signup_deadline: { type: "string", description: "\"YYYY-MM-DDTHH:MM\" or \"\"." },
+    },
+    required: ["title", "description", "location", "starts_at", "ends_at", "signup_deadline"],
+  } as const;
+
+  const SYSTEM =
+    `You turn a pasted event announcement/email into structured fields for a youth-sports team event signup that PARENTS will see. ` +
+    `Today is ${today}; use it to resolve the year for partial dates. ` +
+    `Be faithful to the source — do not invent details. Output dates strictly as "YYYY-MM-DDTHH:MM" or "" when not clearly stated.`;
+
+  try {
+    const msg = await client.messages.create({
+      model: "claude-opus-4-8",
+      max_tokens: 4000,
+      thinking: { type: "adaptive" },
+      system: SYSTEM,
+      output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
+      messages: [{ role: "user", content: text.slice(0, 24000) }],
+    });
+    const block = msg.content.find((b) => b.type === "text");
+    const raw = block && block.type === "text" ? block.text : "";
+    if (!raw) return { error: "Claude returned nothing — try again." };
+    const d = JSON.parse(raw) as Partial<EventDraft>;
+    return {
+      ok: true,
+      draft: {
+        title: d.title ?? "",
+        description: d.description ?? "",
+        location: d.location ?? "",
+        starts_at: d.starts_at ?? "",
+        ends_at: d.ends_at ?? "",
+        signup_deadline: d.signup_deadline ?? "",
+      },
+    };
+  } catch (e) {
+    if (e instanceof Anthropic.APIError) {
+      const msg = e.message ?? "";
+      if (e.status === 400 && /credit balance|billing|too low/i.test(msg))
+        return { error: "Anthropic API credit balance is too low — add credits in the API Console." };
+      if (e.status === 401 || e.status === 403)
+        return { error: "Anthropic API key is invalid or lacks access (ANTHROPIC_API_KEY)." };
+    }
+    return { error: e instanceof Error ? e.message : "Couldn't read that text." };
+  }
+}

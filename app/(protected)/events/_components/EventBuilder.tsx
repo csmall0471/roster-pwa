@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   saveEvent,
+  extractEventDraft,
   type EventPayload,
   type EventFieldInput,
   type EventTierFieldInput,
@@ -87,6 +88,42 @@ export default function EventBuilder({
   const [deadline, setDeadline] = useState(toLocalInput(event?.signup_deadline ?? null));
   const [payUrl, setPayUrl] = useState(event ? event.pay_url ?? "" : DEFAULT_PAY_URL);
   const [payInstructions, setPayInstructions] = useState(event?.pay_instructions ?? "");
+
+  // AI pre-fill: paste raw text → Claude fills the form fields below.
+  const [aiText, setAiText] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiFilled, setAiFilled] = useState(false);
+
+  async function runAiPrefill() {
+    if (aiText.trim().length < 20) {
+      setAiError("Paste a bit more text to work from.");
+      return;
+    }
+    setAiBusy(true);
+    setAiError(null);
+    setAiFilled(false);
+    try {
+      const res = await extractEventDraft(aiText);
+      if ("error" in res) {
+        setAiError(res.error);
+        return;
+      }
+      const d = res.draft;
+      // Only overwrite a field when Claude actually found something for it.
+      if (d.title) setTitle(d.title);
+      if (d.description) setDescription(d.description);
+      if (d.location) setLocation(d.location);
+      if (d.starts_at) setStartsAt(d.starts_at);
+      if (d.ends_at) setEndsAt(d.ends_at);
+      if (d.signup_deadline) setDeadline(d.signup_deadline);
+      setAiFilled(true);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
   const [imageUrls, setImageUrls] = useState<string[]>(event?.image_urls ?? []);
 
   const [fields, setFields] = useState<FieldRow[]>(
@@ -308,6 +345,37 @@ export default function EventBuilder({
           {error}
         </div>
       )}
+
+      {/* AI pre-fill */}
+      <section className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-blue-800 dark:text-blue-300">✨ Pre-fill from text</h2>
+          <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+            Paste an event email or flyer and Claude fills in the title, a parent-friendly description, location,
+            and dates below. It keeps only what attendees need and drops fundraising/marketing fluff. Review before saving.
+          </p>
+        </div>
+        <textarea
+          className={input}
+          rows={4}
+          value={aiText}
+          onChange={(e) => { setAiText(e.target.value); setAiFilled(false); }}
+          placeholder="Paste the event email/flyer text here…"
+        />
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={runAiPrefill}
+            disabled={aiBusy || aiText.trim().length < 20}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {aiBusy && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />}
+            {aiBusy ? "Reading…" : "Pre-fill the form"}
+          </button>
+          {aiError && <span className="text-sm text-red-600 dark:text-red-400">{aiError}</span>}
+          {aiFilled && !aiError && <span className="text-sm text-green-700 dark:text-green-400">Filled in below — review &amp; edit.</span>}
+        </div>
+      </section>
 
       {/* Details */}
       <section className="space-y-4">
