@@ -18,7 +18,7 @@ export default async function EditEventPage({
       .select("*, event_fields(*), event_price_tiers(*, event_tier_fields(*))")
       .eq("id", id)
       .single(),
-    supabase.from("teams").select("id, name").order("name", { ascending: true }),
+    supabase.from("teams").select("id, name, season, age_group, season_start").order("name", { ascending: true }).order("season_start", { ascending: false }),
     supabase.from("event_teams").select("team_id").eq("event_id", id),
   ]);
 

@@ -17,7 +17,22 @@ import {
 } from "@/lib/types";
 import MarkdownEditor from "@/app/_components/MarkdownEditor";
 
-type TeamOption = { id: string; name: string };
+type TeamOption = {
+  id: string;
+  name: string;
+  season?: string | null;
+  age_group?: string | null;
+  season_start?: string | null;
+};
+
+// "Fall 2026 · 10U" — season + year (from season_start, unless already in the
+// season text) + age group, to tell same-named teams apart in the invite list.
+function teamMeta(t: TeamOption): string {
+  const year = t.season_start ? t.season_start.slice(0, 4) : "";
+  const season = t.season ?? "";
+  const showYear = year && !season.includes(year);
+  return [season, showYear ? year : "", t.age_group].filter(Boolean).join(" · ");
+}
 
 type FieldRow = EventFieldInput & { key: string };
 type TierFieldRow = EventTierFieldInput & { key: string };
@@ -445,15 +460,23 @@ export default function EventBuilder({
               />
             )}
             <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-300 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
-              {teams.filter((t) => t.name.toLowerCase().includes(teamFilter.trim().toLowerCase())).map((t) => (
-                <label key={t.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                  <input type="checkbox" className="h-4 w-4" checked={teamIds.includes(t.id)} onChange={() => toggleTeam(t.id)} />
-                  <span className="text-gray-800 dark:text-gray-200">{t.name}</span>
-                  {teamIds[0] === t.id && teamIds.length > 1 && (
-                    <span className="ml-auto rounded-full bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">primary</span>
-                  )}
-                </label>
-              ))}
+              {teams
+                .filter((t) => `${t.name} ${teamMeta(t)}`.toLowerCase().includes(teamFilter.trim().toLowerCase()))
+                .map((t) => {
+                  const meta = teamMeta(t);
+                  return (
+                    <label key={t.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <input type="checkbox" className="h-4 w-4 shrink-0" checked={teamIds.includes(t.id)} onChange={() => toggleTeam(t.id)} />
+                      <span className="min-w-0">
+                        <span className="text-gray-800 dark:text-gray-200">{t.name}</span>
+                        {meta && <span className="text-gray-400 dark:text-gray-500"> · {meta}</span>}
+                      </span>
+                      {teamIds[0] === t.id && teamIds.length > 1 && (
+                        <span className="ml-auto shrink-0 rounded-full bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">primary</span>
+                      )}
+                    </label>
+                  );
+                })}
               {teams.length === 0 && <p className="px-3 py-2 text-sm text-gray-400">No teams yet.</p>}
             </div>
             <p className="mt-1 text-xs text-gray-400">

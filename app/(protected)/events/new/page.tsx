@@ -6,8 +6,9 @@ export default async function NewEventPage() {
   const supabase = await createClient();
   const { data: teams } = await supabase
     .from("teams")
-    .select("id, name")
-    .order("name", { ascending: true });
+    .select("id, name, season, age_group, season_start")
+    .order("name", { ascending: true })
+    .order("season_start", { ascending: false });
 
   return (
     <div>
