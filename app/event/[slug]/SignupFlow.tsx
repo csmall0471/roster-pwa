@@ -243,19 +243,25 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
         }));
       }
 
-      // Prefill the Parent tier with the signed-in parent's own name (one tap to
-      // add themselves). Only seed when nothing's there yet.
+      // Prefill the Parent tier with BOTH parents (the family's parents, not just
+      // whoever signed in). Only seed when nothing's there yet.
       const parentTier = tiers.find((t) => t.is_parent);
-      const parentName = `${parent.first_name} ${parent.last_name}`.trim();
-      if (parentTier && parentTier.collect_attendees && parentName) {
+      const famParents = parent.family_parents.length
+        ? parent.family_parents
+        : [{ name: `${parent.first_name} ${parent.last_name}`.trim() }].filter((p) => p.name);
+      if (parentTier && parentTier.collect_attendees && famParents.length) {
         setAttendees((a) =>
           a[parentTier.id]?.length
             ? a
             : {
                 ...a,
-                [parentTier.id]: [
-                  { key: newKey(), name: parentName, playerId: null, attributes: {}, status: "attending" as const },
-                ],
+                [parentTier.id]: famParents.map((p) => ({
+                  key: newKey(),
+                  name: p.name,
+                  playerId: null,
+                  attributes: {},
+                  status: "attending" as const,
+                })),
               }
         );
       }

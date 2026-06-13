@@ -57,6 +57,9 @@ export type IdentifiedParent = {
   phone: string | null;
   players: SignupPlayer[];
   siblings: SavedSibling[];
+  // Everyone in the family (the signed-in parent + co-parents who share a kid),
+  // so the Parent tier can pre-fill both parents — not just whoever logged in.
+  family_parents: { name: string }[];
   existing_signup: ExistingSignup | null;
 };
 
@@ -187,6 +190,17 @@ export async function identifyParent(
     }
   }
 
+  // All parents in the family (signed-in parent first), for the Parent tier.
+  const familyIds = await familyParentIds(service, parentId);
+  const { data: famRows } = await service
+    .from("parents")
+    .select("id, first_name, last_name")
+    .in("id", familyIds);
+  const family_parents = [...(famRows ?? [])]
+    .sort((a, b) => (a.id === parentId ? -1 : b.id === parentId ? 1 : 0))
+    .map((p) => ({ name: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() }))
+    .filter((p) => p.name);
+
   return {
     parent_id: parent.id,
     first_name: parent.first_name ?? "",
@@ -195,6 +209,7 @@ export async function identifyParent(
     phone: parent.phone ?? null,
     players,
     siblings,
+    family_parents,
     existing_signup,
   };
 }
