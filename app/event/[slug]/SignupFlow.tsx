@@ -223,6 +223,23 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
           }),
         }));
       }
+
+      // Prefill the Parent tier with the signed-in parent's own name (one tap to
+      // add themselves). Only seed when nothing's there yet.
+      const parentTier = tiers.find((t) => t.is_parent);
+      const parentName = `${parent.first_name} ${parent.last_name}`.trim();
+      if (parentTier && parentTier.collect_attendees && parentName) {
+        setAttendees((a) =>
+          a[parentTier.id]?.length
+            ? a
+            : {
+                ...a,
+                [parentTier.id]: [
+                  { key: newKey(), name: parentName, playerId: null, attributes: {}, status: "attending" as const },
+                ],
+              }
+        );
+      }
     },
     [tiers, kidAttributes]
   );

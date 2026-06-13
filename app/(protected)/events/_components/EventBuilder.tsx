@@ -45,6 +45,7 @@ type TierRow = {
   collect_attendees: boolean;
   player_attributes: string[];
   is_sibling: boolean;
+  is_parent: boolean;
   fields: TierFieldRow[];
 };
 
@@ -170,6 +171,7 @@ export default function EventBuilder({
       collect_attendees: t.collect_attendees,
       player_attributes: t.player_attributes ?? [],
       is_sibling: t.is_sibling,
+      is_parent: t.is_parent ?? false,
       fields: [...(t.event_tier_fields ?? [])]
         .sort((a, b) => a.position - b.position)
         .map((f) => ({
@@ -195,6 +197,7 @@ export default function EventBuilder({
         collect_attendees: true,
         player_attributes: [],
         is_sibling: false,
+        is_parent: false,
         fields: [],
       });
     }
@@ -252,6 +255,7 @@ export default function EventBuilder({
         collect_attendees: false,
         player_attributes: [],
         is_sibling: false,
+        is_parent: false,
         fields: [],
       },
     ]);
@@ -301,13 +305,23 @@ export default function EventBuilder({
           : x
       )
     );
-  // Only one tier can be the sibling tier; flagging it implies collecting names.
+  // Only one tier can be the sibling tier; flagging it implies collecting names
+  // and clears the parent flag on the same tier (a tier is one special kind).
   const setSiblingTier = (tierKey: string, on: boolean) =>
     setTiers((t) =>
       t.map((x) =>
         x.key === tierKey
-          ? { ...x, is_sibling: on, collect_attendees: on ? true : x.collect_attendees }
+          ? { ...x, is_sibling: on, is_parent: on ? false : x.is_parent, collect_attendees: on ? true : x.collect_attendees }
           : { ...x, is_sibling: on ? false : x.is_sibling }
+      )
+    );
+  // Same for the parent tier.
+  const setParentTier = (tierKey: string, on: boolean) =>
+    setTiers((t) =>
+      t.map((x) =>
+        x.key === tierKey
+          ? { ...x, is_parent: on, is_sibling: on ? false : x.is_sibling, collect_attendees: on ? true : x.collect_attendees }
+          : { ...x, is_parent: on ? false : x.is_parent }
       )
     );
 
@@ -344,6 +358,7 @@ export default function EventBuilder({
         collect_attendees: t.collect_attendees,
         player_attributes: t.player_attributes,
         is_sibling: t.is_sibling,
+        is_parent: t.is_parent,
         fields: t.fields.map((f) => {
           // Drop blank option rows, keeping each option's price aligned.
           const pairs =
@@ -576,14 +591,24 @@ export default function EventBuilder({
             </label>
 
             {!t.is_player && (
-              <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                <input
-                  type="checkbox"
-                  checked={t.is_sibling}
-                  onChange={(e) => setSiblingTier(t.key, e.target.checked)}
-                />
-                This is the Sibling tier — remember &amp; pre-fill the family&apos;s siblings next time
-              </label>
+              <>
+                <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={t.is_sibling}
+                    onChange={(e) => setSiblingTier(t.key, e.target.checked)}
+                  />
+                  This is the Sibling tier — remember &amp; pre-fill the family&apos;s siblings next time
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={t.is_parent}
+                    onChange={(e) => setParentTier(t.key, e.target.checked)}
+                  />
+                  This is the Parent tier — pre-fill the signed-in parent&apos;s name
+                </label>
+              </>
             )}
 
             {t.collect_attendees && (
@@ -594,7 +619,9 @@ export default function EventBuilder({
                       ? "Pre-fill these roster fields per kid (parents can edit if wrong):"
                       : t.is_sibling
                         ? "Collect these per sibling — saved & pre-filled next time:"
-                        : "Collect these standard fields per attendee:"}
+                        : t.is_parent
+                          ? "Collect these per parent:"
+                          : "Collect these standard fields per attendee:"}
                   </p>
                   <div className="flex flex-wrap gap-3">
                     {PLAYER_ATTRIBUTE_CATALOG.map((attr) => (

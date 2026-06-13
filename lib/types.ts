@@ -206,6 +206,7 @@ export interface EventPriceTier {
   collect_attendees: boolean;
   player_attributes: PlayerAttributeKey[];
   is_sibling: boolean;
+  is_parent: boolean;
 }
 
 // A saved family sibling, remembered across events.

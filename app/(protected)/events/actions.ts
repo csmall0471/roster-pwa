@@ -62,6 +62,7 @@ export type EventTierInput = {
   collect_attendees: boolean;
   player_attributes: string[];
   is_sibling: boolean;
+  is_parent: boolean;
   fields: EventTierFieldInput[];
 };
 
@@ -166,6 +167,7 @@ export async function saveEvent(payload: EventPayload): Promise<SaveEventResult>
         collect_attendees: t.collect_attendees,
         player_attributes: t.collect_attendees ? t.player_attributes : [],
         is_sibling: t.is_sibling,
+        is_parent: t.is_parent,
       },
     }))
   );
