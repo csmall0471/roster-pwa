@@ -422,23 +422,12 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 via-white to-white">
       <div className="mx-auto max-w-lg px-4 py-8">
-        {/* Hero */}
-        {(event.image_urls ?? [])[0] && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={event.image_urls[0]} alt="" className="mb-5 h-48 w-full rounded-2xl object-cover shadow-sm" />
-        )}
+        {/* Photo carousel */}
+        <EventGallery images={event.image_urls ?? []} />
         <h1 className="text-2xl font-bold text-gray-900">{event.title}</h1>
         <EventMeta event={event} />
         {event.description && (
           <CollapsibleDescription html={renderMarkdown(event.description)} />
-        )}
-        {(event.image_urls ?? []).length > 1 && (
-          <div className="mt-4 flex gap-2 overflow-x-auto">
-            {event.image_urls.slice(1).map((url) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={url} src={url} alt="" className="h-24 w-24 shrink-0 rounded-lg object-cover" />
-            ))}
-          </div>
         )}
 
         {tiers.length > 0 && step !== "done" && (
@@ -731,6 +720,90 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Top-of-page photo carousel: a swipeable, snap-scrolling slideshow of all the
+// event images that also auto-advances. A single image renders as a plain hero;
+// 2+ get dots + auto-rotation (paused briefly after the visitor interacts).
+function EventGallery({ images }: { images: string[] }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+  const pausedUntil = useRef(0);
+
+  const scrollToSlide = useCallback((i: number, smooth = true) => {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollTo({ left: i * el.clientWidth, behavior: smooth ? "smooth" : "auto" });
+  }, []);
+
+  const onScroll = () => {
+    const el = trackRef.current;
+    if (!el) return;
+    setActive(Math.round(el.scrollLeft / el.clientWidth));
+  };
+
+  const pause = () => {
+    pausedUntil.current = Date.now() + 8000;
+  };
+
+  // Auto-advance every few seconds, skipping while the visitor is interacting.
+  useEffect(() => {
+    if (images.length < 2) return;
+    const id = setInterval(() => {
+      if (Date.now() < pausedUntil.current) return;
+      const el = trackRef.current;
+      if (!el) return;
+      const next = (Math.round(el.scrollLeft / el.clientWidth) + 1) % images.length;
+      el.scrollTo({ left: next * el.clientWidth, behavior: "smooth" });
+    }, 4500);
+    return () => clearInterval(id);
+  }, [images.length]);
+
+  if (images.length === 0) return null;
+  if (images.length === 1) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={images[0]} alt="" className="mb-5 h-52 w-full rounded-2xl object-cover shadow-sm" />
+    );
+  }
+
+  return (
+    <div className="mb-5">
+      <div
+        ref={trackRef}
+        onScroll={onScroll}
+        onPointerDown={pause}
+        onTouchStart={pause}
+        className="flex snap-x snap-mandatory overflow-x-auto rounded-2xl shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {images.map((url, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={i}
+            src={url}
+            alt=""
+            className="h-52 w-full shrink-0 snap-center object-cover"
+          />
+        ))}
+      </div>
+      <div className="mt-2 flex justify-center gap-1.5">
+        {images.map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            aria-label={`Photo ${i + 1}`}
+            onClick={() => {
+              pause();
+              scrollToSlide(i);
+            }}
+            className={`h-1.5 rounded-full transition-all ${
+              i === active ? "w-5 bg-gray-700" : "w-1.5 bg-gray-300 hover:bg-gray-400"
+            }`}
+          />
+        ))}
       </div>
     </div>
   );
