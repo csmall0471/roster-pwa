@@ -15,6 +15,17 @@ export type InviteRow = {
   parentIds: string[];
   emailCount: number;
   status: InviteStatus;
+  invited: boolean; // at least one parent was sent an invite
+};
+
+// The funnel buckets you can filter by. Definitions mirror the stat counts:
+// opened/rsvped/declined all imply "invited", and rsvped/declined imply opened.
+type Filter = "invited" | "opened" | "rsvped" | "declined";
+const matchesFilter = (r: InviteRow, f: Filter): boolean => {
+  if (!r.invited) return false;
+  if (f === "invited") return true;
+  if (f === "opened") return r.status === "opened" || r.status === "rsvped" || r.status === "declined";
+  return r.status === f; // rsvped | declined
 };
 
 const BADGE: Record<InviteStatus, { label: string; cls: string }> = {
@@ -41,6 +52,9 @@ export default function InviteRosterPanel({
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(rows.filter((r) => r.status === "none").map((r) => r.key))
   );
+  // Optional funnel filter (click a stat to narrow the list).
+  const [filter, setFilter] = useState<Filter | null>(null);
+  const visible = useMemo(() => (filter ? rows.filter((r) => matchesFilter(r, filter)) : rows), [rows, filter]);
 
   const toggle = (key: string) =>
     setSelected((s) => {
@@ -50,9 +64,15 @@ export default function InviteRosterPanel({
       return next;
     });
 
-  const allKeys = useMemo(() => rows.map((r) => r.key), [rows]);
-  const allSelected = selected.size === allKeys.length && allKeys.length > 0;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allKeys));
+  const visibleKeys = useMemo(() => visible.map((r) => r.key), [visible]);
+  const allSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selected.has(k));
+  const toggleAll = () =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (allSelected) for (const k of visibleKeys) next.delete(k);
+      else for (const k of visibleKeys) next.add(k);
+      return next;
+    });
 
   // Union of parent ids across the selected players.
   const selectedParentIds = useMemo(() => {
@@ -79,13 +99,21 @@ export default function InviteRosterPanel({
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-      {/* Funnel */}
+      {/* Funnel — click a stat to filter the list to that bucket */}
       <div className="grid grid-cols-4 divide-x divide-gray-100 dark:divide-gray-800 border-b border-gray-100 dark:border-gray-800">
-        <Stat label="Invited" value={stats.invited} />
-        <Stat label="Opened" value={stats.opened} />
-        <Stat label="RSVP'd" value={stats.rsvped} />
-        <Stat label="Declined" value={stats.declined} />
+        <Stat label="Invited" value={stats.invited} active={filter === "invited"} onClick={() => setFilter((f) => (f === "invited" ? null : "invited"))} />
+        <Stat label="Opened" value={stats.opened} active={filter === "opened"} onClick={() => setFilter((f) => (f === "opened" ? null : "opened"))} />
+        <Stat label="RSVP'd" value={stats.rsvped} active={filter === "rsvped"} onClick={() => setFilter((f) => (f === "rsvped" ? null : "rsvped"))} />
+        <Stat label="Declined" value={stats.declined} active={filter === "declined"} onClick={() => setFilter((f) => (f === "declined" ? null : "declined"))} />
       </div>
+      {filter && (
+        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 bg-blue-50/50 dark:bg-blue-950/20 px-4 py-1.5 text-xs text-blue-700 dark:text-blue-300">
+          <span>Showing <strong>{filter === "rsvped" ? "RSVP'd" : filter}</strong> — {visible.length} player{visible.length === 1 ? "" : "s"}</span>
+          <button type="button" onClick={() => setFilter(null)} className="font-semibold hover:underline">
+            Clear filter
+          </button>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 dark:border-gray-800 px-4 py-2.5">
@@ -108,7 +136,10 @@ export default function InviteRosterPanel({
 
       {/* Players */}
       <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-96 overflow-y-auto">
-        {rows.map((r) => {
+        {visible.length === 0 && (
+          <li className="px-4 py-6 text-center text-sm text-gray-400 dark:text-gray-500">No players in this bucket.</li>
+        )}
+        {visible.map((r) => {
           const b = BADGE[r.status];
           return (
             <li key={r.key} className="flex items-center gap-3 px-4 py-2.5 text-sm">
@@ -135,11 +166,18 @@ export default function InviteRosterPanel({
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value, active, onClick }: { label: string; value: number; active: boolean; onClick: () => void }) {
   return (
-    <div className="p-3 text-center">
-      <p className="text-xl font-bold text-gray-900 dark:text-white">{value}</p>
-      <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`p-3 text-center transition-colors ${
+        active ? "bg-blue-50 dark:bg-blue-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
+      }`}
+    >
+      <p className={`text-xl font-bold ${active ? "text-blue-700 dark:text-blue-300" : "text-gray-900 dark:text-white"}`}>{value}</p>
+      <p className={`text-xs ${active ? "text-blue-600 dark:text-blue-400 font-medium" : "text-gray-500 dark:text-gray-400"}`}>{label}</p>
+    </button>
   );
 }

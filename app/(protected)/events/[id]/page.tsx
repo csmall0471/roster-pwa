@@ -187,7 +187,15 @@ export default async function EventManagePage({
           : emails < pl.parents.length
             ? ` · ${emails}/${pl.parents.length} have email`
             : "");
-    return { key: pl.id, label: pl.name, sub, parentIds, emailCount: emails, status: bestStatus(parentIds) };
+    return {
+      key: pl.id,
+      label: pl.name,
+      sub,
+      parentIds,
+      emailCount: emails,
+      status: bestStatus(parentIds),
+      invited: parentIds.some((id) => invitedSet.has(id)),
+    };
   });
   // Keep anyone invited who's no longer on the roster visible.
   const rosterParentIds = new Set(rosterPlayers.flatMap((p) => p.parents.map((x) => x.id)));
@@ -200,12 +208,13 @@ export default async function EventManagePage({
       parentIds: [i.parent_id],
       emailCount: i.email ? 1 : 0,
       status: statusOf(i.parent_id),
+      invited: true,
     });
   }
   inviteRows.sort((a, b) => a.label.localeCompare(b.label));
 
   // Funnel over invited players (a player is "invited" if any parent was).
-  const invitedRows = inviteRows.filter((r) => r.parentIds.some((id) => invitedSet.has(id)));
+  const invitedRows = inviteRows.filter((r) => r.invited);
   const engaged = (s: IStatus) => s === "opened" || s === "rsvped" || s === "declined";
   const funnel = {
     invited: invitedRows.length,
