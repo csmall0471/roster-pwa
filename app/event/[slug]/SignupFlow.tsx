@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { renderMarkdown, markdownClass } from "@/lib/markdown";
 import {
@@ -430,10 +430,7 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
         <h1 className="text-2xl font-bold text-gray-900">{event.title}</h1>
         <EventMeta event={event} />
         {event.description && (
-          <div
-            className={`mt-3 text-gray-600 ${markdownClass}`}
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(event.description) }}
-          />
+          <CollapsibleDescription html={renderMarkdown(event.description)} />
         )}
         {(event.image_urls ?? []).length > 1 && (
           <div className="mt-4 flex gap-2 overflow-x-auto">
@@ -735,6 +732,53 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Event description that clamps to a few lines with a "Show more / Show less"
+// toggle. The toggle only appears when the rendered markdown actually overflows
+// the collapsed height (measured on mount / when the content changes).
+function CollapsibleDescription({ html }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const COLLAPSED_PX = 132;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setOverflows(el.scrollHeight > COLLAPSED_PX + 16);
+    check();
+    // Re-check once fonts/images settle so a borderline description toggles right.
+    const t = setTimeout(check, 300);
+    return () => clearTimeout(t);
+  }, [html]);
+
+  const clamp = overflows && !expanded;
+
+  return (
+    <div className="mt-3">
+      <div className="relative">
+        <div
+          ref={ref}
+          className={`text-gray-600 ${markdownClass} overflow-hidden`}
+          style={{ maxHeight: clamp ? COLLAPSED_PX : undefined }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        {clamp && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" />
+        )}
+      </div>
+      {overflows && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-sm font-semibold text-blue-600 hover:text-blue-800"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
     </div>
   );
 }
