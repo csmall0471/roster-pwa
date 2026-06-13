@@ -101,9 +101,22 @@ async function main() {
     if (!COMMIT) { console.log(""); continue; }
 
     // ── Perform the merge ─────────────────────────────────────────────────────
-    // player_parents: ensure canonical has each kid, then drop the dup links.
-    for (const pid of movePlayers) {
-      await sb.from("player_parents").upsert({ player_id: pid, parent_id: canonical }, { onConflict: "player_id,parent_id", ignoreDuplicates: true });
+    // player_parents: re-point each kid link to canonical, PRESERVING the row's
+    // user_id (NOT NULL) + relationship — a bare {player_id,parent_id} upsert
+    // silently fails the user_id constraint and would orphan the kid.
+    const { data: dupLinks } = await sb
+      .from("player_parents")
+      .select("player_id, user_id, relationship")
+      .in("parent_id", dups);
+    const seenPid = new Set();
+    for (const l of dupLinks ?? []) {
+      if (seenPid.has(l.player_id)) continue;
+      seenPid.add(l.player_id);
+      const { error: e } = await sb.from("player_parents").upsert(
+        { player_id: l.player_id, parent_id: canonical, user_id: l.user_id, relationship: l.relationship ?? "parent" },
+        { onConflict: "player_id,parent_id", ignoreDuplicates: true }
+      );
+      if (e) { console.log(`   ! ABORT player_parents re-point ${l.player_id.slice(0, 8)}: ${e.message}`); return; }
     }
     await sb.from("player_parents").delete().in("parent_id", dups);
 

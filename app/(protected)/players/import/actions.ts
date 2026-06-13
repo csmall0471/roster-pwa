@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { phoneKey } from "@/lib/phone";
 
 export type ImportResult = {
   imported: number;
@@ -43,6 +44,23 @@ export async function importPlayers(
 
   let imported = 0;
   const errors: string[] = [];
+
+  // De-dupe parents by normalized phone OR case-insensitive email (a person
+  // imported again with the phone in a different format or a re-cased/alternate
+  // email must reuse the same parent, not spawn a duplicate). Prefetch once and
+  // keep the maps current as new parents are created during this import.
+  const { data: existingParents } = await supabase
+    .from("parents")
+    .select("id, email, phone")
+    .eq("user_id", user.id);
+  const parentByPhone = new Map<string, string>();
+  const parentByEmail = new Map<string, string>();
+  for (const p of existingParents ?? []) {
+    const k = phoneKey(p.phone as string | null);
+    if (k) parentByPhone.set(k, p.id as string);
+    const e = ((p.email as string | null) ?? "").trim().toLowerCase();
+    if (e) parentByEmail.set(e, p.id as string);
+  }
 
   for (const line of dataLines) {
     const cols = line.split("\t");
@@ -87,18 +105,12 @@ export async function importPlayers(
         if (!name) continue;
 
         const { first, last } = parseName(name);
-        let parentId: string | null = null;
+        const pKey = phoneKey(phone);
+        const emailLc = (email || "").trim().toLowerCase();
 
-        // Deduplicate by email — siblings share one parent record
-        if (email) {
-          const { data: existing } = await supabase
-            .from("parents")
-            .select("id")
-            .eq("user_id", user.id)
-            .eq("email", email)
-            .maybeSingle();
-          parentId = existing?.id ?? null;
-        }
+        // Reuse an existing parent matched by phone or email; else create one.
+        let parentId =
+          (pKey && parentByPhone.get(pKey)) || (emailLc && parentByEmail.get(emailLc)) || null;
 
         if (!parentId) {
           const { data: newParent } = await supabase
@@ -113,6 +125,10 @@ export async function importPlayers(
             .select("id")
             .single();
           parentId = newParent?.id ?? null;
+          if (parentId) {
+            if (pKey) parentByPhone.set(pKey, parentId);
+            if (emailLc) parentByEmail.set(emailLc, parentId);
+          }
         }
 
         if (parentId) {

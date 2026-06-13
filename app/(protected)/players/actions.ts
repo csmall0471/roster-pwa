@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { phoneKey } from "@/lib/phone";
 
 export type PlayerFormState = { error?: string } | null;
 
@@ -32,6 +33,24 @@ async function upsertParent(
       .eq("id", existingId)
       .eq("user_id", userId);
     return existingId;
+  }
+
+  // Reuse an existing parent (same coach) matched by normalized phone or
+  // case-insensitive email, so re-adding the same person doesn't create a
+  // duplicate that splits their kids across records.
+  const pKey = phoneKey(phone);
+  const emailLc = email.trim().toLowerCase();
+  if (pKey || emailLc) {
+    const { data: candidates } = await supabase
+      .from("parents")
+      .select("id, phone, email")
+      .eq("user_id", userId);
+    const match = (candidates ?? []).find(
+      (c) =>
+        (pKey && phoneKey(c.phone as string | null) === pKey) ||
+        (emailLc && ((c.email as string | null) ?? "").trim().toLowerCase() === emailLc)
+    );
+    if (match) return match.id as string;
   }
 
   const { data } = await supabase
