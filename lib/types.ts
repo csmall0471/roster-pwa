@@ -126,7 +126,8 @@ export type EventFieldType =
   | "number"
   | "select"
   | "checkbox"
-  | "yesno";
+  | "yesno"
+  | "date";
 
 export interface EventRecord {
   id: string;
@@ -171,6 +172,16 @@ export interface EventTierField {
   option_prices: number[];
 }
 
+// Pickable values for the standard player/sibling attributes, so these are
+// dropdowns (grade, shirt size) / a calendar (birthdate) everywhere they're
+// collected — the event signup tiers and the in-app siblings editor.
+export const GRADE_OPTIONS = [
+  "Pre-K", "K", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th",
+];
+export const SHIRT_SIZE_OPTIONS = [
+  "YXS", "YS", "YM", "YL", "YXL", "AXS", "AS", "AM", "AL", "AXL", "AXXL",
+];
+
 // Roster attributes that can be prefilled per kid on the Player tier.
 export type PlayerAttributeKey = "grade" | "shirt_size" | "date_of_birth";
 
@@ -178,10 +189,11 @@ export const PLAYER_ATTRIBUTE_CATALOG: {
   key: PlayerAttributeKey;
   label: string;
   field_type: EventFieldType;
+  options?: string[];
 }[] = [
-  { key: "grade", label: "Grade", field_type: "text" },
-  { key: "shirt_size", label: "Shirt size", field_type: "text" },
-  { key: "date_of_birth", label: "Birthdate", field_type: "text" },
+  { key: "grade", label: "Grade", field_type: "select", options: GRADE_OPTIONS },
+  { key: "shirt_size", label: "Shirt size", field_type: "select", options: SHIRT_SIZE_OPTIONS },
+  { key: "date_of_birth", label: "Birthdate", field_type: "date" },
 ];
 
 export interface EventPriceTier {

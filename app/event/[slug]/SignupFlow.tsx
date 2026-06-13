@@ -109,7 +109,7 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
               id: c.label,
               label: c.label,
               field_type: c.field_type,
-              options: [],
+              options: c.options ?? [],
               required: false,
               priceAdjustCents: 0,
             }));
@@ -947,14 +947,27 @@ function FieldInput({
       </div>
     );
   }
-  if (field.field_type === "select") {
+  if (field.field_type === "date") {
     return (
       <div>
         <label className={labelCls}>{field.label}{req}</label>
-        <select className={inputCls} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)}>
+        <input className={inputCls} type="date" value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />
+      </div>
+    );
+  }
+  if (field.field_type === "select") {
+    const cur = (value as string) ?? "";
+    // Keep a prefilled value that isn't one of the choices (e.g. an older
+    // free-text grade/size) selectable so it isn't silently dropped.
+    const opts = cur && !field.options.includes(cur) ? [cur, ...field.options] : field.options;
+    return (
+      <div>
+        <label className={labelCls}>{field.label}{req}</label>
+        <select className={inputCls} value={cur} onChange={(e) => onChange(e.target.value)}>
           <option value="">— Select —</option>
-          {field.options.map((o, i) => {
-            const p = field.optionPrices?.[i] ?? 0;
+          {opts.map((o) => {
+            const i = field.options.indexOf(o);
+            const p = i >= 0 ? field.optionPrices?.[i] ?? 0 : 0;
             return (
               <option key={o} value={o}>{o}{p ? ` (${p > 0 ? "+" : "−"}${money(Math.abs(p))})` : ""}</option>
             );

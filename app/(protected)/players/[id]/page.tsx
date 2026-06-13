@@ -195,7 +195,7 @@ export default async function PlayerDetailPage({
 
       {/* Siblings */}
       <div className="mb-6">
-        <SiblingsSection playerId={id} initialSiblings={siblings} linkablePlayers={linkablePlayers} />
+        <SiblingsSection playerId={id} playerLastName={player.last_name as string} initialSiblings={siblings} linkablePlayers={linkablePlayers} />
       </div>
 
       {/* Season history */}

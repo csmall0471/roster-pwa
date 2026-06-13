@@ -9,6 +9,7 @@ import {
   linkPlayerSibling,
   type SiblingItem,
 } from "@/app/actions/siblings";
+import { GRADE_OPTIONS, SHIRT_SIZE_OPTIONS } from "@/lib/types";
 
 export type LinkablePlayer = { id: string; name: string };
 
@@ -18,11 +19,21 @@ const ATTRS = ["Grade", "Shirt size", "Birthdate"] as const;
 const inputCls =
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 
-type Draft = { name: string } & Record<(typeof ATTRS)[number], string>;
+type Draft = { firstName: string; lastName: string } & Record<(typeof ATTRS)[number], string>;
 
-function toDraft(s?: SiblingItem): Draft {
+// Split a stored "First Last" name; everything before the last token is the
+// first name (handles middle names), the last token is the surname.
+function splitName(full: string): { firstName: string; lastName: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { firstName: full.trim(), lastName: "" };
+  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
+}
+
+function toDraft(s: SiblingItem | undefined, defaultLastName: string): Draft {
+  const { firstName, lastName } = s ? splitName(s.name) : { firstName: "", lastName: defaultLastName };
   return {
-    name: s?.name ?? "",
+    firstName,
+    lastName,
     Grade: String(s?.attributes?.["Grade"] ?? ""),
     "Shirt size": String(s?.attributes?.["Shirt size"] ?? ""),
     Birthdate: String(s?.attributes?.["Birthdate"] ?? ""),
@@ -48,27 +59,31 @@ function summary(s: SiblingItem): string {
 function SiblingForm({
   playerId,
   sibling,
+  defaultLastName,
   onDone,
 }: {
   playerId: string;
   sibling?: SiblingItem;
+  defaultLastName: string;
   onDone: () => void;
 }) {
   const router = useRouter();
-  const [draft, setDraft] = useState<Draft>(toDraft(sibling));
+  const [draft, setDraft] = useState<Draft>(toDraft(sibling, defaultLastName));
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  const fullName = `${draft.firstName.trim()} ${draft.lastName.trim()}`.trim();
+
   function save() {
-    if (!draft.name.trim()) {
-      setError("Name is required.");
+    if (!draft.firstName.trim()) {
+      setError("First name is required.");
       return;
     }
     setError(null);
     start(async () => {
       const res = sibling
-        ? await updateSibling(playerId, sibling.name, draft.name, buildAttrs(draft))
-        : await addSibling(playerId, draft.name, buildAttrs(draft));
+        ? await updateSibling(playerId, sibling.name, fullName, buildAttrs(draft))
+        : await addSibling(playerId, fullName, buildAttrs(draft));
       if (res.error) setError(res.error);
       else {
         onDone();
@@ -91,23 +106,58 @@ function SiblingForm({
 
   return (
     <div className="px-4 py-3 space-y-2 bg-gray-50 dark:bg-gray-800/50">
-      <input
-        className={inputCls}
-        placeholder="Sibling name"
-        value={draft.name}
-        onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-        autoFocus
-      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          className={inputCls}
+          placeholder="Sibling first name"
+          value={draft.firstName}
+          onChange={(e) => setDraft((d) => ({ ...d, firstName: e.target.value }))}
+          autoFocus
+        />
+        <input
+          className={inputCls}
+          placeholder="Last name"
+          value={draft.lastName}
+          onChange={(e) => setDraft((d) => ({ ...d, lastName: e.target.value }))}
+        />
+      </div>
       <div className="grid grid-cols-3 gap-2">
-        {ATTRS.map((k) => (
-          <input
-            key={k}
-            className={inputCls}
-            placeholder={k}
-            value={draft[k]}
-            onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
-          />
-        ))}
+        {ATTRS.map((k) => {
+          const labelEl = (
+            <span className="block text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-0.5">{k}</span>
+          );
+          if (k === "Birthdate") {
+            return (
+              <label key={k}>
+                {labelEl}
+                <input
+                  className={inputCls}
+                  type="date"
+                  value={draft[k]}
+                  onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+                />
+              </label>
+            );
+          }
+          const options = k === "Grade" ? GRADE_OPTIONS : SHIRT_SIZE_OPTIONS;
+          const cur = draft[k];
+          const opts = cur && !options.includes(cur) ? [cur, ...options] : options;
+          return (
+            <label key={k}>
+              {labelEl}
+              <select
+                className={inputCls}
+                value={cur}
+                onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+              >
+                <option value="">—</option>
+                {opts.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </label>
+          );
+        })}
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex items-center gap-2 pt-1">
@@ -245,10 +295,12 @@ function LinkPlayerControl({
 
 export default function SiblingsSection({
   playerId,
+  playerLastName = "",
   initialSiblings,
   linkablePlayers = [],
 }: {
   playerId: string;
+  playerLastName?: string; // pre-fills a new sibling's last name (same family)
   initialSiblings: SiblingItem[];
   linkablePlayers?: LinkablePlayer[];
 }) {
@@ -309,13 +361,13 @@ export default function SiblingsSection({
                 <span className="text-gray-400 text-xs">{isOpen ? "Close" : "Edit"}</span>
               </button>
               {isOpen && (
-                <SiblingForm playerId={playerId} sibling={s} onDone={() => setOpenName(null)} />
+                <SiblingForm playerId={playerId} sibling={s} defaultLastName={playerLastName} onDone={() => setOpenName(null)} />
               )}
             </div>
           );
         })}
 
-        {adding && <SiblingForm playerId={playerId} onDone={() => setAdding(false)} />}
+        {adding && <SiblingForm playerId={playerId} defaultLastName={playerLastName} onDone={() => setAdding(false)} />}
 
         {available.length > 0 && <LinkPlayerControl playerId={playerId} players={available} />}
       </div>

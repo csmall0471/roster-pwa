@@ -173,7 +173,7 @@ export default async function ParentPlayerPage({
       />
 
       {/* Siblings */}
-      <SiblingsSection playerId={player.id} initialSiblings={siblings} />
+      <SiblingsSection playerId={player.id} playerLastName={player.last_name} initialSiblings={siblings} />
 
       {/* Season history */}
       {seasons && seasons.length > 0 && (
