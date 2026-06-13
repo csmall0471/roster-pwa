@@ -96,13 +96,12 @@ export default async function EventManagePage({
     recentOpens,
   };
 
-  // Team roster → (1) recipients for the text/share button, and (2) a per-parent
-  // map (with their kids' names) that feeds the per-player invite picker.
+  // Team roster → recipients (for the text/share button) + a PLAYER-centric
+  // list (each kid with their parents) that feeds the invite picker. Inviting a
+  // player invites all of its parents.
   const recipients: Recipient[] = [];
-  const rosterParents = new Map<
-    string,
-    { id: string; name: string; email: string | null; players: string[] }
-  >();
+  type RPlayer = { id: string; name: string; parents: { id: string; name: string; email: string | null }[] };
+  const rosterPlayers: RPlayer[] = [];
   let teamName: string | null = null;
   if (ev.team_id) {
     const { data: teamRaw } = await supabase
@@ -114,24 +113,23 @@ export default async function EventManagePage({
       .maybeSingle();
     const team = teamRaw as TeamWithParents | null;
     teamName = team?.name ?? null;
-    const seen = new Set<string>();
+    const seenParent = new Set<string>();
+    const seenPlayer = new Set<string>();
     for (const r of team?.roster ?? []) {
-      const playerName = r.players ? `${r.players.first_name} ${r.players.last_name}`.trim() : "";
-      for (const pp of r.players?.player_parents ?? []) {
+      const pl = r.players;
+      if (!pl || seenPlayer.has(pl.id)) continue;
+      seenPlayer.add(pl.id);
+      const parents: RPlayer["parents"] = [];
+      for (const pp of pl.player_parents ?? []) {
         const p = pp.parents;
         if (!p) continue;
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
+        parents.push({ id: p.id, name: `${p.first_name} ${p.last_name}`.trim(), email: p.email });
+        if (!seenParent.has(p.id)) {
+          seenParent.add(p.id);
           recipients.push({ name: `${p.first_name} ${p.last_name}`, email: p.email, phone: p.phone });
-          rosterParents.set(p.id, {
-            id: p.id,
-            name: `${p.first_name} ${p.last_name}`.trim(),
-            email: p.email,
-            players: [],
-          });
         }
-        if (playerName) rosterParents.get(p.id)!.players.push(playerName);
       }
+      rosterPlayers.push({ id: pl.id, name: `${pl.first_name} ${pl.last_name}`.trim(), parents });
     }
   }
 
@@ -158,7 +156,8 @@ export default async function EventManagePage({
   );
   const invitedSet = new Set(invites.map((i) => i.parent_id).filter((x): x is string => Boolean(x)));
 
-  const statusOf = (pid: string): "none" | "invited" | "opened" | "declined" | "rsvped" =>
+  type IStatus = "none" | "invited" | "opened" | "declined" | "rsvped";
+  const statusOf = (pid: string): IStatus =>
     goingSet.has(pid)
       ? "rsvped"
       : declinedSet.has(pid)
@@ -168,34 +167,51 @@ export default async function EventManagePage({
           : invitedSet.has(pid)
             ? "invited"
             : "none";
+  // A player's status is the furthest-along of its parents (a co-parent's RSVP
+  // counts for the kid).
+  const RANK: Record<IStatus, number> = { none: 0, invited: 1, opened: 2, declined: 3, rsvped: 4 };
+  const bestStatus = (ids: string[]): IStatus =>
+    ids.reduce<IStatus>((best, id) => (RANK[statusOf(id)] > RANK[best] ? statusOf(id) : best), "none");
 
-  // Picker rows: every roster parent, plus anyone invited who's no longer on the
-  // roster (so nobody invited disappears from view).
-  const inviteRows = [...rosterParents.values()].map((p) => ({
-    parentId: p.id,
-    name: p.name,
-    email: p.email,
-    players: p.players,
-    status: statusOf(p.id),
-  }));
+  // Player-centric picker rows. Inviting a player emails ALL its parents.
+  const inviteRows = rosterPlayers.map((pl) => {
+    const parentIds = pl.parents.map((p) => p.id);
+    const emails = pl.parents.filter((p) => p.email).length;
+    const names = pl.parents.map((p) => p.name).join(", ");
+    const sub =
+      (names || "No parent on file") +
+      (pl.parents.length === 0
+        ? ""
+        : emails === 0
+          ? " · no email"
+          : emails < pl.parents.length
+            ? ` · ${emails}/${pl.parents.length} have email`
+            : "");
+    return { key: pl.id, label: pl.name, sub, parentIds, emailCount: emails, status: bestStatus(parentIds) };
+  });
+  // Keep anyone invited who's no longer on the roster visible.
+  const rosterParentIds = new Set(rosterPlayers.flatMap((p) => p.parents.map((x) => x.id)));
   for (const i of invites) {
-    if (!i.parent_id || rosterParents.has(i.parent_id)) continue;
+    if (!i.parent_id || rosterParentIds.has(i.parent_id)) continue;
     inviteRows.push({
-      parentId: i.parent_id,
-      name: i.name ?? "Invited parent",
-      email: i.email ?? null,
-      players: [],
+      key: `p:${i.parent_id}`,
+      label: i.name ?? "Invited parent",
+      sub: i.email ?? "invited",
+      parentIds: [i.parent_id],
+      emailCount: i.email ? 1 : 0,
       status: statusOf(i.parent_id),
     });
   }
-  inviteRows.sort((a, b) => (a.players[0] ?? a.name).localeCompare(b.players[0] ?? b.name));
+  inviteRows.sort((a, b) => a.label.localeCompare(b.label));
 
-  // Funnel counts over the people actually invited.
+  // Funnel over invited players (a player is "invited" if any parent was).
+  const invitedRows = inviteRows.filter((r) => r.parentIds.some((id) => invitedSet.has(id)));
+  const engaged = (s: IStatus) => s === "opened" || s === "rsvped" || s === "declined";
   const funnel = {
-    invited: invitedSet.size,
-    opened: [...invitedSet].filter((id) => openedSet.has(id)).length,
-    rsvped: [...invitedSet].filter((id) => goingSet.has(id)).length,
-    declined: [...invitedSet].filter((id) => declinedSet.has(id)).length,
+    invited: invitedRows.length,
+    opened: invitedRows.filter((r) => engaged(r.status)).length,
+    rsvped: invitedRows.filter((r) => r.status === "rsvped").length,
+    declined: invitedRows.filter((r) => r.status === "declined").length,
   };
 
   const dateStr = ev.starts_at
@@ -239,12 +255,27 @@ export default async function EventManagePage({
         )}
       </div>
 
-      {ev.status === "published" && inviteRows.length > 0 && (
+      {ev.status === "published" && (
         <section>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             Invite players
           </h2>
-          <InviteRosterPanel eventId={ev.id} rows={inviteRows} stats={funnel} />
+          {inviteRows.length > 0 ? (
+            <InviteRosterPanel eventId={ev.id} rows={inviteRows} stats={funnel} />
+          ) : (
+            <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4 text-sm text-gray-500 dark:text-gray-400">
+              {ev.team_id
+                ? "This team has no players with linked parents yet, so there's no one to invite."
+                : (
+                  <>
+                    Attach a team to this event to invite its players.{" "}
+                    <Link href={`/events/${ev.id}/edit`} className="font-semibold text-blue-600 hover:underline">
+                      Edit event
+                    </Link>
+                  </>
+                )}
+            </p>
+          )}
         </section>
       )}
 

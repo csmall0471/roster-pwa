@@ -74,6 +74,10 @@ export default function EventBuilder({
   const [error, setError] = useState<string | null>(null);
   const [imgUploading, setImgUploading] = useState(false);
 
+  // Pre-fill the pay link with the coach's Venmo on a NEW event so it doesn't
+  // have to be typed each time. Existing events keep whatever was saved.
+  const DEFAULT_PAY_URL = "https://venmo.com/u/Connor-Small-1";
+
   const [teamId, setTeamId] = useState<string | null>(event?.team_id ?? null);
   const [title, setTitle] = useState(event?.title ?? "");
   const [description, setDescription] = useState(event?.description ?? "");
@@ -81,7 +85,7 @@ export default function EventBuilder({
   const [startsAt, setStartsAt] = useState(toLocalInput(event?.starts_at ?? null));
   const [endsAt, setEndsAt] = useState(toLocalInput(event?.ends_at ?? null));
   const [deadline, setDeadline] = useState(toLocalInput(event?.signup_deadline ?? null));
-  const [payUrl, setPayUrl] = useState(event?.pay_url ?? "");
+  const [payUrl, setPayUrl] = useState(event ? event.pay_url ?? "" : DEFAULT_PAY_URL);
   const [payInstructions, setPayInstructions] = useState(event?.pay_instructions ?? "");
   const [imageUrls, setImageUrls] = useState<string[]>(event?.image_urls ?? []);
 

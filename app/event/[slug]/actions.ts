@@ -17,6 +17,45 @@ import type {
   SignupPlayer,
 } from "@/lib/types";
 
+type ServiceClient = ReturnType<typeof createServiceClient>;
+
+// Every parent in a player's family: the given parent plus anyone who shares a
+// kid with them. Lets BOTH parents of an invited player land on (and edit) the
+// SAME event signup instead of each creating a duplicate.
+async function familyParentIds(service: ServiceClient, parentId: string): Promise<string[]> {
+  const { data: mine } = await service
+    .from("player_parents")
+    .select("player_id")
+    .eq("parent_id", parentId);
+  const playerIds = [...new Set((mine ?? []).map((r) => r.player_id as string))];
+  if (playerIds.length === 0) return [parentId];
+  const { data: co } = await service
+    .from("player_parents")
+    .select("parent_id")
+    .in("player_id", playerIds);
+  return [...new Set([parentId, ...((co ?? []).map((r) => r.parent_id as string))])];
+}
+
+// Turn a Venmo profile/pay link into a one-tap payment link with the amount and
+// a note (kid names + event) prefilled. Non-Venmo links pass through untouched.
+function venmoPayLink(payUrl: string | null, note: string, amountCents: number): string | null {
+  if (!payUrl) return null;
+  try {
+    const u = new URL(payUrl);
+    if (!/(^|\.)venmo\.com$/i.test(u.hostname)) return payUrl;
+    // Handle = last path segment, ignoring a leading "u" (…/u/Handle).
+    const segs = u.pathname.split("/").filter((s) => s && s.toLowerCase() !== "u");
+    const handle = segs[segs.length - 1];
+    if (!handle) return payUrl;
+    const params = new URLSearchParams({ txn: "pay" });
+    if (amountCents > 0) params.set("amount", (amountCents / 100).toFixed(2));
+    if (note) params.set("note", note);
+    return `https://venmo.com/${handle}?${params.toString()}`;
+  } catch {
+    return payUrl;
+  }
+}
+
 // The parent's existing RSVP for the current event, returned so the form can be
 // re-populated and edited in place (rather than creating a duplicate).
 export type ExistingSignup = {
@@ -140,11 +179,13 @@ export async function identifyParent(
   // be re-populated and edited in place instead of creating a duplicate.
   let existing_signup: ExistingSignup | null = null;
   if (eventId) {
+    // Match this family's signup (either parent), so co-parents edit one entry.
+    const familyIds = await familyParentIds(service, parentId);
     const { data: row } = await service
       .from("event_signups")
       .select("id, name, email, phone, responses, attendees, declined")
       .eq("event_id", eventId)
-      .eq("parent_id", parentId)
+      .in("parent_id", familyIds)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -324,6 +365,14 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   // the family is attending (every attendee marked not-attending).
   const declined = isDecline || attendingUnits === 0;
 
+  // Prefill the Venmo note (kid names + event) and amount so the coach can match
+  // the payment without the parent typing anything.
+  const kidNames = attendees
+    .filter((a) => a.is_player && a.status !== "declined" && a.name)
+    .map((a) => a.name as string);
+  const payNote = `${kidNames.length ? kidNames.join(", ") : name} - ${event.title}`;
+  const payUrl = declined ? null : venmoPayLink(event.pay_url, payNote, total_cents);
+
   const email = input.email.trim() || null;
   const phone = input.phone.trim() || null;
   const row = {
@@ -345,11 +394,13 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   let existingId: string | null = null;
   if (input.parent_id) {
     const service = createServiceClient();
+    // Either parent of the family edits the same row.
+    const familyIds = await familyParentIds(service, input.parent_id);
     const { data: existing } = await service
       .from("event_signups")
       .select("id")
       .eq("event_id", input.event_id)
-      .eq("parent_id", input.parent_id)
+      .in("parent_id", familyIds)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -399,7 +450,7 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
       attendees,
       total_cents,
       declined,
-      pay_url: declined ? null : event.pay_url,
+      pay_url: payUrl,
       pay_instructions: declined ? null : event.pay_instructions,
     }).catch(() => {});
   }
@@ -408,7 +459,7 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     ok: true,
     declined,
     total_cents,
-    pay_url: declined ? null : event.pay_url,
+    pay_url: payUrl,
     pay_instructions: declined ? null : event.pay_instructions,
   };
 }

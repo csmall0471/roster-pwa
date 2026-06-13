@@ -41,11 +41,27 @@ export async function getParentEvents(): Promise<ParentEventsResult> {
 
   const service = createServiceClient();
 
+  // A signup made by EITHER parent of the family counts for this parent, so a
+  // co-parent's RSVP resolves the invite for both. Invites stay per-parent.
+  const { data: mine } = await service
+    .from("player_parents")
+    .select("player_id")
+    .eq("parent_id", parentId);
+  const playerIds = [...new Set((mine ?? []).map((r) => r.player_id as string))];
+  let familyIds = [parentId];
+  if (playerIds.length) {
+    const { data: co } = await service
+      .from("player_parents")
+      .select("parent_id")
+      .in("player_id", playerIds);
+    familyIds = [...new Set([parentId, ...((co ?? []).map((r) => r.parent_id as string))])];
+  }
+
   const [{ data: signupRows }, { data: inviteRows }] = await Promise.all([
     service
       .from("event_signups")
       .select("event_id, declined, events!inner(id, slug, title, starts_at, location, status)")
-      .eq("parent_id", parentId)
+      .in("parent_id", familyIds)
       .eq("events.status", "published"),
     service
       .from("event_invites")

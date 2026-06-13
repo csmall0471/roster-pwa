@@ -6,11 +6,14 @@ import { inviteParents } from "../actions";
 
 export type InviteStatus = "none" | "invited" | "opened" | "declined" | "rsvped";
 
+// One row = one player (or an off-roster invited parent). Inviting a row invites
+// every parent in `parentIds`, so both of a kid's parents get notified.
 export type InviteRow = {
-  parentId: string;
-  name: string;
-  email: string | null;
-  players: string[];
+  key: string;
+  label: string; // player name
+  sub: string; // parents / email summary
+  parentIds: string[];
+  emailCount: number;
   status: InviteStatus;
 };
 
@@ -34,34 +37,41 @@ export default function InviteRosterPanel({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<string | null>(null);
-  // Default selection: everyone not yet invited and not yet responded.
+  // Default: pre-select every player not yet invited.
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(rows.filter((r) => r.status === "none").map((r) => r.parentId))
+    () => new Set(rows.filter((r) => r.status === "none").map((r) => r.key))
   );
 
-  const toggle = (id: string) =>
+  const toggle = (key: string) =>
     setSelected((s) => {
       const next = new Set(s);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
-  const allIds = useMemo(() => rows.map((r) => r.parentId), [rows]);
-  const allSelected = selected.size === allIds.length && allIds.length > 0;
-  const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(allIds));
+  const allKeys = useMemo(() => rows.map((r) => r.key), [rows]);
+  const allSelected = selected.size === allKeys.length && allKeys.length > 0;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allKeys));
+
+  // Union of parent ids across the selected players.
+  const selectedParentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rows) if (selected.has(r.key)) for (const id of r.parentIds) ids.add(id);
+    return [...ids];
+  }, [rows, selected]);
 
   function invite() {
-    const ids = [...selected];
-    if (ids.length === 0) return;
+    if (selectedParentIds.length === 0) return;
     setResult(null);
     start(async () => {
-      const res = await inviteParents(eventId, ids);
+      const res = await inviteParents(eventId, selectedParentIds);
       if (res.error) setResult(res.error);
       else
         setResult(
-          `Invited ${res.invited}${res.sent ? ` · emailed ${res.sent}` : ""}${res.failed ? ` · ${res.failed} email failed` : ""}.`
+          `Invited ${selected.size} player${selected.size === 1 ? "" : "s"}` +
+            `${res.sent ? ` · emailed ${res.sent} parent${res.sent === 1 ? "" : "s"}` : ""}` +
+            `${res.failed ? ` · ${res.failed} email failed` : ""}.`
         );
       router.refresh();
     });
@@ -96,27 +106,21 @@ export default function InviteRosterPanel({
         </div>
       </div>
 
-      {/* Roster */}
+      {/* Players */}
       <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-96 overflow-y-auto">
         {rows.map((r) => {
           const b = BADGE[r.status];
-          const checked = selected.has(r.parentId);
-          const label = r.players.length ? r.players.join(", ") : r.name;
-          const sub = r.players.length ? r.name : r.email ?? "no email";
           return (
-            <li key={r.parentId} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+            <li key={r.key} className="flex items-center gap-3 px-4 py-2.5 text-sm">
               <input
                 type="checkbox"
-                checked={checked}
-                onChange={() => toggle(r.parentId)}
+                checked={selected.has(r.key)}
+                onChange={() => toggle(r.key)}
                 className="h-4 w-4 shrink-0"
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-gray-800 dark:text-gray-200">{label}</p>
-                <p className="truncate text-xs text-gray-400 dark:text-gray-500">
-                  {sub}
-                  {!r.email && r.players.length ? " · no email" : ""}
-                </p>
+                <p className="truncate font-medium text-gray-800 dark:text-gray-200">{r.label}</p>
+                <p className="truncate text-xs text-gray-400 dark:text-gray-500">{r.sub}</p>
               </div>
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${b.cls}`}>{b.label}</span>
             </li>
@@ -124,8 +128,8 @@ export default function InviteRosterPanel({
         })}
       </ul>
       <p className="px-4 py-2 text-xs text-gray-400 dark:text-gray-500">
-        Inviting emails the signup link and adds it to the parent&rsquo;s dashboard until they RSVP or decline.
-        Re-inviting someone re-sends the email.
+        Inviting a player emails the signup link to <strong>both parents</strong> and adds it to their dashboard
+        until they RSVP or decline. Either parent edits the same RSVP. Re-inviting re-sends.
       </p>
     </div>
   );
