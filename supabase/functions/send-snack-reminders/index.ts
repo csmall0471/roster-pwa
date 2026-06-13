@@ -45,7 +45,7 @@ Deno.serve(async (_req) => {
       parents(first_name, last_name, email, phone),
       games!inner(
         game_date, game_time, opponent, location, is_home,
-        teams!inner(name, snack_signup_enabled)
+        teams!inner(id, name, snack_signup_enabled)
       )
     `)
     .eq("games.game_date", tomorrowStr)
@@ -94,7 +94,10 @@ Deno.serve(async (_req) => {
 
     // ── SMS via Twilio ────────────────────────────────────────────────────────
     if (signup.reminder_sms && parent?.phone) {
-      const body = `Reminder: You're bringing snacks for ${team?.name} ${vs} tomorrow (${dateStr}${timeStr}).${locationLine} — Coach Connor`;
+      // Body matches the sample messages on /sms-terms (brand prefix, manage
+      // link, STOP) so it lines up with what's registered with the carrier.
+      const smsLoc = game?.location ? ` Location: ${game.location}.` : "";
+      const body = `CS Sports AZ: Reminder — you signed up to bring snacks for ${team?.name} ${vs} tomorrow (${dateStr}${timeStr}).${smsLoc} Manage: cssports-az.com/parent/team/${team?.id}?tab=schedule. Reply STOP to opt out.`;
       const auth = btoa(`${Deno.env.get("TWILIO_ACCOUNT_SID")}:${Deno.env.get("TWILIO_AUTH_TOKEN")}`);
       const res = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${Deno.env.get("TWILIO_ACCOUNT_SID")}/Messages.json`,

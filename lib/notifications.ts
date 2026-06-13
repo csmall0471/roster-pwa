@@ -416,7 +416,8 @@ export async function sendSnackReminder(payload: ReminderPayload): Promise<void>
   }
 
   if (payload.reminderSms && payload.parentPhone) {
-    const body = `Reminder: You're bringing snacks for ${payload.teamName} ${vs} tomorrow (${dateStr}).${locationLine} — Coach Connor`
+    const smsLoc = payload.location ? ` Location: ${payload.location}.` : ""
+    const body = `CS Sports AZ: Reminder — you signed up to bring snacks for ${payload.teamName} ${vs} tomorrow (${dateStr}).${smsLoc} Reply STOP to opt out.`
     // TODO: uncomment when Twilio keys are available
     // const twilio = (await import("twilio")).default;
     // const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -472,7 +473,8 @@ export async function sendTrainingReminder(payload: TrainingReminderPayload): Pr
   }
 
   if (payload.reminderSms && payload.parentPhone) {
-    const body = `Reminder: ${payload.playerName} has training tomorrow — ${payload.title} (${dateStr}).${locLine} — Coach Connor`
+    const smsLoc = payload.location ? ` Location: ${payload.location}.` : ""
+    const body = `CS Sports AZ: Reminder — ${payload.playerName} is registered for ${payload.title} tomorrow (${dateStr}).${smsLoc} Manage: cssports-az.com/parent/training. Reply STOP to opt out.`
     // TODO: uncomment when Twilio keys are available
     // const twilio = (await import("twilio")).default;
     // const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);

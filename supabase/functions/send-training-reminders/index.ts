@@ -216,7 +216,10 @@ Deno.serve(async (_req) => {
 
     // ── SMS ───────────────────────────────────────────────────────────────
     if (signup.reminder_sms && parent?.phone) {
-      const body = `Reminder: ${playerName} has training tomorrow — ${session?.title} (${dateStr}).${locationLine} — Coach Connor`;
+      // Body matches the sample messages on /sms-terms (brand prefix, manage
+      // link, STOP) so it lines up with what's registered with the carrier.
+      const smsLoc = session?.location ? ` Location: ${session.location}.` : "";
+      const body = `CS Sports AZ: Reminder — ${playerName} is registered for ${session?.title} tomorrow (${dateStr}).${smsLoc} Manage: cssports-az.com/parent/training. Reply STOP to opt out.`;
       const auth = btoa(`${Deno.env.get("TWILIO_ACCOUNT_SID")}:${Deno.env.get("TWILIO_AUTH_TOKEN")}`);
       const res = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${Deno.env.get("TWILIO_ACCOUNT_SID")}/Messages.json`,
