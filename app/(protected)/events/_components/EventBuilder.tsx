@@ -66,9 +66,11 @@ function fromLocalInput(v: string): string | null {
 export default function EventBuilder({
   teams,
   event,
+  teamIds: initialTeamIds,
 }: {
   teams: TeamOption[];
   event?: EventWithDetails;
+  teamIds?: string[]; // the event's full team set (for editing); falls back to team_id
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -79,7 +81,14 @@ export default function EventBuilder({
   // have to be typed each time. Existing events keep whatever was saved.
   const DEFAULT_PAY_URL = "https://venmo.com/u/Connor-Small-1";
 
-  const [teamId, setTeamId] = useState<string | null>(event?.team_id ?? null);
+  // Multi-team invite list. Initialize from the event's full set, else its
+  // single primary team. The first selected team is treated as primary.
+  const [teamIds, setTeamIds] = useState<string[]>(
+    initialTeamIds && initialTeamIds.length ? initialTeamIds : event?.team_id ? [event.team_id] : []
+  );
+  const [teamFilter, setTeamFilter] = useState("");
+  const toggleTeam = (id: string) =>
+    setTeamIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const [title, setTitle] = useState(event?.title ?? "");
   const [description, setDescription] = useState(event?.description ?? "");
   const [location, setLocation] = useState(event?.location ?? "");
@@ -293,7 +302,7 @@ export default function EventBuilder({
     }
     const payload: EventPayload = {
       id: event?.id,
-      team_id: teamId,
+      team_ids: teamIds,
       title,
       description,
       location,
@@ -413,15 +422,30 @@ export default function EventBuilder({
             <input type="datetime-local" className={input} value={deadline} onChange={(e) => setDeadline(e.target.value)} />
           </div>
           <div>
-            <label className={label}>Team (for sending invites)</label>
-            <select className={input} value={teamId ?? ""} onChange={(e) => setTeamId(e.target.value || null)}>
-              <option value="">— None —</option>
-              {teams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
+            <label className={label}>Teams to invite</label>
+            {teams.length > 8 && (
+              <input
+                className={`${input} mb-2`}
+                value={teamFilter}
+                onChange={(e) => setTeamFilter(e.target.value)}
+                placeholder="Filter teams…"
+              />
+            )}
+            <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-300 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
+              {teams.filter((t) => t.name.toLowerCase().includes(teamFilter.trim().toLowerCase())).map((t) => (
+                <label key={t.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <input type="checkbox" className="h-4 w-4" checked={teamIds.includes(t.id)} onChange={() => toggleTeam(t.id)} />
+                  <span className="text-gray-800 dark:text-gray-200">{t.name}</span>
+                  {teamIds[0] === t.id && teamIds.length > 1 && (
+                    <span className="ml-auto rounded-full bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">primary</span>
+                  )}
+                </label>
               ))}
-            </select>
+              {teams.length === 0 && <p className="px-3 py-2 text-sm text-gray-400">No teams yet.</p>}
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              Players from every selected team appear in the invite picker. {teamIds.length > 1 ? "The first (primary) team brands the emails." : "Pick one or more."}
+            </p>
           </div>
         </div>
 

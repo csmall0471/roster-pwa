@@ -65,7 +65,10 @@ export type EventTierInput = {
 
 export type EventPayload = {
   id?: string;
-  team_id: string | null;
+  // The invite list can span multiple teams. team_ids[0] becomes the "primary"
+  // team (events.team_id) used for email/brand; the full set is stored in
+  // event_teams and feeds the per-player invite picker.
+  team_ids: string[];
   title: string;
   description: string;
   location: string;
@@ -88,8 +91,9 @@ export async function saveEvent(payload: EventPayload): Promise<SaveEventResult>
   const title = payload.title.trim();
   if (!title) return { error: "Title is required" };
 
+  const teamIds = [...new Set((payload.team_ids ?? []).filter(Boolean))];
   const eventRow = {
-    team_id: payload.team_id,
+    team_id: teamIds[0] ?? null, // primary team (email/brand)
     title,
     description: payload.description.trim() || null,
     location: payload.location.trim() || null,
@@ -114,6 +118,15 @@ export async function saveEvent(payload: EventPayload): Promise<SaveEventResult>
       .single();
     if (error) return { error: error.message };
     eventId = data.id;
+  }
+
+  // Sync the multi-team invite list (replace the whole set).
+  await supabase.from("event_teams").delete().eq("event_id", eventId!);
+  if (teamIds.length) {
+    const { error: etErr } = await supabase
+      .from("event_teams")
+      .insert(teamIds.map((tid) => ({ event_id: eventId, team_id: tid })));
+    if (etErr) return { error: etErr.message };
   }
 
   const fieldsResult = await syncChildren(

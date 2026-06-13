@@ -96,42 +96,53 @@ export default async function EventManagePage({
     recentOpens,
   };
 
-  // Team roster → recipients (for the text/share button) + a PLAYER-centric
-  // list (each kid with their parents) that feeds the invite picker. Inviting a
-  // player invites all of its parents.
+  // The invite list can span multiple teams (event_teams; primary = team_id).
+  // Union their rosters into one PLAYER-centric list (each kid with their
+  // parents, deduped across teams). Inviting a player invites all its parents.
+  const { data: etRows } = await supabase.from("event_teams").select("team_id").eq("event_id", id);
+  const teamIds = [
+    ...new Set([...(ev.team_id ? [ev.team_id] : []), ...((etRows ?? []).map((r) => r.team_id as string))]),
+  ];
+
   const recipients: Recipient[] = [];
-  type RPlayer = { id: string; name: string; parents: { id: string; name: string; email: string | null }[] };
-  const rosterPlayers: RPlayer[] = [];
+  type RPlayer = { id: string; name: string; teams: Set<string>; parents: { id: string; name: string; email: string | null }[] };
+  const rosterPlayerMap = new Map<string, RPlayer>();
+  const seenRecipient = new Set<string>();
   let teamName: string | null = null;
-  if (ev.team_id) {
-    const { data: teamRaw } = await supabase
+  const multiTeam = teamIds.length > 1;
+  if (teamIds.length) {
+    const { data: teamRows } = await supabase
       .from("teams")
       .select(
-        "name, roster(players(id, first_name, last_name, player_parents(parents(id, first_name, last_name, email, phone))))"
+        "id, name, roster(players(id, first_name, last_name, player_parents(parents(id, first_name, last_name, email, phone))))"
       )
-      .eq("id", ev.team_id)
-      .maybeSingle();
-    const team = teamRaw as TeamWithParents | null;
-    teamName = team?.name ?? null;
-    const seenParent = new Set<string>();
-    const seenPlayer = new Set<string>();
-    for (const r of team?.roster ?? []) {
-      const pl = r.players;
-      if (!pl || seenPlayer.has(pl.id)) continue;
-      seenPlayer.add(pl.id);
-      const parents: RPlayer["parents"] = [];
-      for (const pp of pl.player_parents ?? []) {
-        const p = pp.parents;
-        if (!p) continue;
-        parents.push({ id: p.id, name: `${p.first_name} ${p.last_name}`.trim(), email: p.email });
-        if (!seenParent.has(p.id)) {
-          seenParent.add(p.id);
-          recipients.push({ name: `${p.first_name} ${p.last_name}`, email: p.email, phone: p.phone });
+      .in("id", teamIds);
+    const teamArr = (teamRows ?? []) as unknown as (TeamWithParents & { id: string })[];
+    teamName = teamArr.find((t) => t.id === ev.team_id)?.name ?? teamArr[0]?.name ?? null;
+    for (const team of teamArr) {
+      for (const r of team.roster ?? []) {
+        const pl = r.players;
+        if (!pl) continue;
+        let rp = rosterPlayerMap.get(pl.id);
+        if (!rp) {
+          rp = { id: pl.id, name: `${pl.first_name} ${pl.last_name}`.trim(), teams: new Set(), parents: [] };
+          rosterPlayerMap.set(pl.id, rp);
+        }
+        rp.teams.add(team.name);
+        for (const pp of pl.player_parents ?? []) {
+          const p = pp.parents;
+          if (!p) continue;
+          if (!rp.parents.some((x) => x.id === p.id))
+            rp.parents.push({ id: p.id, name: `${p.first_name} ${p.last_name}`.trim(), email: p.email });
+          if (!seenRecipient.has(p.id)) {
+            seenRecipient.add(p.id);
+            recipients.push({ name: `${p.first_name} ${p.last_name}`, email: p.email, phone: p.phone });
+          }
         }
       }
-      rosterPlayers.push({ id: pl.id, name: `${pl.first_name} ${pl.last_name}`.trim(), parents });
     }
   }
+  const rosterPlayers = [...rosterPlayerMap.values()];
 
   // Build the absolute share link server-side so client components don't need
   // to read window (avoids hydration mismatch + effect-driven state).
@@ -178,7 +189,9 @@ export default async function EventManagePage({
     const parentIds = pl.parents.map((p) => p.id);
     const emails = pl.parents.filter((p) => p.email).length;
     const names = pl.parents.map((p) => p.name).join(", ");
+    const teamTag = multiTeam ? `${[...pl.teams].join(", ")} · ` : "";
     const sub =
+      teamTag +
       (names || "No parent on file") +
       (pl.parents.length === 0
         ? ""
