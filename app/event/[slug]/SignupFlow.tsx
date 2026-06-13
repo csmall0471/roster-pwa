@@ -77,6 +77,9 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<Extract<SubmitSignupResult, { ok: true }> | null>(null);
+  // They previously declined this event — show a gentle banner so they know
+  // their current status, while leaving the form ready to change to "going".
+  const [priorDeclined, setPriorDeclined] = useState(false);
 
   const tiers = useMemo(
     () =>
@@ -135,7 +138,10 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
       setParentId(parent.parent_id);
 
       const existing = parent.existing_signup;
-      if (existing) {
+      // A prior DECLINE shouldn't lock them into an empty form — show the banner
+      // but fall through to a fresh kid-prefill so changing to "going" is easy.
+      if (existing && !existing.declined) {
+        setPriorDeclined(false);
         setName(existing.name || `${parent.first_name} ${parent.last_name}`.trim());
         setEmail(existing.email ?? parent.email ?? "");
         setContactPhone(existing.phone ?? parent.phone ?? fallbackPhone ?? "");
@@ -173,6 +179,7 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
         return;
       }
 
+      setPriorDeclined(Boolean(existing?.declined));
       setName(`${parent.first_name} ${parent.last_name}`.trim());
       setEmail(parent.email ?? "");
       setContactPhone(parent.phone ?? fallbackPhone ?? "");
@@ -384,6 +391,34 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
     setStep("done");
   }
 
+  // "Can't make it" — record a decline with no attendees/charge, skipping the
+  // form. Only the name is needed (it's prefilled for identified parents).
+  async function handleDecline() {
+    setSubmitError(null);
+    if (!name.trim()) {
+      setSubmitError("Please enter your name first.");
+      return;
+    }
+    setSubmitting(true);
+    const res = await submitSignup({
+      event_id: event.id,
+      parent_id: parentId,
+      name,
+      email,
+      phone: contactPhone,
+      responses: {},
+      attendees: [],
+      decline: true,
+    });
+    setSubmitting(false);
+    if ("error" in res) {
+      setSubmitError(res.error);
+      return;
+    }
+    setResult(res);
+    setStep("done");
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 via-white to-white">
       <div className="mx-auto max-w-lg px-4 py-8">
@@ -504,6 +539,12 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
 
           {step === "form" && (
             <div className="space-y-5">
+              {priorDeclined && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  You&rsquo;re currently marked <strong>not attending</strong>. Change your mind below and tap
+                  <strong> Sign up</strong> to RSVP.
+                </div>
+              )}
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-gray-900">Your info</h2>
                 <div>
@@ -620,10 +661,47 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
               >
                 {submitting ? "Submitting…" : "Sign up"}
               </button>
+              {!priorDeclined && (
+                <button
+                  onClick={handleDecline}
+                  disabled={submitting}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Can&rsquo;t make it
+                </button>
+              )}
             </div>
           )}
 
-          {step === "done" && result && (
+          {step === "done" && result && result.declined && (
+            <div className="text-center">
+              <div className="text-4xl">👍</div>
+              <h2 className="mt-2 text-lg font-semibold text-gray-900">Thanks for letting us know</h2>
+              <p className="mt-1 text-sm text-gray-600">
+                You&rsquo;re marked as <span className="font-semibold">not attending</span>.
+              </p>
+              <button
+                onClick={() => {
+                  setResult(null);
+                  setPriorDeclined(true);
+                  setStep("form");
+                }}
+                className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Changed my mind — RSVP
+              </button>
+              {parentId && (
+                <a
+                  href="/parent/dashboard"
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Back to the dashboard
+                </a>
+              )}
+            </div>
+          )}
+
+          {step === "done" && result && !result.declined && (
             <div className="text-center">
               <div className="text-4xl">🎉</div>
               <h2 className="mt-2 text-lg font-semibold text-gray-900">You&apos;re signed up!</h2>

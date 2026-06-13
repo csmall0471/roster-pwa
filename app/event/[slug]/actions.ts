@@ -26,6 +26,7 @@ export type ExistingSignup = {
   phone: string | null;
   responses: Record<string, string | number | boolean>;
   attendees: SignupAttendee[];
+  declined: boolean;
 };
 
 export type IdentifiedParent = {
@@ -141,7 +142,7 @@ export async function identifyParent(
   if (eventId) {
     const { data: row } = await service
       .from("event_signups")
-      .select("id, name, email, phone, responses, attendees")
+      .select("id, name, email, phone, responses, attendees, declined")
       .eq("event_id", eventId)
       .eq("parent_id", parentId)
       .order("created_at", { ascending: false })
@@ -159,6 +160,7 @@ export async function identifyParent(
           ...a,
           status: a.status === "declined" ? "declined" : "attending",
         })),
+        declined: Boolean(row.declined),
       };
     }
   }
@@ -223,11 +225,20 @@ export type SubmitSignupInput = {
   phone: string;
   responses: Record<string, string | number | boolean>;
   attendees: SubmitAttendeeInput[];
+  // "Can't make it": record a decline (no attendees, $0) and skip the form's
+  // required-field validation — declining shouldn't force you to fill the form.
+  decline?: boolean;
 };
 
 export type SubmitSignupResult =
   | { error: string }
-  | { ok: true; total_cents: number; pay_url: string | null; pay_instructions: string | null };
+  | {
+      ok: true;
+      declined: boolean;
+      total_cents: number;
+      pay_url: string | null;
+      pay_instructions: string | null;
+    };
 
 export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSignupResult> {
   const supabase = await createClient();
@@ -248,12 +259,16 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   const name = input.name.trim();
   if (!name) return { error: "Please enter your name." };
 
-  // Validate required custom fields.
-  for (const f of event.event_fields ?? []) {
-    if (!f.required) continue;
-    const v = input.responses[f.id];
-    const empty = v === undefined || v === null || v === "" || v === false;
-    if (empty) return { error: `"${f.label}" is required.` };
+  const isDecline = input.decline === true;
+
+  // Validate required custom fields — but a decline skips the form entirely.
+  if (!isDecline) {
+    for (const f of event.event_fields ?? []) {
+      if (!f.required) continue;
+      const v = input.responses[f.id];
+      const empty = v === undefined || v === null || v === "" || v === false;
+      if (empty) return { error: `"${f.label}" is required.` };
+    }
   }
 
   // Build the priced attendee snapshot from the server's authoritative tier
@@ -274,7 +289,9 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   const attendees: SignupAttendee[] = [];
   const siblingDrafts: SavedSibling[] = [];
   let total_cents = 0;
-  for (const a of input.attendees.slice(0, 200)) {
+  let attendingUnits = 0;
+  // A decline carries no attendees; otherwise build the priced snapshot.
+  for (const a of (isDecline ? [] : input.attendees).slice(0, 200)) {
     const t = tierById.get(a.tier_id);
     if (!t) continue;
     const fieldLabel = new Map((t.event_tier_fields ?? []).map((f) => [f.id, f.label]));
@@ -296,9 +313,16 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     });
     // Declined attendees are recorded (so the coach sees who's out) but never
     // charged.
-    if (status === "attending") total_cents += t.amount_cents;
+    if (status === "attending") {
+      total_cents += t.amount_cents;
+      attendingUnits++;
+    }
     if (t.is_sibling && trimmedName) siblingDrafts.push({ name: trimmedName, attributes: labeled });
   }
+
+  // The whole RSVP is a decline if they tapped "can't make it" or nobody from
+  // the family is attending (every attendee marked not-attending).
+  const declined = isDecline || attendingUnits === 0;
 
   const email = input.email.trim() || null;
   const phone = input.phone.trim() || null;
@@ -308,9 +332,10 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     name,
     email,
     phone,
-    responses: input.responses,
+    responses: isDecline ? {} : input.responses,
     attendees,
     total_cents,
+    declined,
   };
 
   // If this parent already RSVP'd to this event, edit that row in place instead
@@ -373,16 +398,18 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
       teamName,
       attendees,
       total_cents,
-      pay_url: event.pay_url,
-      pay_instructions: event.pay_instructions,
+      declined,
+      pay_url: declined ? null : event.pay_url,
+      pay_instructions: declined ? null : event.pay_instructions,
     }).catch(() => {});
   }
 
   return {
     ok: true,
+    declined,
     total_cents,
-    pay_url: event.pay_url,
-    pay_instructions: event.pay_instructions,
+    pay_url: declined ? null : event.pay_url,
+    pay_instructions: declined ? null : event.pay_instructions,
   };
 }
 
@@ -395,19 +422,44 @@ async function sendSignupConfirmation(args: {
   teamName: string | null;
   attendees: SignupAttendee[];
   total_cents: number;
+  declined: boolean;
   pay_url: string | null;
   pay_instructions: string | null;
 }): Promise<void> {
-  const { to, name, title, teamName, attendees, total_cents, pay_url, pay_instructions } = args;
+  const { to, name, title, teamName, attendees, total_cents, declined, pay_url, pay_instructions } = args;
+
+  // A decline gets a short "thanks for letting us know" note instead of an RSVP
+  // receipt — no attendees, no payment.
+  if (declined) {
+    const html = buildEmailHtml({
+      teamName: teamName ?? undefined,
+      htmlBody:
+        `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${esc(name)},</p>` +
+        `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Thanks for letting us know you can&rsquo;t make <strong>${esc(title)}</strong>. We&rsquo;ve marked you as not attending.</p>` +
+        `<p style="margin:0;font-size:13px;color:#6b7280;">Changed your mind? Just re-open the event link to update your RSVP.</p>`,
+    });
+    const { Resend } = await import("resend");
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const from = `${process.env.EMAIL_FROM_NAME ?? "CS Sports"} <${process.env.EMAIL_FROM ?? "onboarding@resend.dev"}>`;
+    const { error } = await resend.emails.send({
+      from,
+      to,
+      subject: `Got it — you can't make ${title}`,
+      html,
+      text: `Hi ${name}, thanks for letting us know you can't make ${title}. We've marked you as not attending. Changed your mind? Re-open the event link to update your RSVP.`,
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
 
   const attending = attendees.filter((a) => (a.status ?? "attending") !== "declined");
-  const declined = attendees.filter((a) => a.status === "declined");
+  const declinedAttendees = attendees.filter((a) => a.status === "declined");
 
   const fmtName = (a: SignupAttendee) => a.name?.trim() || a.tier_label;
   const attendingRows = attending
     .map((a) => infoRow(a.tier_label, fmtName(a)))
     .join("");
-  const declinedRows = declined
+  const declinedRows = declinedAttendees
     .map((a) => infoRow(`${a.tier_label} (not attending)`, fmtName(a)))
     .join("");
 
@@ -440,7 +492,7 @@ async function sendSignupConfirmation(args: {
     `Hi ${name}, you're signed up for ${title}.`,
     "",
     ...attending.map((a) => `Attending — ${a.tier_label}: ${fmtName(a)}`),
-    ...declined.map((a) => `Not attending — ${a.tier_label}: ${fmtName(a)}`),
+    ...declinedAttendees.map((a) => `Not attending — ${a.tier_label}: ${fmtName(a)}`),
   ];
   if (total_cents > 0) textLines.push("", `Total due: ${money(total_cents)}`);
   if (pay_url) textLines.push("", `Pay: ${pay_url}`);

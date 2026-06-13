@@ -236,6 +236,9 @@ export interface EventSignup {
   responses: Record<string, string | number | boolean>;
   attendees: SignupAttendee[];
   total_cents: number;
+  // The parent responded "can't make it" (or marked everyone not-attending):
+  // recorded as a signup so the invite resolves, but nobody's attending/charged.
+  declined: boolean;
   paid: boolean;
   paid_at: string | null;
   coach_notes: string | null;

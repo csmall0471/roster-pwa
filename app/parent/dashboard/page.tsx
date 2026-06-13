@@ -187,7 +187,7 @@ export default async function DashboardPage() {
   calEvents.sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : (a.time ?? "").localeCompare(b.time ?? ""))
 
   // Event RSVPs + invitations (service-role action, authorized by this session)
-  const { rsvped: rsvpedEvents, invited: invitedEvents } = await getParentEvents();
+  const { rsvped: rsvpedEvents, declined: declinedEvents, invited: invitedEvents } = await getParentEvents();
   for (const ev of rsvpedEvents) {
     const { date, time } = splitTimestamp(ev.starts_at);
     calEvents.push({
@@ -410,6 +410,41 @@ export default async function DashboardPage() {
                     </p>
                     <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mt-1">
                       View or edit your RSVP →
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {declinedEvents.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">
+            Not going
+          </h2>
+          <div className="space-y-3">
+            {declinedEvents.map((ev) => (
+              <Link
+                key={ev.id}
+                href={`/event/${ev.slug}`}
+                className="block bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-base mt-0.5">🚫</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-gray-500 dark:text-gray-400">{ev.title}</p>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                        Not going
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      {fmtEventDate(ev.starts_at)}{ev.location ? ` · ${ev.location}` : ""}
+                    </p>
+                    <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mt-1">
+                      Changed your mind? Tap to RSVP →
                     </p>
                   </div>
                 </div>

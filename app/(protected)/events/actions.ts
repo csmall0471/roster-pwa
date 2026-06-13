@@ -276,85 +276,86 @@ export async function deleteEvent(eventId: string): Promise<{ error?: string }> 
   return {};
 }
 
-// ── Group invite email (tracked) ─────────────────────────────────────────────
+// ── Invites (tracked) ────────────────────────────────────────────────────────
 
 type InviteParent = { id: string; first_name: string; last_name: string; email: string | null };
-type InviteTeam = {
-  name: string;
-  roster: { players: { player_parents: { parents: InviteParent | null }[] } | null }[];
-};
 
-export type SendInvitesResult = { sent: number; failed: number; error?: string };
+// Invite a hand-picked set of parents (the per-player picker on the event
+// page). Records the invite (so it shows on each parent's dashboard) and emails
+// the signup link to those with an address. Generalizes sendEventInvites, which
+// blasts the whole team.
+export type InviteParentsResult = { sent: number; failed: number; invited: number; error?: string };
 
-export async function sendEventInvites(eventId: string): Promise<SendInvitesResult> {
+export async function inviteParents(
+  eventId: string,
+  parentIds: string[]
+): Promise<InviteParentsResult> {
   const supabase = await createClient();
-  if (!(await requireCoach(supabase))) return { sent: 0, failed: 0, error: "Not authorized" };
+  if (!(await requireCoach(supabase))) return { sent: 0, failed: 0, invited: 0, error: "Not authorized" };
+
+  const ids = [...new Set(parentIds)].filter(Boolean);
+  if (ids.length === 0) return { sent: 0, failed: 0, invited: 0, error: "Pick at least one player to invite." };
 
   const { data: event } = await supabase
     .from("events")
     .select("id, title, slug, status, team_id, starts_at, location, description")
     .eq("id", eventId)
     .single();
-  if (!event) return { sent: 0, failed: 0, error: "Event not found." };
+  if (!event) return { sent: 0, failed: 0, invited: 0, error: "Event not found." };
   if (event.status !== "published")
-    return { sent: 0, failed: 0, error: "Publish the event before inviting." };
-  if (!event.team_id)
-    return { sent: 0, failed: 0, error: "Attach a team to this event first." };
+    return { sent: 0, failed: 0, invited: 0, error: "Publish the event before inviting." };
 
-  const { data: teamRaw } = await supabase
-    .from("teams")
-    .select("name, roster(players(player_parents(parents(id, first_name, last_name, email))))")
-    .eq("id", event.team_id)
-    .maybeSingle();
-  const team = teamRaw as InviteTeam | null;
+  const service = createServiceClient();
 
-  // Unique parents with an email address.
-  const seen = new Set<string>();
-  const parents: InviteParent[] = [];
-  for (const r of team?.roster ?? []) {
-    for (const pp of r.players?.player_parents ?? []) {
-      const p = pp.parents;
-      if (!p || !p.email || seen.has(p.id)) continue;
-      seen.add(p.id);
-      parents.push(p);
-    }
+  let teamName: string | null = null;
+  if (event.team_id) {
+    const { data: team } = await service.from("teams").select("name").eq("id", event.team_id).maybeSingle();
+    teamName = team?.name ?? null;
   }
-  if (parents.length === 0)
-    return { sent: 0, failed: 0, error: "No parents with an email address on this team." };
+
+  const { data: parentRows } = await service
+    .from("parents")
+    .select("id, first_name, last_name, email")
+    .in("id", ids);
+  const parents = (parentRows ?? []) as InviteParent[];
 
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
   const url = `${proto}://${h.get("host")}/event/${event.slug}`;
-
   const dateStr = event.starts_at
     ? new Date(event.starts_at).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })
     : null;
 
-  const service = createServiceClient();
   let sent = 0;
   let failed = 0;
-
+  let invited = 0;
   for (const p of parents) {
-    try {
-      await sendInviteEmail(p, event.title, team?.name ?? null, url, dateStr, event.location, event.description);
-      await service.from("event_invites").upsert(
-        {
-          event_id: eventId,
-          parent_id: p.id,
-          name: `${p.first_name} ${p.last_name}`.trim(),
-          email: p.email,
-          sent_at: new Date().toISOString(),
-        },
-        { onConflict: "event_id,parent_id" }
-      );
-      sent++;
-    } catch {
-      failed++;
+    // Record the invite first — it's what surfaces on the parent's dashboard,
+    // and must happen whether or not we have an email for them.
+    const { error: invErr } = await service.from("event_invites").upsert(
+      {
+        event_id: eventId,
+        parent_id: p.id,
+        name: `${p.first_name} ${p.last_name}`.trim(),
+        email: p.email,
+        sent_at: new Date().toISOString(),
+      },
+      { onConflict: "event_id,parent_id" }
+    );
+    if (!invErr) invited++;
+
+    if (p.email) {
+      try {
+        await sendInviteEmail(p, event.title, teamName, url, dateStr, event.location, event.description);
+        sent++;
+      } catch {
+        failed++;
+      }
     }
   }
 
   revalidatePath(`/events/${eventId}`);
-  return { sent, failed };
+  return { sent, failed, invited };
 }
 
 async function sendInviteEmail(

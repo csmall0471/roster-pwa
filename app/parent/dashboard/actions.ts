@@ -13,16 +13,17 @@ export type ParentEvent = {
 
 export type ParentEventsResult = {
   rsvped: ParentEvent[];
+  declined: ParentEvent[];
   invited: ParentEvent[];
 };
 
-// Returns the published events the logged-in parent has RSVP'd to, and the
-// published events they were invited to but have NOT yet responded to.
-// Authorizes the caller via their session -> parent_auth before using the
-// service-role client (event_signups / event_invites aren't readable by parents
-// under RLS).
+// Returns, for the logged-in parent's published events: the ones they RSVP'd
+// "going" to, the ones they declined, and the ones they were invited to but
+// have NOT yet responded to. Authorizes the caller via their session ->
+// parent_auth before using the service-role client (event_signups /
+// event_invites aren't readable by parents under RLS).
 export async function getParentEvents(): Promise<ParentEventsResult> {
-  const empty: ParentEventsResult = { rsvped: [], invited: [] };
+  const empty: ParentEventsResult = { rsvped: [], declined: [], invited: [] };
 
   const supabase = await createClient();
   const {
@@ -43,7 +44,7 @@ export async function getParentEvents(): Promise<ParentEventsResult> {
   const [{ data: signupRows }, { data: inviteRows }] = await Promise.all([
     service
       .from("event_signups")
-      .select("event_id, events!inner(id, slug, title, starts_at, location, status)")
+      .select("event_id, declined, events!inner(id, slug, title, starts_at, location, status)")
       .eq("parent_id", parentId)
       .eq("events.status", "published"),
     service
@@ -55,29 +56,38 @@ export async function getParentEvents(): Promise<ParentEventsResult> {
 
   type Row = {
     event_id: string;
+    declined?: boolean;
     events: ParentEvent | ParentEvent[] | null;
   };
 
-  function unwrap(rows: Row[] | null): Map<string, ParentEvent> {
-    const map = new Map<string, ParentEvent>();
-    for (const r of rows ?? []) {
-      const ev = Array.isArray(r.events) ? r.events[0] : r.events;
-      if (ev) map.set(ev.id, ev);
-    }
-    return map;
+  const evOf = (r: Row): ParentEvent | null =>
+    Array.isArray(r.events) ? r.events[0] ?? null : r.events;
+
+  // Split signups into going vs declined.
+  const rsvpedMap = new Map<string, ParentEvent>();
+  const declinedMap = new Map<string, ParentEvent>();
+  for (const r of (signupRows ?? []) as Row[]) {
+    const ev = evOf(r);
+    if (!ev) continue;
+    (r.declined ? declinedMap : rsvpedMap).set(ev.id, ev);
   }
 
-  const rsvpedMap = unwrap(signupRows as Row[] | null);
-  const invitedMap = unwrap(inviteRows as Row[] | null);
+  const invitedMap = new Map<string, ParentEvent>();
+  for (const r of (inviteRows ?? []) as Row[]) {
+    const ev = evOf(r);
+    if (ev) invitedMap.set(ev.id, ev);
+  }
 
-  // Signed up wins: drop any invite that the parent has already responded to.
+  // Any response (going OR declined) resolves the invite — drop it from pending.
   for (const id of rsvpedMap.keys()) invitedMap.delete(id);
+  for (const id of declinedMap.keys()) invitedMap.delete(id);
 
   const byStart = (a: ParentEvent, b: ParentEvent) =>
     a.starts_at.localeCompare(b.starts_at);
 
   return {
     rsvped: [...rsvpedMap.values()].sort(byStart),
+    declined: [...declinedMap.values()].sort(byStart),
     invited: [...invitedMap.values()].sort(byStart),
   };
 }
