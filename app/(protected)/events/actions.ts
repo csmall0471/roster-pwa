@@ -330,12 +330,6 @@ export async function inviteParents(
 
   const service = createServiceClient();
 
-  let teamName: string | null = null;
-  if (event.team_id) {
-    const { data: team } = await service.from("teams").select("name").eq("id", event.team_id).maybeSingle();
-    teamName = team?.name ?? null;
-  }
-
   const { data: parentRows } = await service
     .from("parents")
     .select("id, first_name, last_name, email")
@@ -369,7 +363,7 @@ export async function inviteParents(
 
     if (p.email) {
       try {
-        await sendInviteEmail(p, event.title, teamName, url, dateStr, event.location, event.description);
+        await sendInviteEmail(p, event.title, url, dateStr, event.location, event.description);
         sent++;
       } catch {
         failed++;
@@ -384,7 +378,6 @@ export async function inviteParents(
 async function sendInviteEmail(
   parent: InviteParent,
   title: string,
-  teamName: string | null,
   url: string,
   dateStr: string | null,
   location: string | null,
@@ -400,7 +393,7 @@ async function sendInviteEmail(
       : "";
 
   const html = buildEmailHtml({
-    teamName: teamName ?? undefined,
+    teamName: title,
     htmlBody:
       `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${esc(parent.first_name)},</p>` +
       `<p style="margin:0 0 12px;font-size:15px;color:#111827;">You're invited to <strong>${esc(title)}</strong>.</p>` +
