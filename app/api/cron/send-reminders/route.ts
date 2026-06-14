@@ -183,7 +183,6 @@ export async function GET(request: Request) {
     .from("events")
     .select(`
       id, title, slug, starts_at, location, pay_url, status,
-      teams(name),
       event_signups(id, name, email, attendees, total_cents, paid, declined)
     `)
     .eq("status", "published")
@@ -196,7 +195,6 @@ export async function GET(request: Request) {
     errors.push(`event query: ${eventErr.message}`)
   } else {
     for (const ev of events ?? []) {
-      const teamName = (ev.teams as any)?.name as string | undefined
       const whenStr = ev.starts_at
         ? new Date(ev.starts_at as string).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })
         : ""
@@ -213,7 +211,7 @@ export async function GET(request: Request) {
 
         const subject = `Reminder: ${ev.title} is in 2 days`
         const html = buildEmailHtml({
-          teamName,
+          teamName: ev.title as string,
           htmlBody:
             `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${first},</p>` +
             `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Just a reminder — <strong>${ev.title}</strong> is in 2 days.</p>` +

@@ -445,21 +445,10 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   // Confirmation email to the parent/guest. Never let an email failure break the
   // signup itself.
   if (email) {
-    let teamName: string | null = null;
-    if (event.team_id) {
-      const service = createServiceClient();
-      const { data: team } = await service
-        .from("teams")
-        .select("name")
-        .eq("id", event.team_id)
-        .maybeSingle();
-      teamName = team?.name ?? null;
-    }
     await sendSignupConfirmation({
       to: email,
       name,
       title: event.title,
-      teamName,
       attendees,
       total_cents,
       declined,
@@ -483,20 +472,19 @@ async function sendSignupConfirmation(args: {
   to: string;
   name: string;
   title: string;
-  teamName: string | null;
   attendees: SignupAttendee[];
   total_cents: number;
   declined: boolean;
   pay_url: string | null;
   pay_instructions: string | null;
 }): Promise<void> {
-  const { to, name, title, teamName, attendees, total_cents, declined, pay_url, pay_instructions } = args;
+  const { to, name, title, attendees, total_cents, declined, pay_url, pay_instructions } = args;
 
   // A decline gets a short "thanks for letting us know" note instead of an RSVP
   // receipt — no attendees, no payment.
   if (declined) {
     const html = buildEmailHtml({
-      teamName: teamName ?? undefined,
+      teamName: title,
       htmlBody:
         `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${esc(name)},</p>` +
         `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Thanks for letting us know you can&rsquo;t make <strong>${esc(title)}</strong>. We&rsquo;ve marked you as not attending.</p>` +
@@ -548,7 +536,7 @@ async function sendSignupConfirmation(args: {
     );
 
   const html = buildEmailHtml({
-    teamName: teamName ?? undefined,
+    teamName: title,
     htmlBody: sections.join(""),
   });
 
