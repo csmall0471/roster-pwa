@@ -685,7 +685,8 @@ export default function TeamsBoard({
                 const card = (p: BoardPlayer) => (
                   <PlayerCard key={p.id} player={p} onSelect={() => setSelectedId(p.id)} flags={flagsFor(
                     { id: p.id, coachId: p.coachId, coachReq: p.coachReq, teamNameId: p.teamNameId, nights: p.nights, buddyIds: p.buddyIds },
-                    { coachId: teamCoach.get(t.id) ?? null, playerIds: members.map((m) => m.id), night: t.night }
+                    { coachId: teamCoach.get(t.id) ?? null, playerIds: members.map((m) => m.id), night: t.night },
+                    (id) => (id ? coachNames[id] ?? "" : "")
                   )} />
                 );
                 return (

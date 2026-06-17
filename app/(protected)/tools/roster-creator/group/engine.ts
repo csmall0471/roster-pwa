@@ -165,6 +165,12 @@ function movableComponents(
   return comps;
 }
 
+// How far over target the refinement pass may push a team to honor a coach/buddy
+// request (the initial coach-anchoring can still exceed this; this only bounds
+// what the refiner itself adds). Small, so "fuller but happier" never becomes
+// "ballooned".
+const REFINE_OVERFLOW = 2;
+
 // Post-process the first greedy pass. A bounded, deterministic hill-climb that
 // applies the single best move/swap each round, but ONLY ones that never reduce
 // total satisfaction (no met request is ever broken) and never worsen balance.
@@ -208,9 +214,15 @@ function refine(teams: WorkingTeam[], target: number, w: Weights, locked: Set<st
           if (locked.has(dst.team.id)) continue;
           const dstWith = dst.members.concat(comp);
           const dS = srcScoreA + teamScore(dstWith, dst.team.coachId, w) - baseScore[si] - baseScore[di];
-          if (dS < -1e-9) continue; // would break a met request
+          if (dS < -1e-9) continue; // never net-reduce satisfaction (no request sacrificed for balance)
+          // Bounded overflow: a coach/buddy gain may nudge a team a little over
+          // target (the squared penalty keeps that nudge cheap), but never balloon
+          // one — and never feed an already-overfull team.
+          if (dstWith.length > target + REFINE_OVERFLOW) continue;
           const dImb = srcPenA + penalty(dstWith.length, target) - basePen[si] - basePen[di];
-          if (dImb > 1e-9) continue; // would worsen balance
+          // gain = ΔΦ (Φ = satisfaction − imbalance²). A 12→13 nudge costs only +1
+          // imbalance, so a buddy (+3) or coach (+8) easily justifies it; a mere
+          // night gain (+1) does not. Pure balance moves (dImb<0, dS=0) still win.
           consider(dS - dImb, () => {
             src.members = srcRest;
             dst.members = dst.members.concat(comp);
@@ -447,14 +459,26 @@ export type PlayerFlags = {
 
 export function flagsFor(
   player: GroupPlayer,
-  team: { coachId: string | null; playerIds: string[]; night: string | null }
+  team: { coachId: string | null; playerIds: string[]; night: string | null },
+  // Optional id→name resolver. When given, a coach is "met" if the team's coach
+  // shares the requested coach's NAME even if the underlying record id differs
+  // (duplicate coach records of the same person — e.g. a re-uploaded roster).
+  coachName?: (id: string | null) => string
 ): PlayerFlags {
   const teamMates = new Set(team.playerIds);
   // Requested a coach (matched or not) but isn't on that coach's team. An
   // unmatched request (coach not on the roster) can never be on the right team,
   // so it always counts as unmet.
   const requestedCoach = player.coachReq ?? player.coachId != null;
-  const coachUnmet = requestedCoach && !(player.coachId != null && team.coachId === player.coachId);
+  const lc = (s: string) => s.trim().toLowerCase();
+  const coachMet =
+    player.coachId != null &&
+    (team.coachId === player.coachId ||
+      (!!coachName &&
+        !!team.coachId &&
+        lc(coachName(team.coachId)) !== "" &&
+        lc(coachName(team.coachId)) === lc(coachName(player.coachId))));
+  const coachUnmet = requestedCoach && !coachMet;
   const buddyUnmet =
     player.buddyIds.length > 0 && !player.buddyIds.some((id) => teamMates.has(id));
   const nightUnmet = team.night != null && !player.nights.includes(team.night);

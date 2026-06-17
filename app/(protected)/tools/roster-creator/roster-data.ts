@@ -142,7 +142,19 @@ export async function fetchRosterRows(
 
       coachReq: reqCoachId ? coachName.get(reqCoachId) ?? "" : askedCoach ? rawCoachText : "",
       coachAssigned: tCoachId ? coachName.get(tCoachId) ?? "" : "",
-      coachMet: !tid || !askedCoach ? "" : yn(!!reqCoachId && reqCoachId === tCoachId),
+      // Met if the team's coach IS the requested one, or shares the same NAME
+      // (duplicate coach records of the same person resolve to different ids but
+      // are the same coach to the family).
+      coachMet: !tid || !askedCoach
+        ? ""
+        : yn(
+            !!reqCoachId &&
+              (reqCoachId === tCoachId ||
+                (!!tCoachId &&
+                  (coachName.get(reqCoachId) ?? "").trim().toLowerCase() !== "" &&
+                  (coachName.get(reqCoachId) ?? "").trim().toLowerCase() ===
+                    (coachName.get(tCoachId) ?? "").trim().toLowerCase()))
+          ),
       teamReq: reqTeamId ? teamNameOf.get(reqTeamId) ?? "" : "",
       teamMet: !tid || !reqTeamId ? "" : yn(reqTeamId === tTeamId),
       buddiesReq: reqBuddies.length ? String(reqBuddies.length) : "",

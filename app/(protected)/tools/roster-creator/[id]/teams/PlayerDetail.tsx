@@ -51,11 +51,18 @@ export default function PlayerDetail({
   const nightOf = (id: string | null) => (id ? teamById.get(id)?.night ?? null : null);
   const domCoach = (id: string | null) => (id ? teamCoach.get(id) ?? null : null);
   const coachLabel = (id: string | null) => (id ? coachNames[id] ?? "a coach" : "—");
+  // A team satisfies the coach request if its coach IS the requested one, or
+  // shares the same NAME (duplicate coach records of the same person).
+  const lc = (s: string) => s.trim().toLowerCase();
+  const coachMatches = (teamCoachId: string | null) =>
+    !!player.coachId &&
+    (teamCoachId === player.coachId ||
+      (!!teamCoachId && lc(coachNames[teamCoachId] ?? "") !== "" && lc(coachNames[teamCoachId] ?? "") === lc(coachNames[player.coachId] ?? "")));
 
   const curTeam = assign.get(player.id) ?? null;
 
   const ev = (teamId: string | null): Ev => ({
-    coach: player.coachId ? domCoach(teamId) === player.coachId : undefined,
+    coach: player.coachId ? coachMatches(domCoach(teamId)) : undefined,
     team: player.teamNameId ? (teamId ? teamById.get(teamId)?.name === teamNames[player.teamNameId] : false) : undefined,
     buddy: player.buddyIds.length ? player.buddyIds.some((id) => (assign.get(id) ?? null) === teamId) : undefined,
     night: nightOf(teamId) ? player.nights.includes(nightOf(teamId)!) : undefined,
