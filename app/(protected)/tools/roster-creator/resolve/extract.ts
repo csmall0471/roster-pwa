@@ -88,13 +88,16 @@ function emptyIntent(id: string): ExtractedIntent {
   return { id, coaches: [], team: "", buddies: [], playUp: false, notes: "" };
 }
 
+export type Effort = "low" | "medium" | "high" | "max";
+
 async function extractBatch(
   client: Anthropic,
   batch: RawPlayer[],
   signal?: AbortSignal,
   // Reports players finished WITHIN this batch as they stream in, so the overall
   // bar climbs continuously instead of jumping a whole batch at a time.
-  onPlayer?: (delta: number) => void
+  onPlayer?: (delta: number) => void,
+  effort: Effort = "high"
 ): Promise<ExtractedIntent[]> {
   const lines = batch
     .map((p) => {
@@ -126,7 +129,7 @@ async function extractBatch(
         max_tokens: 8000,
         thinking: { type: "adaptive" },
         system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
-        output_config: { effort: "high", format: { type: "json_schema", schema: SCHEMA } },
+        output_config: { effort, format: { type: "json_schema", schema: SCHEMA } },
         messages: [{ role: "user", content: `Extract intent for these players:\n\n${lines}` }],
       },
       { signal }
@@ -190,7 +193,8 @@ async function extractBatch(
 export async function extractIntent(
   players: RawPlayer[],
   onProgress?: (done: number, total: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  effort: Effort = "high"
 ): Promise<ExtractedIntent[]> {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured.");
   if (players.length === 0) return [];
@@ -213,7 +217,7 @@ export async function extractIntent(
       if (signal?.aborted) throw new Error("aborted");
       const idx = next++;
       const t0 = Date.now();
-      results[idx] = await extractBatch(client, batches[idx], signal, bump);
+      results[idx] = await extractBatch(client, batches[idx], signal, bump, effort);
       console.error(`[extract] batch ${idx + 1}/${batches.length} done in ${((Date.now() - t0) / 1000).toFixed(1)}s — ${done}/${players.length}`);
     }
   }
