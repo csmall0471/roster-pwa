@@ -376,8 +376,12 @@ export async function adminRemoveTrainingSignup(signupId: string) {
 
 export type BulkSessionUpdateData = Omit<SessionData, "session_date" | "series_id">
 
-export async function adminBulkUpdateSessions(sessionIds: string[], data: BulkSessionUpdateData) {
+// Only the fields the caller actually included are written — every other column
+// (each session's own time, photo, etc.) is left untouched. Passing a partial
+// is the whole point: a bulk edit must never clobber fields you didn't change.
+export async function adminBulkUpdateSessions(sessionIds: string[], data: Partial<BulkSessionUpdateData>) {
   const supabase = await createClient()
+  if (Object.keys(data).length === 0 || sessionIds.length === 0) return { error: null }
   const { error } = await supabase.from("training_sessions").update(data).in("id", sessionIds)
   if (error) return { error: error.message }
   revalidatePath("/training")

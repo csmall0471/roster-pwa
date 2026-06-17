@@ -178,21 +178,45 @@ type BulkFormState = {
   eligibility_rules: EligibilityRules
 }
 
-function toBulkData(f: BulkFormState): BulkSessionUpdateData {
-  return {
-    title:             f.title,
-    description:       f.description       || null,
-    location:          f.location          || null,
-    location_address:  f.location_address  || null,
-    image_url:         f.image_url         || null,
-    session_time:      f.session_time      || null,
-    session_end_time:  f.session_end_time  || null,
-    max_players:       Math.max(1, parseInt(f.max_players) || 10),
-    payment_amount:    f.payment_amount    || null,
-    payment_methods:   f.payment_methods,
-    eligibility_rules: f.eligibility_rules,
-    notes:             f.notes             || null,
+// Which bulk-edit fields the user opted to change, and how each maps to columns.
+type BulkFieldKey =
+  | "title" | "description" | "time" | "location"
+  | "max_players" | "payment_amount" | "payment_methods" | "eligibility_rules"
+  | "notes" | "image"
+
+const BULK_FIELD_LABELS: Record<BulkFieldKey, string> = {
+  title: "Title",
+  description: "Description",
+  time: "Start/end time",
+  location: "Location",
+  max_players: "Max players",
+  payment_amount: "Price",
+  payment_methods: "Payment methods",
+  eligibility_rules: "Eligibility",
+  notes: "Notes",
+  image: "Photo",
+}
+
+// Build a partial update from only the toggled-on fields.
+function buildBulkPartial(f: BulkFormState, on: (k: BulkFieldKey) => boolean): Partial<BulkSessionUpdateData> {
+  const d: Partial<BulkSessionUpdateData> = {}
+  if (on("title")) d.title = f.title
+  if (on("description")) d.description = f.description || null
+  if (on("time")) {
+    d.session_time = f.session_time || null
+    d.session_end_time = f.session_end_time || null
   }
+  if (on("location")) {
+    d.location = f.location || null
+    d.location_address = f.location_address || null
+  }
+  if (on("max_players")) d.max_players = Math.max(1, parseInt(f.max_players) || 10)
+  if (on("payment_amount")) d.payment_amount = f.payment_amount || null
+  if (on("payment_methods")) d.payment_methods = f.payment_methods
+  if (on("eligibility_rules")) d.eligibility_rules = f.eligibility_rules
+  if (on("notes")) d.notes = f.notes || null
+  if (on("image")) d.image_url = f.image_url || null
+  return d
 }
 
 // ── SessionList ───────────────────────────────────────────────────────────────
@@ -940,7 +964,7 @@ function AdminSeriesGroup({
   onSignupAdded:       (sessionId: string, signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (sessionId: string, signupId: string) => void
   onSignupPaidToggled: (sessionId: string, signupId: string, paid: boolean) => void
-  onBulkUpdated:       (sessionIds: string[], data: BulkSessionUpdateData) => void
+  onBulkUpdated:       (sessionIds: string[], data: Partial<BulkSessionUpdateData>) => void
 }) {
   // Standalone sessions start open so they're immediately visible
   const [open, setOpen]               = useState(sessions.length === 1)
@@ -1396,7 +1420,7 @@ function BulkEditPanel({
   sessions:   TrainingSession[]
   teams:      TeamOption[]
   onClose:    () => void
-  onUpdated:  (data: BulkSessionUpdateData) => void
+  onUpdated:  (data: Partial<BulkSessionUpdateData>) => void
 }) {
   const first = sessions[0]
   const [form, setForm] = useState<BulkFormState>({
@@ -1413,9 +1437,18 @@ function BulkEditPanel({
     notes:             first.notes            ?? "",
     eligibility_rules: first.eligibility_rules,
   })
+  const [enabled, setEnabled] = useState<Record<BulkFieldKey, boolean>>({} as Record<BulkFieldKey, boolean>)
   const [error, setError]   = useState<string | null>(null)
   const [pending, start]    = useTransition()
   const [imageUploading, setImgUpload] = useState(false)
+
+  const on = (k: BulkFieldKey) => !!enabled[k]
+  const toggle = (k: BulkFieldKey) => setEnabled((e) => ({ ...e, [k]: !e[k] }))
+  const FIELD_ORDER: BulkFieldKey[] = [
+    "title", "time", "location", "image", "max_players",
+    "payment_amount", "payment_methods", "description", "notes", "eligibility_rules",
+  ]
+  const changed = FIELD_ORDER.filter(on)
 
   const inputCls = "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
 
@@ -1436,9 +1469,10 @@ function BulkEditPanel({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.title) return
     setError(null)
-    const data = toBulkData(form)
+    const data = buildBulkPartial(form, on)
+    if (Object.keys(data).length === 0) { setError("Tick at least one field to change."); return }
+    if (on("title") && !form.title.trim()) { setError("Title can't be blank."); return }
     start(async () => {
       const result = await adminBulkUpdateSessions(sessions.map((s) => s.id), data)
       if (result.error) { setError(result.error); return }
@@ -1460,16 +1494,39 @@ function BulkEditPanel({
         </button>
       </div>
 
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Tick only the fields you want to change. Anything you leave unticked keeps each session&rsquo;s own value — times, photos, and everything else stay exactly as they are.
+      </p>
+
+      {/* Field picker — only ticked fields are edited & applied */}
+      <div className="flex flex-wrap gap-1.5">
+        {FIELD_ORDER.map((k) => (
+          <button
+            key={k} type="button" onClick={() => toggle(k)}
+            className={`text-xs rounded-full px-3 py-1 border transition-colors ${
+              on(k)
+                ? "border-blue-600 bg-blue-600 text-white"
+                : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
+            }`}
+          >
+            {on(k) ? "✓ " : ""}{BULK_FIELD_LABELS[k]}
+          </button>
+        ))}
+      </div>
+
+      {on("title") && (
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Title *</label>
         <input
-          type="text" required
+          type="text"
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
           className={inputCls}
         />
       </div>
+      )}
 
+      {on("description") && (
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Description</label>
         <textarea
@@ -1479,7 +1536,9 @@ function BulkEditPanel({
           className={`${inputCls} resize-none`}
         />
       </div>
+      )}
 
+      {on("time") && (<>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Start time</label>
@@ -1514,7 +1573,9 @@ function BulkEditPanel({
           ))}
         </div>
       )}
+      </>)}
 
+      {on("location") && (<>
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Location name</label>
         <input
@@ -1533,17 +1594,21 @@ function BulkEditPanel({
           className={inputCls}
         />
       </div>
+      </>)}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Max players</label>
-          <input
-            type="number" min={1} max={100}
-            value={form.max_players}
-            onChange={(e) => setForm((f) => ({ ...f, max_players: e.target.value }))}
-            className={inputCls}
-          />
-        </div>
+      {on("max_players") && (
+      <div>
+        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Max players</label>
+        <input
+          type="number" min={1} max={100}
+          value={form.max_players}
+          onChange={(e) => setForm((f) => ({ ...f, max_players: e.target.value }))}
+          className={inputCls}
+        />
+      </div>
+      )}
+
+      {on("payment_amount") && (
         <div>
           <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price</label>
           <input
@@ -1553,9 +1618,10 @@ function BulkEditPanel({
             className={inputCls}
           />
         </div>
-      </div>
+      )}
 
       {/* Payment methods */}
+      {on("payment_methods") && (
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Payment methods</label>
         <div className="space-y-2">
@@ -1618,8 +1684,10 @@ function BulkEditPanel({
           </div>
         </div>
       </div>
+      )}
 
       {/* Eligibility */}
+      {on("eligibility_rules") && (
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Eligibility</label>
         <RuleBuilder
@@ -1628,8 +1696,10 @@ function BulkEditPanel({
           teams={teams}
         />
       </div>
+      )}
 
       {/* Notes */}
+      {on("notes") && (
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Notes</label>
         <input
@@ -1639,8 +1709,10 @@ function BulkEditPanel({
           className={inputCls}
         />
       </div>
+      )}
 
       {/* Image */}
+      {on("image") && (
       <div>
         <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1.5">Photo</label>
         {form.image_url ? (
@@ -1667,16 +1739,28 @@ function BulkEditPanel({
           </label>
         )}
       </div>
+      )}
+
+      {/* What will change — explicit before applying */}
+      {changed.length > 0 ? (
+        <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
+          All <strong>{sessions.length}</strong> sessions will be set to the same{" "}
+          <strong>{changed.map((k) => BULK_FIELD_LABELS[k]).join(", ")}</strong>. Every other field stays as each
+          session has it.
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 dark:text-gray-500">Tick a field above to change it for all {sessions.length} sessions.</p>
+      )}
 
       {error && <p className="text-xs text-red-500">{error}</p>}
 
       <div className="flex items-center gap-3 pt-1">
         <button
           type="submit"
-          disabled={pending || !form.title}
+          disabled={pending || changed.length === 0}
           className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
-          {pending ? "Saving…" : `Update all ${sessions.length} sessions`}
+          {pending ? "Saving…" : changed.length === 0 ? "Pick fields to change" : `Apply to ${sessions.length} sessions`}
         </button>
         <button type="button" onClick={onClose}
           className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
