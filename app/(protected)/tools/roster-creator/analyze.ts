@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { selectAll } from "./db";
-import { extractIntent, type RawPlayer } from "./resolve/extract";
+import { extractIntent, type RawPlayer, type ExtractedIntent } from "./resolve/extract";
 import { normalize, jaroWinkler } from "./resolve/similarity";
 import { matchCoachOptions, type CoachCandidate } from "./resolve/match-coach";
 import { isCoachChild, accountNameOf, isNoRequest } from "./fields";
@@ -154,10 +154,41 @@ export async function runAnalysis(
     );
   const needRows = rows.filter(hasRequest);
   const skipped = rows.length - needRows.length;
-  console.error(`[analyze] ${skipped} no-request rows skipped; ${needRows.length} → Claude`);
+
+  // ── Deterministic fast-path ────────────────────────────────────────────────
+  // A row whose ONLY request is a coach name that EXACTLY matches one of its
+  // division's known coaches needs no model call: synthesize the exact intent
+  // Claude would return for it and keep only the messy rows for Claude. This is
+  // a pure speedup (and pure cost cut) with zero change in output — the matching
+  // loop below, including coach's-kid handling, treats these rows identically.
+  const synthetic: ExtractedIntent[] = [];
+  const forClaude: typeof rows = [];
+  for (const p of needRows) {
+    const dz = p.division_id as string | null;
+    const cands = dz ? candidatesByDiv.get(dz) ?? [] : [];
+    const coachText = `${(p.coach_first as string) ?? ""} ${(p.coach_last as string) ?? ""}`.trim();
+    const key = normalize(coachText);
+    // No digits (so an age/"U10" note never sneaks past play-up detection), exactly
+    // one same-division coach with that exact normalized name, and nothing in the
+    // team or buddy fields.
+    const exact = key && !/\d/.test(coachText) ? cands.filter((c) => normalize(c.name) === key) : [];
+    const onlyCoach =
+      isNoRequest((p.team_name as string) ?? "") &&
+      isNoRequest((p.buddy_first as string) ?? "") &&
+      isNoRequest((p.buddy_last as string) ?? "");
+    if (onlyCoach && exact.length === 1) {
+      synthetic.push({ id: idOf(p), coaches: [exact[0].name], team: "", buddies: [], playUp: false, notes: "" });
+    } else {
+      forClaude.push(p);
+    }
+  }
+  const instant = skipped + synthetic.length; // rows already resolved without Claude
+  console.error(
+    `[analyze] ${skipped} no-request skipped, ${synthetic.length} clean-coach fast-pathed; ${forClaude.length} → Claude`
+  );
 
   // ── Roster-aware extraction: feed each player their division's coach names ──
-  const raw: RawPlayer[] = needRows.map((p) => {
+  const raw: RawPlayer[] = forClaude.map((p) => {
     const dz = p.division_id as string | null;
     const cand = dz ? candidatesByDiv.get(dz) ?? [] : [];
     return {
@@ -174,12 +205,14 @@ export async function runAnalysis(
     };
   });
 
-  // Progress stays denominated over ALL players (skipped rows are instantly done).
-  const intents = await extractIntent(
+  // Progress stays denominated over ALL players (skipped + fast-pathed are done).
+  onProgress?.(instant, rows.length);
+  const claudeIntents = await extractIntent(
     raw,
-    (done, total) => onProgress?.(skipped + done, skipped + total),
+    (done) => onProgress?.(instant + done, rows.length),
     signal
   );
+  const intents = [...synthetic, ...claudeIntents];
   console.error(`[analyze] extraction done in ${((Date.now() - t0) / 1000).toFixed(1)}s; matching…`);
   const intentById = new Map(intents.map((i) => [i.id, i]));
 

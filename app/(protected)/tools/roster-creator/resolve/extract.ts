@@ -11,7 +11,13 @@ const MODEL = "claude-opus-4-8";
 // SDK retries 429s with backoff (maxRetries below), so a higher concurrency
 // safely absorbs rate-limit bumps; lower this if the API account is a small tier.
 const BATCH_SIZE = 30;
-const CONCURRENCY = 16;
+// Fan batches out in parallel. Wall-clock is dominated by the slowest batch in
+// each wave, so getting a typical season (~28 batches) into a SINGLE wave roughly
+// halves the time vs the old 16 (which forced a second wave). The SDK retries
+// 429s with backoff (maxRetries below), so this can't be slower than the account's
+// rate limit allows — it just uses all available headroom. Lower it only if a
+// small-tier account 429s so persistently that backoff thrash dominates.
+const CONCURRENCY = 32;
 
 export type RawPlayer = {
   id: string;
