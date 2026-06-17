@@ -8,17 +8,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const supabase = await createClient();
 
-  // Owner-only (authenticated, not a parent). RLS also enforces this.
+  // Allowed: the coach who owns teams, or a granted roster admin (shared
+  // access) — same rule as the server actions. RLS also enforces this.
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
-  const { data: parentLink } = await supabase
-    .from("parent_auth")
-    .select("parent_id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (parentLink) return new Response("Forbidden", { status: 403 });
+  const { count } = await supabase
+    .from("teams")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+  let allowed = (count ?? 0) > 0;
+  if (!allowed) {
+    const { data: admin } = await supabase.rpc("is_roster_admin");
+    allowed = !!admin;
+  }
+  if (!allowed) return new Response("Forbidden", { status: 403 });
 
   console.error(`[analyze route] connected — season ${id}`);
   const encoder = new TextEncoder();
