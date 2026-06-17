@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import SignOutButton from "./_components/SignOutButton";
 import ToolsNav from "./_components/ToolsNav";
 import ThemeToggle from "./_components/ThemeToggle";
+import ScopedAdminGuard from "./_components/ScopedAdminGuard";
 
 export default async function ProtectedLayout({
   children,
@@ -23,47 +24,58 @@ export default async function ProtectedLayout({
 
   const isCoach = (teamCount ?? 0) > 0;
 
+  // Roster admins: people the coach granted Roster-Creator-only access by phone.
+  // They aren't coaches; they get a scoped nav and are held to that one tool.
+  let scopedAdmin = false;
+
   if (!isCoach) {
-    // Check if already linked to a parent record
-    const { data: parentLink } = await supabase
-      .from("parent_auth")
-      .select("parent_id")
-      .eq("auth_user_id", user.id)
-      .maybeSingle();
-
-    if (parentLink) {
-      redirect("/parent");
-    }
-
-    // First sign-in: try to auto-link by matching email or phone
-    let matchedId: string | null = null;
-
-    if (user.email) {
-      const { data } = await supabase
-        .from("parents")
-        .select("id")
-        .eq("email", user.email)
+    // Link this phone-authed user to a matching access-list row (if any), then
+    // check. A roster admin skips the parent/no-access flow below.
+    const { data: admin } = await supabase.rpc("link_roster_admin");
+    if (admin) {
+      scopedAdmin = true;
+    } else {
+      // Check if already linked to a parent record
+      const { data: parentLink } = await supabase
+        .from("parent_auth")
+        .select("parent_id")
+        .eq("auth_user_id", user.id)
         .maybeSingle();
-      matchedId = data?.id ?? null;
-    }
 
-    if (!matchedId && user.phone) {
-      const { data } = await supabase.rpc("match_parent_by_phone", {
-        input_phone: user.phone,
-      });
-      matchedId = data ?? null;
-    }
+      if (parentLink) {
+        redirect("/parent");
+      }
 
-    if (matchedId) {
-      await supabase.from("parent_auth").insert({
-        auth_user_id: user.id,
-        parent_id: matchedId,
-      });
-      redirect("/parent");
-    }
+      // First sign-in: try to auto-link by matching email or phone
+      let matchedId: string | null = null;
 
-    // No matching parent record found
-    redirect("/no-access");
+      if (user.email) {
+        const { data } = await supabase
+          .from("parents")
+          .select("id")
+          .eq("email", user.email)
+          .maybeSingle();
+        matchedId = data?.id ?? null;
+      }
+
+      if (!matchedId && user.phone) {
+        const { data } = await supabase.rpc("match_parent_by_phone", {
+          input_phone: user.phone,
+        });
+        matchedId = data ?? null;
+      }
+
+      if (matchedId) {
+        await supabase.from("parent_auth").insert({
+          auth_user_id: user.id,
+          parent_id: matchedId,
+        });
+        redirect("/parent");
+      }
+
+      // No matching parent record found
+      redirect("/no-access");
+    }
   }
 
   return (
@@ -71,31 +83,39 @@ export default async function ProtectedLayout({
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
         <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center justify-between">
           <nav className="flex items-center gap-6">
-            <Link href="/teams" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Teams
-            </Link>
-            <Link href="/players" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Players
-            </Link>
-            <Link href="/email" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Email
-            </Link>
-            <Link href="/training" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Training
-            </Link>
-            <Link href="/training/skills" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Skills
-            </Link>
-            <Link href="/events" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Events
-            </Link>
-            <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Preview
-            </Link>
-            <Link href="/activity" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-              Activity
-            </Link>
-            <ToolsNav />
+            {scopedAdmin ? (
+              <Link href="/tools/roster-creator" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                Roster Creator
+              </Link>
+            ) : (
+              <>
+                <Link href="/teams" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Teams
+                </Link>
+                <Link href="/players" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Players
+                </Link>
+                <Link href="/email" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Email
+                </Link>
+                <Link href="/training" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Training
+                </Link>
+                <Link href="/training/skills" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Skills
+                </Link>
+                <Link href="/events" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Events
+                </Link>
+                <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Preview
+                </Link>
+                <Link href="/activity" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
+                  Activity
+                </Link>
+                <ToolsNav />
+              </>
+            )}
           </nav>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{user.email ?? user.phone}</span>
@@ -104,6 +124,8 @@ export default async function ProtectedLayout({
           </div>
         </div>
       </header>
+
+      {scopedAdmin && <ScopedAdminGuard />}
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full px-4 py-6">
         {children}

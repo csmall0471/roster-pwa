@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import NewSeasonButton from "./NewSeasonButton";
 import DeleteSeasonButton from "./DeleteSeasonButton";
 import DeleteAllSeasonsButton from "./DeleteAllSeasonsButton";
+import RosterAccessManager from "./RosterAccessManager";
+import { canManageRosterAccess, listRosterAdmins } from "./actions";
 
 export default async function RosterCreatorPage() {
   const supabase = await createClient();
@@ -11,6 +13,10 @@ export default async function RosterCreatorPage() {
     .from("tb_seasons")
     .select("id, name, sport, status, created_at, tb_players(count), tb_divisions(count)")
     .order("created_at", { ascending: false });
+
+  // Only the coach owner manages who else can use the tool.
+  const canManage = await canManageRosterAccess();
+  const admins = canManage ? await listRosterAdmins() : [];
 
   type SeasonRow = {
     id: string;
@@ -54,6 +60,8 @@ export default async function RosterCreatorPage() {
           </div>
         ))}
       </div>
+
+      {canManage && <RosterAccessManager admins={admins} />}
 
       {rows.length > 0 ? (
         <div>

@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { phoneKey } from "@/lib/phone";
 import {
   type CanonicalRecord,
   type ColumnMapping,
@@ -56,6 +57,8 @@ function bestDivisionMatch(
 
 // Ensure the caller is the coach/owner (authenticated, not a parent). RLS also
 // enforces this, but we fail fast and clearly here too.
+// Anyone allowed to USE the Roster Creator: the coach who owns teams, or a
+// granted roster admin (shared access). Used by every data action.
 async function requireOwner() {
   const supabase = await createClient();
   const {
@@ -63,14 +66,31 @@ async function requireOwner() {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in");
 
-  const { data: parentLink } = await supabase
-    .from("parent_auth")
-    .select("parent_id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (parentLink) throw new Error("Not authorized");
+  if (await isCoach(supabase, user.id)) return { supabase, user };
 
+  const { data: admin } = await supabase.rpc("is_roster_admin");
+  if (admin) return { supabase, user };
+
+  throw new Error("Not authorized");
+}
+
+// The owner (coach who owns teams) — only they can manage the access list.
+async function requireCoachOwner() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+  if (!(await isCoach(supabase, user.id))) throw new Error("Not authorized");
   return { supabase, user };
+}
+
+async function isCoach(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<boolean> {
+  const { count } = await supabase
+    .from("teams")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+  return (count ?? 0) > 0;
 }
 
 export type CommitImportInput = {
@@ -1327,4 +1347,58 @@ export async function removeAssistantCoach(seasonId: string, teamId: string, coa
     .eq("coach_id", coachId);
   if (error) throw new Error(error.message);
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
+}
+
+// ── Shared access (roster admins) ─────────────────────────────────────────────
+// The owner grants others access to ONLY the Roster Creator by phone number;
+// they log in with phone OTP and share these seasons. Managed via the service
+// client (the table is locked to direct client access).
+
+export type RosterAdminRow = { id: string; phone_key: string; label: string | null; linked: boolean };
+
+export async function listRosterAdmins(): Promise<RosterAdminRow[]> {
+  await requireCoachOwner();
+  const service = createServiceClient();
+  const { data } = await service
+    .from("roster_admins")
+    .select("id, phone_key, label, auth_user_id")
+    .order("created_at", { ascending: true });
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    phone_key: r.phone_key as string,
+    label: (r.label as string | null) ?? null,
+    linked: !!r.auth_user_id,
+  }));
+}
+
+export async function addRosterAdmin(phone: string, label: string): Promise<{ error?: string }> {
+  await requireCoachOwner();
+  const key = phoneKey(phone);
+  if (key.length < 10) return { error: "Enter a valid 10-digit phone number." };
+  const service = createServiceClient();
+  const { error } = await service
+    .from("roster_admins")
+    .upsert({ phone_key: key, label: label.trim() || null }, { onConflict: "phone_key" });
+  if (error) return { error: error.message };
+  revalidatePath("/tools/roster-creator");
+  return {};
+}
+
+export async function removeRosterAdmin(id: string): Promise<{ error?: string }> {
+  await requireCoachOwner();
+  const service = createServiceClient();
+  const { error } = await service.from("roster_admins").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/tools/roster-creator");
+  return {};
+}
+
+// For the page: can the viewer manage access (is the coach owner)?
+export async function canManageRosterAccess(): Promise<boolean> {
+  try {
+    await requireCoachOwner();
+    return true;
+  } catch {
+    return false;
+  }
 }
