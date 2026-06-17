@@ -158,6 +158,11 @@ export default function TeamsBoard({
 
   const config: GroupConfig = { target, weights };
 
+  // The board only means anything once teams have been generated (someone is
+  // seated). Until then we keep the page to just the settings + Generate button
+  // and hide the division view, stats, coach-gaps, and columns below it.
+  const hasGenerated = Array.from(assign.values()).some((t) => t != null);
+
   function reorder(i: number, dir: -1 | 1) {
     const j = i + dir;
     if (j < 0 || j >= order.length) return;
@@ -483,27 +488,35 @@ export default function TeamsBoard({
             Generating teams…
           </div>
         </div>
-      ) : (
+      ) : hasGenerated ? (
        <>
       {/* Division selector + team search + legend */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <span className="font-medium text-gray-600 dark:text-gray-300">Division</span>
-            <select value={divisionId} onChange={(e) => setDivisionId(e.target.value)}
-              className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1.5 text-sm">
+          <label
+            className="flex items-center gap-2 rounded-lg border-2 border-blue-500/70 dark:border-blue-400/60 bg-blue-50 dark:bg-blue-950/40 pl-3 pr-2 py-1.5 cursor-pointer"
+            title="Switch which division's teams you're viewing"
+          >
+            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+              Showing division
+            </span>
+            <select
+              value={divisionId}
+              onChange={(e) => setDivisionId(e.target.value)}
+              className="bg-transparent text-base font-bold text-blue-800 dark:text-blue-100 focus:outline-none cursor-pointer"
+            >
               {divisions.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
+                <option key={d.id} value={d.id} className="font-normal text-gray-900">{d.name}</option>
               ))}
             </select>
           </label>
+          <span className="text-xs text-gray-400">{visibleTeams.length} teams</span>
           <input
             value={teamQuery}
             onChange={(e) => setTeamQuery(e.target.value)}
             placeholder="Search teams or coaches…"
             className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1.5 text-sm w-56"
           />
-          <span className="text-xs text-gray-400">{visibleTeams.length} teams</span>
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
           <span><Dot color="bg-red-500" /> coach</span>
@@ -656,8 +669,9 @@ export default function TeamsBoard({
         </Column>
       </div>
        </>
-      )}
+      ) : null}
 
+      {hasGenerated && (<>
       {selectedPlayer && (
         <PlayerDetail
           player={selectedPlayer}
@@ -718,6 +732,7 @@ export default function TeamsBoard({
           )}
         </div>
       </section>
+      </>)}
     </div>
   );
 }
