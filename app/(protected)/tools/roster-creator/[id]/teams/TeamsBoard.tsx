@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   addAssistantCoach,
   addCoachTeam,
+  addOverflowCoachTeam,
   addTeam,
   emailRoster,
   exportRosterCsv,
@@ -226,6 +227,20 @@ export default function TeamsBoard({
     }
   }
 
+  // Add a second team for a coach who has more requesters than fit one team.
+  const [addingCoach, setAddingCoach] = useState<string | null>(null);
+  async function addCoachOverflowTeam(coachId: string) {
+    setAddingCoach(coachId);
+    try {
+      await addOverflowCoachTeam(seasonId, divisionId, coachId);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add team.");
+    } finally {
+      setAddingCoach(null);
+    }
+  }
+
   async function move(playerId: string, teamId: string | null) {
     const prev = assign.get(playerId) ?? null;
     if (prev === teamId) return;
@@ -267,6 +282,29 @@ export default function TeamsBoard({
   );
   const membersOf = (teamId: string | null) =>
     divisionPlayers.filter((p) => (assign.get(p.id) ?? null) === teamId);
+
+  // Coaches in this division requested by MORE players than their team(s) can
+  // seat at target — the overflow spills onto other teams (coach request unmet).
+  // Surface them with a one-click "add another team for this coach" so the split
+  // happens across teams that both count as that coach.
+  const overSubscribed = useMemo(() => {
+    const reqByCoach = new Map<string, number>();
+    for (const p of divisionPlayers) {
+      if (p.coachId) reqByCoach.set(p.coachId, (reqByCoach.get(p.coachId) ?? 0) + 1);
+    }
+    const teamsByCoach = new Map<string, number>();
+    for (const t of divisionTeams) {
+      if (t.coachId) teamsByCoach.set(t.coachId, (teamsByCoach.get(t.coachId) ?? 0) + 1);
+    }
+    const out: { coachId: string; name: string; requesters: number; teams: number }[] = [];
+    for (const [cid, req] of reqByCoach) {
+      const tc = teamsByCoach.get(cid) ?? 0;
+      if (tc >= 1 && req > tc * target) {
+        out.push({ coachId: cid, name: coachNames[cid] ?? "Coach", requesters: req, teams: tc });
+      }
+    }
+    return out.sort((a, b) => b.requesters - a.requesters);
+  }, [divisionPlayers, divisionTeams, target, coachNames]);
 
   // Coaches requested in THIS division but not on its roster (so those kids are
   // free agents). Grouped by the requested name, 3+ families — the ones you'd
@@ -582,6 +620,39 @@ export default function TeamsBoard({
         coachNames={coachNames}
         teamNames={teamNames}
       />
+
+      {/* Popular coaches — more requesters than one team seats. Offer a 2nd team. */}
+      {overSubscribed.length > 0 && (
+        <section className="rounded-lg border border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 p-4">
+          <h2 className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+            Popular coaches — more requests than one team holds ({overSubscribed.length})
+          </h2>
+          <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+            More players requested these coaches than their {target}-player team can seat, so the extras spill
+            onto other teams with their coach request unmet. Add another team for the coach to split the
+            requesters across two teams that <strong>both</strong> count as that coach — then re-generate.
+          </p>
+          <ul className="rounded-lg border border-blue-200 dark:border-blue-900/40 bg-white dark:bg-gray-900 divide-y divide-blue-100 dark:divide-blue-900/30">
+            {overSubscribed.map((c) => (
+              <li key={c.coachId} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <span className="font-medium text-gray-900 dark:text-white">{c.name}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {c.requesters} requested · {c.teams} team{c.teams !== 1 ? "s" : ""} · ~
+                  {Math.ceil(c.requesters / (c.teams + 1))} per team if you add one
+                </span>
+                <button
+                  type="button"
+                  disabled={addingCoach === c.coachId}
+                  onClick={() => addCoachOverflowTeam(c.coachId)}
+                  className="ml-auto shrink-0 rounded-md bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {addingCoach === c.coachId ? "Adding…" : `Add another ${c.name} team`}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Requested coaches not on this division's roster — actionable here */}
       {missingCoaches.length > 0 && (

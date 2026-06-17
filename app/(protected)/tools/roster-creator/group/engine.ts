@@ -286,13 +286,16 @@ export function assignDivision(input: AssignInput): AssignResult {
   // Working teams, in the caller's order so placeholders fill predictably.
   const teams: WorkingTeam[] = input.teams.map((team) => ({ team, members: [] }));
 
-  // 1. coachId -> the team that coach runs. Authoritative teams carry coachId;
-  //    placeholders don't. If two teams somehow share a coach the first wins
-  //    (deterministic by caller order) — but normally a coach owns one team.
-  const teamByCoach = new Map<string, WorkingTeam>();
+  // 1. coachId -> ALL teams that coach heads (caller order). Usually one, but a
+  //    popular coach can run more than one team; their requesters are split across
+  //    those teams (least-full first), so a coach with 21 requesters can run two
+  //    ~10/11 teams that BOTH satisfy the coach request instead of one ballooning.
+  const teamsByCoach = new Map<string, WorkingTeam[]>();
   for (const wt of teams) {
-    if (wt.team.coachId && !teamByCoach.has(wt.team.coachId)) {
-      teamByCoach.set(wt.team.coachId, wt);
+    if (wt.team.coachId) {
+      const list = teamsByCoach.get(wt.team.coachId);
+      if (list) list.push(wt);
+      else teamsByCoach.set(wt.team.coachId, [wt]);
     }
   }
 
@@ -317,9 +320,14 @@ export function assignDivision(input: AssignInput): AssignResult {
   //    inviolability holds for free.)
   const free: GroupPlayer[] = [];
   for (const p of input.players) {
-    const wt = p.coachId ? teamByCoach.get(p.coachId) : undefined;
-    if (wt) place(p, wt);
-    else free.push(p);
+    const hosts = p.coachId ? teamsByCoach.get(p.coachId) : undefined;
+    if (hosts && hosts.length) {
+      // Least-full of this coach's teams (deterministic: ties → earliest), so a
+      // coach's requesters split evenly across the teams they run.
+      let host = hosts[0];
+      for (const wt of hosts) if (wt.members.length < host.members.length) host = wt;
+      place(p, host);
+    } else free.push(p);
   }
 
   // 4. Buddies: pull a free agent onto a team already holding one of their

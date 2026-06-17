@@ -1072,6 +1072,37 @@ export async function addCoachTeam(
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
+// Add a SECOND (or third…) team headed by an existing coach, so a coach with more
+// requesters than fit one team can split them across teams that both satisfy the
+// coach request. The engine distributes that coach's requesters across all their
+// teams on the next generate.
+export async function addOverflowCoachTeam(seasonId: string, divisionId: string, coachId: string) {
+  const { supabase } = await requireOwner();
+  const { data: coach } = await supabase
+    .from("tb_coaches")
+    .select("name")
+    .eq("id", coachId)
+    .eq("season_id", seasonId)
+    .maybeSingle();
+  const baseName = (coach?.name as string)?.trim() || "Coach";
+  const { count } = await supabase
+    .from("tb_teams")
+    .select("id", { count: "exact", head: true })
+    .eq("division_id", divisionId)
+    .eq("coach_id", coachId);
+  const position = await nextTeamPosition(supabase, divisionId);
+  const { error } = await supabase.from("tb_teams").insert({
+    season_id: seasonId,
+    division_id: divisionId,
+    name: `${baseName} ${(count ?? 1) + 1}`,
+    coach_id: coachId,
+    is_placeholder: false,
+    position,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
+}
+
 // Add an open "Team N" placeholder slot to a division.
 export async function addPlaceholderTeam(seasonId: string, divisionId: string) {
   const { supabase } = await requireOwner();
