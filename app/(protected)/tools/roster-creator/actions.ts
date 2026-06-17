@@ -29,6 +29,7 @@ import {
 import { rosterToCsv } from "./export-csv";
 import { fetchRosterRows } from "./roster-data";
 import { normalize, jaroWinkler } from "./resolve/similarity";
+import { logToolActivity } from "@/lib/activity";
 
 // Map a player file's free-text division string (package_name, e.g. "Peoria 8U
 // Boys") onto the closest authoritative division created from the coach workbook
@@ -309,6 +310,7 @@ export async function createSeasonFromRoster(input: CreateSeasonFromRosterInput)
     }
   }
 
+  void logToolActivity("rc_roster_uploaded", { season_id: seasonId, mode: "new_season", divisions: input.divisions.length });
   revalidatePath("/tools/roster-creator");
   revalidatePath(`/tools/roster-creator/${seasonId}`);
   return seasonId;
@@ -414,6 +416,7 @@ export async function deleteSeason(seasonId: string) {
   const { supabase } = await requireOwner();
   const { error } = await supabase.from("tb_seasons").delete().eq("id", seasonId);
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_season_deleted", { season_id: seasonId });
   revalidatePath("/tools/roster-creator");
 }
 
@@ -675,6 +678,7 @@ export async function updateGroupingConfig(seasonId: string, config: GroupConfig
 // assignments first, never deletes teams.
 export async function generateTeams(seasonId: string, config?: GroupConfig) {
   const { supabase } = await requireOwner();
+  try {
 
   const cfg = normalizeConfig(config);
   if (config) {
@@ -839,6 +843,18 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
 
   await supabase.from("tb_seasons").update({ status: "grouped" }).eq("id", seasonId);
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
+  void logToolActivity("rc_teams_generated", {
+    season_id: seasonId,
+    divisions: (divisions ?? []).length,
+    players: rows.length,
+  });
+  } catch (e) {
+    void logToolActivity("rc_generate_failed", {
+      season_id: seasonId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
 }
 
 export async function movePlayerToTeam(
@@ -849,6 +865,7 @@ export async function movePlayerToTeam(
   const { supabase } = await requireOwner();
   const { error } = await supabase.from("tb_players").update({ team_id: teamId }).eq("id", playerId);
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_player_moved", { season_id: seasonId, player_id: playerId, team_id: teamId });
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }
 
@@ -878,6 +895,7 @@ export async function setTeamLocked(seasonId: string, teamId: string, locked: bo
   const { supabase } = await requireOwner();
   const { error } = await supabase.from("tb_teams").update({ locked }).eq("id", teamId).eq("season_id", seasonId);
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_lock_changed", { season_id: seasonId, scope: "team", team_id: teamId, locked });
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }
 
@@ -886,6 +904,7 @@ export async function setDivisionLocked(seasonId: string, divisionId: string, lo
   const { supabase } = await requireOwner();
   const { error } = await supabase.from("tb_divisions").update({ locked }).eq("id", divisionId).eq("season_id", seasonId);
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_lock_changed", { season_id: seasonId, scope: "division", division_id: divisionId, locked });
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }
 
@@ -895,6 +914,7 @@ export async function addTeam(seasonId: string, divisionId: string, name: string
     .from("tb_teams")
     .insert({ season_id: seasonId, division_id: divisionId, name: name.trim() || "New team", position: 999 });
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_team_added", { season_id: seasonId, division_id: divisionId, kind: "manual" });
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }
 
@@ -903,6 +923,7 @@ export async function addTeam(seasonId: string, divisionId: string, name: string
 export async function exportRosterCsv(seasonId: string): Promise<string> {
   const { supabase } = await requireOwner();
   const rows = await fetchRosterRows(supabase, seasonId);
+  void logToolActivity("rc_csv_exported", { season_id: seasonId, rows: rows.length });
   return rosterToCsv(rows);
 }
 
@@ -949,6 +970,7 @@ export async function emailRoster(
       ],
     });
     if (error) return { ok: false, error: error.message };
+    void logToolActivity("rc_roster_emailed", { season_id: seasonId, to: email, rows: rows.length, teams: teamCount });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to send email." };
@@ -972,6 +994,7 @@ export async function createSeason(name: string, sport?: string): Promise<string
     .select("id")
     .single();
   if (error || !data) throw new Error(error?.message ?? "Failed to create season");
+  void logToolActivity("rc_season_created", { season_id: data.id as string, name: name.trim() || "Untitled season" });
   revalidatePath("/tools/roster-creator");
   return data.id as string;
 }
@@ -1069,6 +1092,7 @@ export async function addCoachTeam(
       .eq("season_id", seasonId);
     if (upErr) throw new Error(upErr.message);
   }
+  void logToolActivity("rc_coach_team_added", { season_id: seasonId, division_id: divisionId, coach: n, attached: attachPlayerIds?.length ?? 0 });
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
@@ -1100,6 +1124,7 @@ export async function addOverflowCoachTeam(seasonId: string, divisionId: string,
     position,
   });
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_coach_team_added", { season_id: seasonId, division_id: divisionId, coach: baseName, reason: "overflow" });
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }
 
@@ -1116,6 +1141,7 @@ export async function addPlaceholderTeam(seasonId: string, divisionId: string) {
     position,
   });
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_team_added", { season_id: seasonId, division_id: divisionId, kind: "placeholder" });
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
@@ -1146,6 +1172,7 @@ export async function deleteTeam(seasonId: string, teamId: string) {
   const { supabase } = await requireOwner();
   const { error } = await supabase.from("tb_teams").delete().eq("id", teamId).eq("season_id", seasonId);
   if (error) throw new Error(error.message);
+  void logToolActivity("rc_team_deleted", { season_id: seasonId, team_id: teamId });
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
@@ -1230,6 +1257,7 @@ export async function addRosterToSeason(
       if (error) throw new Error(error.message);
     }
   }
+  void logToolActivity("rc_roster_uploaded", { season_id: seasonId, mode: "merge", divisions: divisions.length });
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
@@ -1398,6 +1426,7 @@ export async function addAssistantCoach(
       if (upErr) throw new Error(upErr.message);
     }
   }
+  void logToolActivity("rc_assistant_added", { season_id: seasonId, team_id: teamId, coach: n, attached: attachPlayerIds?.length ?? 0 });
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
@@ -1444,6 +1473,7 @@ export async function addRosterAdmin(phone: string, label: string): Promise<{ er
     .from("roster_admins")
     .upsert({ phone_key: key, label: label.trim() || null }, { onConflict: "phone_key" });
   if (error) return { error: error.message };
+  void logToolActivity("rc_access_granted", { label: label.trim() || null });
   revalidatePath("/tools/roster-creator");
   return {};
 }
@@ -1453,6 +1483,7 @@ export async function removeRosterAdmin(id: string): Promise<{ error?: string }>
   const service = createServiceClient();
   const { error } = await service.from("roster_admins").delete().eq("id", id);
   if (error) return { error: error.message };
+  void logToolActivity("rc_access_revoked", { admin_id: id });
   revalidatePath("/tools/roster-creator");
   return {};
 }

@@ -43,6 +43,25 @@ const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   past_seasons_expanded:    { label: "Past seasons",        color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
   past_teams_expanded:      { label: "Past teams",          color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
   calendar_month_changed:   { label: "Calendar nav",        color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
+  // Roster Creator tool
+  rc_season_created:        { label: "RC: season created",  color: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300" },
+  rc_season_deleted:        { label: "RC: season deleted",  color: "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400" },
+  rc_roster_uploaded:       { label: "RC: roster uploaded", color: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300" },
+  rc_analyze_started:       { label: "RC: analyze started", color: "bg-cyan-50 text-cyan-600 dark:bg-cyan-900/20 dark:text-cyan-400" },
+  rc_analyze_completed:     { label: "RC: analyze done",    color: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300" },
+  rc_analyze_failed:        { label: "RC: analyze FAILED",  color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  rc_teams_generated:       { label: "RC: teams generated", color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
+  rc_generate_failed:       { label: "RC: generate FAILED", color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  rc_player_moved:          { label: "RC: player moved",    color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" },
+  rc_team_added:            { label: "RC: team added",      color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+  rc_coach_team_added:      { label: "RC: coach team added",color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+  rc_assistant_added:       { label: "RC: assistant added", color: "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400" },
+  rc_team_deleted:          { label: "RC: team deleted",    color: "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400" },
+  rc_lock_changed:          { label: "RC: lock changed",    color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
+  rc_csv_exported:          { label: "RC: CSV exported",    color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
+  rc_roster_emailed:        { label: "RC: roster emailed",  color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
+  rc_access_granted:        { label: "RC: access granted",  color: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300" },
+  rc_access_revoked:        { label: "RC: access revoked",  color: "bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/20 dark:text-fuchsia-400" },
 }
 
 function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
@@ -88,6 +107,38 @@ function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
   if (event === "card_bg_removal_failed" || event === "card_save_failed") {
     return meta.error ? String(meta.error).slice(0, 60) : ""
   }
+  // ── Roster Creator ──
+  if (event === "rc_analyze_completed") {
+    const parts = []
+    if (meta.players) parts.push(`${meta.players} players`)
+    if (meta.seconds != null) parts.push(`${meta.seconds}s`)
+    if (meta.buddyLinks != null) parts.push(`${meta.buddyLinks} buddies`)
+    if (meta.unmatched_coaches) parts.push(`${meta.unmatched_coaches} unmatched coaches`)
+    return parts.join(" · ")
+  }
+  if (event === "rc_analyze_failed" || event === "rc_generate_failed") {
+    return meta.error ? String(meta.error).slice(0, 80) : ""
+  }
+  if (event === "rc_teams_generated") {
+    const parts = []
+    if (meta.divisions != null) parts.push(`${meta.divisions} divisions`)
+    if (meta.players != null) parts.push(`${meta.players} players`)
+    return parts.join(" · ")
+  }
+  if (event === "rc_coach_team_added" || event === "rc_assistant_added") {
+    const parts = []
+    if (meta.coach) parts.push(String(meta.coach))
+    if (meta.reason) parts.push(`(${meta.reason})`)
+    if (meta.attached) parts.push(`${meta.attached} kids`)
+    return parts.join(" · ")
+  }
+  if (event === "rc_team_added") return meta.kind ? String(meta.kind) : ""
+  if (event === "rc_lock_changed") return `${meta.scope ?? ""} ${meta.locked ? "locked" : "unlocked"}`.trim()
+  if (event === "rc_csv_exported") return meta.rows ? `${meta.rows} rows` : ""
+  if (event === "rc_roster_emailed") return meta.to ? String(meta.to) : ""
+  if (event === "rc_season_created") return meta.name ? String(meta.name) : ""
+  if (event === "rc_roster_uploaded") return [meta.mode, meta.divisions ? `${meta.divisions} divisions` : ""].filter(Boolean).join(" · ")
+  if (event === "rc_access_granted") return meta.label ? String(meta.label) : ""
   return ""
 }
 
@@ -109,7 +160,7 @@ export default async function ActivityPage({
 
   const supabase = await createClient()
 
-  const [{ data: rows }, { data: allParents }] = await Promise.all([
+  const [{ data: rows }, { data: allParents }, { data: { user } }, { data: adminLabels }] = await Promise.all([
     (() => {
       let q = supabase
         .from("user_activity")
@@ -121,7 +172,22 @@ export default async function ActivityPage({
       return q
     })(),
     supabase.from("parents").select("id, first_name, last_name").order("first_name"),
+    supabase.auth.getUser(),
+    supabase.rpc("roster_admin_labels"),
   ])
+
+  // Tool events (Roster Creator) are attributed to an auth user via
+  // metadata.actor_user_id — the owner (the viewer) or a shared roster admin.
+  const labelByUser = new Map<string, string>(
+    ((adminLabels ?? []) as { auth_user_id: string; label: string | null }[]).map((r) => [r.auth_user_id, r.label ?? "Admin"])
+  )
+  const actorOf = (meta: Record<string, unknown> | null): { name: string; admin: boolean } | null => {
+    const uid = meta && typeof meta.actor_user_id === "string" ? (meta.actor_user_id as string) : null
+    if (!uid) return null
+    if (user && uid === user.id) return { name: "You (owner)", admin: false }
+    const label = labelByUser.get(uid)
+    return { name: label ?? "Unknown user", admin: true }
+  }
 
   // Summary counts
   const counts: Record<string, number> = {}
@@ -188,7 +254,7 @@ export default async function ActivityPage({
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">When</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">Parent</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">User</th>
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">Event</th>
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400">Details</th>
               </tr>
@@ -198,6 +264,7 @@ export default async function ActivityPage({
                 const parent = row.parents as any
                 const cfg    = EVENT_LABELS[row.event] ?? { label: row.event, color: "bg-gray-100 text-gray-600" }
                 const detail = fmtMeta(row.event, row.metadata as any)
+                const actor  = parent ? null : actorOf(row.metadata as any)
                 return (
                   <tr key={row.id} className="bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/40">
                     <td className="px-4 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
@@ -219,6 +286,15 @@ export default async function ActivityPage({
                             <span className="ml-1.5 text-xs font-normal text-gray-400 dark:text-gray-500">{parent.phone}</span>
                           )}
                         </button>
+                      ) : actor ? (
+                        <span className="text-xs">
+                          <span className="text-gray-800 dark:text-gray-200 font-medium">{actor.name}</span>
+                          {actor.admin && (
+                            <span className="ml-1.5 rounded-full bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                              shared admin
+                            </span>
+                          )}
+                        </span>
                       ) : (
                         <span className="text-xs text-gray-400">—</span>
                       )}

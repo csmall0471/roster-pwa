@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { runAnalysis } from "../../analyze";
+import { logToolActivity } from "@/lib/activity";
 
 // Server-Sent Events: streams { done, total } progress as Claude works through
 // the batches, then a final `result` event with the conflicts. Lets the client
@@ -26,6 +27,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!allowed) return new Response("Forbidden", { status: 403 });
 
   console.error(`[analyze route] connected — season ${id}`);
+  const startedAt = Date.now();
+  void logToolActivity("rc_analyze_started", { season_id: id });
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -40,11 +43,23 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       try {
         const result = await runAnalysis(supabase, id, (done, total) => send("progress", { done, total }), req.signal);
         send("result", result);
+        void logToolActivity("rc_analyze_completed", {
+          season_id: id,
+          seconds: Math.round((Date.now() - startedAt) / 1000),
+          ...result.summary,
+          unmatched_coaches: result.unmatchedCoaches.length,
+          unmatched_buddies: result.unmatchedBuddies.length,
+        });
       } catch (e) {
         // A client-disconnect abort is expected, not a real failure.
         if (!req.signal.aborted) {
           console.error(`[analyze route] failed:`, e instanceof Error ? e.message : e);
           send("failed", { message: e instanceof Error ? e.message : "Analysis failed." });
+          void logToolActivity("rc_analyze_failed", {
+            season_id: id,
+            seconds: Math.round((Date.now() - startedAt) / 1000),
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
       } finally {
         try {
