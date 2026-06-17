@@ -16,7 +16,11 @@ export default function RosterAccessManager({ admins }: { admins: RosterAdminRow
   const [phone, setPhone] = useState("");
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [pending, start] = useTransition();
+
+  const loginUrl =
+    typeof window !== "undefined" ? `${window.location.origin}/roster-login` : "/roster-login";
 
   function add() {
     setError(null);
@@ -58,6 +62,23 @@ export default function RosterAccessManager({ admins }: { admins: RosterAdminRow
             text code (no email or password) and can build these same seasons with you — they can&rsquo;t see your
             teams, players, or events.
           </p>
+
+          {/* Share link — the roster-only sign-in page (no family features). */}
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 px-3 py-2">
+            <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Send them this link:</span>
+            <code className="flex-1 min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">{loginUrl}</code>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard?.writeText(loginUrl);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+              className="shrink-0 rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
 
           {admins.length > 0 && (
             <ul className="divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800">

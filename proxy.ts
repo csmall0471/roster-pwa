@@ -40,16 +40,18 @@ export async function proxy(request: NextRequest) {
     }));
   }
 
-  // Unauthenticated → /login (allow the auth callback through)
-  if (!user && pathname !== "/" && pathname !== "/login" && pathname !== "/admin" && !pathname.startsWith("/auth") && !pathname.startsWith("/api/cron") && !pathname.startsWith("/event/") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/sms-opt-in" && pathname !== "/no-access" && pathname !== "/house") {
+  // Unauthenticated → login (allow the auth callback through). Roster-tool deep
+  // links go to the roster admin login (no family features); everything else to
+  // the family login.
+  if (!user && pathname !== "/" && pathname !== "/login" && pathname !== "/roster-login" && pathname !== "/admin" && !pathname.startsWith("/auth") && !pathname.startsWith("/api/cron") && !pathname.startsWith("/event/") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/sms-opt-in" && pathname !== "/no-access" && pathname !== "/house") {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = pathname.startsWith("/tools/roster-creator") ? "/roster-login" : "/login";
     url.searchParams.set("next", pathname + (request.nextUrl.search ?? ""));
     return NextResponse.redirect(url);
   }
 
-  // Already authenticated → skip login/admin pages
-  if (user && (pathname === "/login" || pathname === "/admin")) {
+  // Already authenticated → skip the login pages
+  if (user && (pathname === "/login" || pathname === "/roster-login" || pathname === "/admin")) {
     const url = request.nextUrl.clone();
     url.pathname = "/teams";
     return NextResponse.redirect(url);
