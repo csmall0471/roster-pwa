@@ -11,12 +11,30 @@ export default async function RosterCreatorPage() {
 
   const { data: seasons } = await supabase
     .from("tb_seasons")
-    .select("id, name, sport, status, created_at, tb_players(count), tb_divisions(count)")
+    .select("id, name, sport, status, created_at, user_id, updated_at, updated_by, tb_players(count), tb_divisions(count)")
     .order("created_at", { ascending: false });
 
   // Only the coach owner manages who else can use the tool.
   const canManage = await canManageRosterAccess();
   const admins = canManage ? await listRosterAdmins() : [];
+
+  // Resolve who created/edited each season — granted admins show their label,
+  // anyone else (the team owner) shows as "Owner".
+  const { data: labelRows } = await supabase.rpc("roster_admin_labels");
+  const labelByUser = new Map<string, string>(
+    (labelRows ?? []).map((r: { auth_user_id: string; label: string | null }) => [r.auth_user_id, r.label ?? "Admin"])
+  );
+  const actorName = (uid: string | null): string => (uid ? labelByUser.get(uid) : null) || "Owner";
+  const relTime = (iso: string | null): string => {
+    if (!iso) return "";
+    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.round(h / 24);
+    return d < 30 ? `${d}d ago` : new Date(iso).toLocaleDateString();
+  };
 
   type SeasonRow = {
     id: string;
@@ -24,6 +42,9 @@ export default async function RosterCreatorPage() {
     sport: string | null;
     status: string;
     created_at: string;
+    user_id: string | null;
+    updated_at: string | null;
+    updated_by: string | null;
     tb_players: { count: number }[];
     tb_divisions: { count: number }[];
   };
@@ -89,6 +110,12 @@ export default async function RosterCreatorPage() {
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {divisions} {divisions === 1 ? "division" : "divisions"} · {players}{" "}
                         {players === 1 ? "player" : "players"} · {new Date(s.created_at).toLocaleDateString()}
+                      </p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-400 dark:text-gray-500">
+                        <span>Created by <span className="font-medium text-gray-500 dark:text-gray-400">{actorName(s.user_id)}</span></span>
+                        {s.updated_by && (
+                          <span>· Last edited by <span className="font-medium text-gray-500 dark:text-gray-400">{actorName(s.updated_by)}</span>{s.updated_at ? ` · ${relTime(s.updated_at)}` : ""}</span>
+                        )}
                       </p>
                     </div>
                     <span className="shrink-0 text-xs rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-1 text-gray-600 dark:text-gray-300">
