@@ -27,6 +27,7 @@ export default async function ProtectedLayout({
   // Roster admins: people the coach granted Roster-Creator-only access by phone.
   // They aren't coaches; they get a scoped nav and are held to that one tool.
   let scopedAdmin = false;
+  let scopedLabel: string | null = null;
 
   if (!isCoach) {
     // Link this phone-authed user to a matching access-list row (if any), then
@@ -34,6 +35,13 @@ export default async function ProtectedLayout({
     const { data: admin } = await supabase.rpc("link_roster_admin");
     if (admin) {
       scopedAdmin = true;
+      // Resolve the name the owner gave them, to show in the header instead of
+      // the raw phone number they logged in with.
+      const { data: labels } = await supabase.rpc("roster_admin_labels");
+      const mine = ((labels ?? []) as { auth_user_id: string; label: string | null }[]).find(
+        (r) => r.auth_user_id === user.id
+      );
+      scopedLabel = mine?.label?.trim() || null;
     } else {
       // Check if already linked to a parent record
       const { data: parentLink } = await supabase
@@ -118,7 +126,13 @@ export default async function ProtectedLayout({
             )}
           </nav>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{user.email ?? user.phone}</span>
+            {scopedAdmin ? (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                Signed in as <span className="font-semibold text-gray-700 dark:text-gray-200">{scopedLabel ?? user.phone ?? user.email}</span>
+              </span>
+            ) : (
+              <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{user.email ?? user.phone}</span>
+            )}
             <ThemeToggle />
             <SignOutButton />
           </div>
