@@ -78,6 +78,8 @@ export type AssignInput = {
   players: GroupPlayer[]; // GroupPlayer already carries: id, coachId, teamNameId, nights, buddyIds
   targetSize: number; // players-per-team target for this division
   protectedCoachIds?: Set<string>; // coaches whose own child is enrolled here — inviolable
+  weights?: Weights; // request priorities — used by the refinement pass
+  lockedTeamIds?: Set<string>; // teams the refinement pass must never touch
 };
 
 export type TeamAssignment = { teamId: string; playerIds: string[]; night: string | null };
@@ -106,6 +108,160 @@ function nightFit(members: GroupPlayer[], team: WorkingTeam): number {
   if (!night) return 1.2;
   const free = withPref.filter((m) => m.nights.includes(night)).length / withPref.length;
   return 2 * free;
+}
+
+// Imbalance cost of a team: squared distance from target (empty placeholders are
+// free — we never force-fill one). Summed over teams, this is what the refinement
+// pass drives down: a 24-player team next to a 6-player team is very expensive.
+function penalty(size: number, target: number): number {
+  return size === 0 ? 0 : (size - target) ** 2;
+}
+
+// Total satisfied-request weight for a team's roster: coach + buddy + night, using
+// the configured weights — exactly the requests flagsFor reports, so the engine and
+// the board agree on what "met" means. Night is the team's emergent bestNight.
+function teamScore(members: GroupPlayer[], coachId: string | null, w: Weights): number {
+  if (members.length === 0) return 0;
+  const ids = new Set(members.map((m) => m.id));
+  const night = bestNight(members);
+  let s = 0;
+  for (const m of members) {
+    if (m.coachId != null && coachId === m.coachId) s += w.coach;
+    if (m.buddyIds.length > 0 && m.buddyIds.some((b) => ids.has(b))) s += w.buddy;
+    if (night && m.nights.includes(night)) s += w.night;
+  }
+  return s;
+}
+
+// Connected components of a team's MOVABLE members under buddy adjacency
+// (restricted to the team). Each is a unit the refiner can relocate without
+// splitting buddies who are currently together. Deterministic (member order).
+function movableComponents(
+  src: WorkingTeam,
+  movable: (p: GroupPlayer, wt: WorkingTeam) => boolean
+): GroupPlayer[][] {
+  const mem = src.members.filter((m) => movable(m, src));
+  const set = new Set(mem.map((m) => m.id));
+  const byId = new Map(mem.map((m) => [m.id, m]));
+  const seen = new Set<string>();
+  const comps: GroupPlayer[][] = [];
+  for (const p of mem) {
+    if (seen.has(p.id)) continue;
+    const comp: GroupPlayer[] = [];
+    const queue = [p];
+    seen.add(p.id);
+    while (queue.length) {
+      const cur = queue.shift()!;
+      comp.push(cur);
+      for (const b of cur.buddyIds) {
+        if (set.has(b) && !seen.has(b)) {
+          seen.add(b);
+          queue.push(byId.get(b)!);
+        }
+      }
+    }
+    comps.push(comp);
+  }
+  return comps;
+}
+
+// Post-process the first greedy pass. A bounded, deterministic hill-climb that
+// applies the single best move/swap each round, but ONLY ones that never reduce
+// total satisfaction (no met request is ever broken) and never worsen balance.
+// This is the "keep going rather than one attempt" pass: it de-bloats teams that
+// overshot target while open teams sit at the floor, and unites buddies stranded
+// on separate teams when a safe move or an equal-size swap can do it. A locked
+// team is never read-from or written-to.
+function refine(teams: WorkingTeam[], target: number, w: Weights, locked: Set<string>): void {
+  const movable = (p: GroupPlayer, wt: WorkingTeam) =>
+    !locked.has(wt.team.id) &&
+    !(p.coachId != null && wt.team.coachId === p.coachId); // a coach match / coach's kid is anchored
+
+  const total = teams.reduce((a, t) => a + t.members.length, 0);
+  const MAX_ROUNDS = total * 4 + 50; // converges well before this; a hard stop for safety
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const baseScore = teams.map((t) => teamScore(t.members, t.team.coachId, w));
+    const basePen = teams.map((t) => penalty(t.members.length, target));
+
+    let best: { gain: number; apply: () => void } | null = null;
+    const consider = (gain: number, apply: () => void) => {
+      if (gain > 1e-9 && (best === null || gain > best.gain)) best = { gain, apply };
+    };
+
+    // (a) Component moves — relocate a movable player OR a whole buddy-cluster as
+    //     a unit to another team. Moving a single fill evens out sizes; moving a
+    //     cluster together de-bloats an over-target team WITHOUT splitting the
+    //     buddies that glue it (the common reason one team balloons). A unit is a
+    //     connected component of movable members under buddy adjacency within src.
+    for (let si = 0; si < teams.length; si++) {
+      const src = teams[si];
+      if (locked.has(src.team.id)) continue;
+      for (const comp of movableComponents(src, movable)) {
+        const compSet = new Set(comp.map((m) => m.id));
+        const srcRest = src.members.filter((m) => !compSet.has(m.id));
+        const srcScoreA = teamScore(srcRest, src.team.coachId, w);
+        const srcPenA = penalty(srcRest.length, target);
+        for (let di = 0; di < teams.length; di++) {
+          if (di === si) continue;
+          const dst = teams[di];
+          if (locked.has(dst.team.id)) continue;
+          const dstWith = dst.members.concat(comp);
+          const dS = srcScoreA + teamScore(dstWith, dst.team.coachId, w) - baseScore[si] - baseScore[di];
+          if (dS < -1e-9) continue; // would break a met request
+          const dImb = srcPenA + penalty(dstWith.length, target) - basePen[si] - basePen[di];
+          if (dImb > 1e-9) continue; // would worsen balance
+          consider(dS - dImb, () => {
+            src.members = srcRest;
+            dst.members = dst.members.concat(comp);
+          });
+        }
+      }
+    }
+
+    // (b) Targeted swaps — equal sizes, so balance-neutral. Unite a player with an
+    //     unmet buddy, or put them on a night they're free, by trading with a
+    //     movable player who loses nothing. Only destinations that can help are tried.
+    for (let si = 0; si < teams.length; si++) {
+      const src = teams[si];
+      if (locked.has(src.team.id)) continue;
+      const srcIds = new Set(src.members.map((m) => m.id));
+      const srcNight = bestNight(src.members);
+      for (const p of src.members) {
+        if (!movable(p, src)) continue;
+        const buddyUnmet = p.buddyIds.length > 0 && !p.buddyIds.some((b) => srcIds.has(b));
+        const nightUnmet = p.nights.length > 0 && (!srcNight || !p.nights.includes(srcNight));
+        if (!buddyUnmet && !nightUnmet) continue;
+        for (let di = 0; di < teams.length; di++) {
+          if (di === si) continue;
+          const dst = teams[di];
+          if (locked.has(dst.team.id)) continue;
+          const dstIds = new Set(dst.members.map((m) => m.id));
+          const helps =
+            (buddyUnmet && p.buddyIds.some((b) => dstIds.has(b))) ||
+            (nightUnmet && p.nights.includes(bestNight(dst.members) ?? ""));
+          if (!helps) continue;
+          for (const q of dst.members) {
+            if (!movable(q, dst)) continue;
+            const srcSwapped = src.members.map((m) => (m === p ? q : m));
+            const dstSwapped = dst.members.map((m) => (m === q ? p : m));
+            const dS =
+              teamScore(srcSwapped, src.team.coachId, w) +
+              teamScore(dstSwapped, dst.team.coachId, w) -
+              baseScore[si] - baseScore[di];
+            if (dS < 1e-9) continue; // a swap must strictly improve satisfaction
+            consider(dS, () => {
+              src.members = src.members.map((m) => (m === p ? q : m));
+              dst.members = dst.members.map((m) => (m === q ? p : m));
+            });
+          }
+        }
+      }
+    }
+
+    if (best === null) break;
+    (best as { gain: number; apply: () => void }).apply();
+  }
 }
 
 // Assign every player into the FIXED set of input.teams. Pure & deterministic:
@@ -264,6 +420,12 @@ export function assignDivision(input: AssignInput): AssignResult {
     }
     if (best) place(p, best);
   }
+
+  // 5b. Refinement: keep improving the first pass instead of stopping here. Only
+  //    safe moves/swaps (never break a met request, never worsen balance) — this
+  //    fixes over-target teams sitting next to floor-sized ones and unites stranded
+  //    buddies. Locked teams are left exactly as they are.
+  refine(teams, target, input.weights ?? DEFAULT_CONFIG.weights, input.lockedTeamIds ?? new Set());
 
   // 6 + 7. Emit EVERY team (empty placeholders included), each with its practice
   //    night chosen by member availability. Empty team → night null.

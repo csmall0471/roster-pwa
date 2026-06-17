@@ -798,6 +798,7 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
       players: groupPlayers,
       targetSize,
       protectedCoachIds,
+      weights: cfg.weights,
     });
 
     const currentNight = new Map(fixedTeams.map((t) => [t.id, t.night]));
