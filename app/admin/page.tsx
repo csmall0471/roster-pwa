@@ -16,6 +16,9 @@ export default function AdminLoginPage() {
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
         scopes: "https://www.googleapis.com/auth/gmail.compose",
+        // offline + consent → Google returns a refresh token we can store, so
+        // Gmail keeps working after the 1h access token expires (no re-login).
+        queryParams: { access_type: "offline", prompt: "consent" },
       },
     });
     if (authError) {

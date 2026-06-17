@@ -26,8 +26,18 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // Stash Google's refresh token (only handed to us here) so Gmail access can
+      // be renewed later without forcing a re-login. Present only when the sign-in
+      // requested offline access + consent.
+      const refreshToken = data.session?.provider_refresh_token;
+      const userId = data.session?.user.id;
+      if (refreshToken && userId) {
+        await supabase
+          .from("google_oauth_tokens")
+          .upsert({ user_id: userId, refresh_token: refreshToken, updated_at: new Date().toISOString() });
+      }
       const url = request.nextUrl.clone();
       url.pathname = next;
       url.search = "";
