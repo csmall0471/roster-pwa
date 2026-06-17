@@ -19,10 +19,10 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
 
   const [{ data: divisions }, { data: teams }, players, links, { data: coaches }, { data: teamNamesRows }, { data: assists }] =
     await Promise.all([
-      supabase.from("tb_divisions").select("id, name, position").eq("season_id", id).order("position"),
+      supabase.from("tb_divisions").select("id, name, position, locked").eq("season_id", id).order("position"),
       supabase
         .from("tb_teams")
-        .select("id, division_id, name, practice_night, position, coach_id")
+        .select("id, division_id, name, practice_night, position, coach_id, locked")
         .eq("season_id", id)
         .order("position"),
       selectAll((from, to) =>
@@ -100,6 +100,7 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
     night: (t.practice_night as string | null) ?? null,
     coachId: (t.coach_id as string | null) ?? null,
     assistants: assistantsByTeam.get(t.id as string) ?? [],
+    locked: !!t.locked,
   }));
 
   const config = normalizeConfig(season.grouping_config as Parameters<typeof normalizeConfig>[0]);
@@ -151,7 +152,7 @@ export default async function TeamsPage({ params }: { params: Promise<{ id: stri
       seasonId={id}
       seasonName={season.name as string}
       config={config}
-      divisions={(divisions ?? []).map((d) => ({ id: d.id as string, name: d.name as string }))}
+      divisions={(divisions ?? []).map((d) => ({ id: d.id as string, name: d.name as string, locked: !!d.locked }))}
       teams={boardTeams}
       players={boardPlayers}
       playUps={playUps}

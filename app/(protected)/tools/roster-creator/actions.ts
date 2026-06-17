@@ -685,18 +685,18 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
     await Promise.all([
       supabase
         .from("tb_divisions")
-        .select("id, name, position, target_team_size")
+        .select("id, name, position, target_team_size, locked")
         .eq("season_id", seasonId)
         .order("position"),
       supabase
         .from("tb_teams")
-        .select("id, division_id, coach_id, is_placeholder, practice_night, position")
+        .select("id, division_id, coach_id, is_placeholder, practice_night, position, locked")
         .eq("season_id", seasonId)
         .order("position"),
       selectAll((from, to) =>
         supabase
           .from("tb_players")
-          .select("id, last_name, division_id, resolved_coach_id, practice_nights, raw, team_name")
+          .select("id, last_name, division_id, resolved_coach_id, practice_nights, raw, team_name, team_id")
           .eq("season_id", seasonId)
           .order("id")
           .range(from, to)
@@ -747,11 +747,12 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
     return best && best.count >= 3 ? best.display : null;
   }
 
-  // Reset prior assignments (regenerate). Teams PERSIST — only players move.
-  await supabase.from("tb_players").update({ team_id: null }).eq("season_id", seasonId);
-
-  // The authoritative, fixed teams, grouped by division.
-  type DivTeam = { id: string; coachId: string | null; isPlaceholder: boolean; night: string | null };
+  // The authoritative, fixed teams, grouped by division. A LOCKED team is frozen:
+  // re-planning never touches it or its players. A LOCKED division is skipped
+  // entirely. (We don't blanket-reset team_id up front anymore — that would wipe
+  // locked rosters — instead each re-planned division clears only its own
+  // movable players just before reassigning them.)
+  type DivTeam = { id: string; coachId: string | null; isPlaceholder: boolean; night: string | null; locked: boolean };
   const teamsByDivision = new Map<string, DivTeam[]>();
   for (const t of teamRows ?? []) {
     const dz = t.division_id as string;
@@ -761,13 +762,27 @@ export async function generateTeams(seasonId: string, config?: GroupConfig) {
       coachId: (t.coach_id as string | null) ?? null,
       isPlaceholder: !!t.is_placeholder,
       night: (t.practice_night as string | null) ?? null,
+      locked: !!t.locked,
     });
   }
 
   for (const division of divisions ?? []) {
-    const members = rows.filter((p) => p.division_id === division.id);
-    const fixedTeams = teamsByDivision.get(division.id as string) ?? [];
+    if (division.locked) continue; // locked division — leave all its teams as-is
+    const allTeams = teamsByDivision.get(division.id as string) ?? [];
+    const lockedTeamIds = new Set(allTeams.filter((t) => t.locked).map((t) => t.id));
+    // Only unlocked teams receive players; locked teams keep their current roster.
+    const fixedTeams = allTeams.filter((t) => !t.locked);
+    // Players frozen on a locked team in this division are excluded from re-planning.
+    const members = rows.filter(
+      (p) => p.division_id === division.id && !(p.team_id && lockedTeamIds.has(p.team_id as string))
+    );
     if (fixedTeams.length === 0 || members.length === 0) continue;
+
+    // Clear assignments for just these movable players before reassigning them.
+    await supabase
+      .from("tb_players")
+      .update({ team_id: null })
+      .in("id", members.map((p) => p.id as string));
 
     // A coach whose OWN child is enrolled here runs an inviolable team. Detect
     // it: the account that registered the player matches the coach they
@@ -853,6 +868,23 @@ export async function setTeamNight(seasonId: string, teamId: string, night: stri
     .from("tb_teams")
     .update({ practice_night: night })
     .eq("id", teamId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
+}
+
+// Lock a team so re-planning leaves its roster exactly as-is (its players are
+// also excluded from filling other teams).
+export async function setTeamLocked(seasonId: string, teamId: string, locked: boolean) {
+  const { supabase } = await requireOwner();
+  const { error } = await supabase.from("tb_teams").update({ locked }).eq("id", teamId).eq("season_id", seasonId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
+}
+
+// Lock a whole division so re-planning skips it entirely.
+export async function setDivisionLocked(seasonId: string, divisionId: string, locked: boolean) {
+  const { supabase } = await requireOwner();
+  const { error } = await supabase.from("tb_divisions").update({ locked }).eq("id", divisionId).eq("season_id", seasonId);
   if (error) throw new Error(error.message);
   revalidatePath(`/tools/roster-creator/${seasonId}/teams`);
 }

@@ -14,6 +14,8 @@ import {
   movePlayerToTeam,
   renameTeam,
   setTeamNight,
+  setTeamLocked,
+  setDivisionLocked,
   updateGroupingConfig,
 } from "../../actions";
 import { type GroupConfig, type Weights, NIGHTS, flagsFor } from "../../group/engine";
@@ -44,7 +46,7 @@ export type BoardPlayer = {
   buddyReq: boolean; // they named a buddy at all (matched or not) — the honest denominator
   raw: Record<string, unknown> | null; // the original CSV row, for the detail view
 };
-export type BoardTeam = { id: string; divisionId: string; name: string; night: string | null; coachId: string | null; assistants: string[] };
+export type BoardTeam = { id: string; divisionId: string; name: string; night: string | null; coachId: string | null; assistants: string[]; locked: boolean };
 export type PlayUpFlag = {
   playerId: string;
   name: string;
@@ -78,7 +80,7 @@ export default function TeamsBoard({
   seasonId: string;
   seasonName: string;
   config: GroupConfig;
-  divisions: { id: string; name: string }[];
+  divisions: { id: string; name: string; locked: boolean }[];
   teams: BoardTeam[];
   players: BoardPlayer[];
   playUps: PlayUpFlag[];
@@ -104,7 +106,7 @@ export default function TeamsBoard({
   // so we reset during render when the props' signature changes — the
   // React-recommended alternative to a syncing effect.
   const dataSig =
-    initialTeams.map((t) => `${t.id}:${t.name}:${t.night ?? ""}`).join("|") +
+    initialTeams.map((t) => `${t.id}:${t.name}:${t.night ?? ""}:${t.locked ? 1 : 0}`).join("|") +
     "#" +
     players.map((p) => `${p.id}:${p.teamId ?? ""}`).join(",");
   const [sig, setSig] = useState(dataSig);
@@ -188,7 +190,11 @@ export default function TeamsBoard({
   }
 
   async function generate() {
-    if (!confirm("Generate teams for all divisions? This replaces any existing teams.")) return;
+    const anyLocked = teams.some((t) => t.locked) || divisions.some((d) => d.locked);
+    const msg = anyLocked
+      ? "Re-plan teams? Locked teams and locked divisions are left untouched; everyone else is re-balanced around them."
+      : "Generate teams for all divisions? This replaces any existing teams.";
+    if (!confirm(msg)) return;
     setGenerating(true);
     setError(null);
     try {
@@ -198,6 +204,25 @@ export default function TeamsBoard({
       setError(e instanceof Error ? e.message : "Failed to generate.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  // Lock/unlock a team — frozen teams are preserved on the next re-plan.
+  async function toggleTeamLock(teamId: string, locked: boolean) {
+    setTeams((ts) => ts.map((x) => (x.id === teamId ? { ...x, locked } : x))); // optimistic
+    try {
+      await setTeamLocked(seasonId, teamId, locked);
+    } catch {
+      setTeams((ts) => ts.map((x) => (x.id === teamId ? { ...x, locked: !locked } : x)));
+    }
+  }
+
+  async function toggleDivisionLock(divisionId: string, locked: boolean) {
+    try {
+      await setDivisionLocked(seasonId, divisionId, locked);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update lock.");
     }
   }
 
@@ -511,6 +536,23 @@ export default function TeamsBoard({
             </select>
           </label>
           <span className="text-xs text-gray-400">{visibleTeams.length} teams</span>
+          {(() => {
+            const dLocked = divisions.find((d) => d.id === divisionId)?.locked ?? false;
+            return (
+              <button
+                type="button"
+                onClick={() => toggleDivisionLock(divisionId, !dLocked)}
+                title={dLocked ? "Division locked — re-planning skips it. Click to unlock." : "Lock this division so re-planning skips it entirely."}
+                className={`inline-flex items-center gap-1 rounded-md border px-2 py-1.5 text-xs font-semibold ${
+                  dLocked
+                    ? "border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                    : "border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                }`}
+              >
+                {dLocked ? "🔒 Division locked" : "Lock division"}
+              </button>
+            );
+          })()}
           <input
             value={teamQuery}
             onChange={(e) => setTeamQuery(e.target.value)}
@@ -607,11 +649,19 @@ export default function TeamsBoard({
           const coach = teamCoach.get(t.id);
           const sizeColor = members.length > target ? "text-amber-600" : "text-gray-500 dark:text-gray-400";
           return (
-            <Column key={t.id} onDropPlayer={(pid) => move(pid, t.id)}>
+            <Column key={t.id} onDropPlayer={(pid) => move(pid, t.id)} locked={t.locked}>
               <div className="flex items-center justify-between gap-2">
                 <input defaultValue={t.name} onBlur={(e) => { renameTeam(seasonId, t.id, e.target.value); }}
                   className="font-semibold text-sm bg-transparent text-gray-900 dark:text-white w-full focus:outline-none focus:border-b border-gray-300" />
                 <span className={`text-xs font-semibold ${sizeColor}`} title={`target ${target}`}>{members.length}/{target}</span>
+                <button
+                  type="button"
+                  onClick={() => toggleTeamLock(t.id, !t.locked)}
+                  title={t.locked ? "Team locked — re-planning won't change it. Click to unlock." : "Lock this team so re-planning keeps it exactly as-is."}
+                  className={`shrink-0 rounded px-1 text-sm leading-none ${t.locked ? "text-amber-600 dark:text-amber-400" : "text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"}`}
+                >
+                  {t.locked ? "🔒" : "🔓"}
+                </button>
               </div>
               <p className="text-[11px] text-gray-400 mb-1 truncate">
                 {coach ? coachNames[coach] ?? "" : "no coach"}
@@ -737,14 +787,21 @@ export default function TeamsBoard({
   );
 }
 
-function Column({ children, onDropPlayer, muted }: { children: React.ReactNode; onDropPlayer: (playerId: string) => void; muted?: boolean }) {
+function Column({ children, onDropPlayer, muted, locked }: { children: React.ReactNode; onDropPlayer: (playerId: string) => void; muted?: boolean; locked?: boolean }) {
   const [over, setOver] = useState(false);
+  const base = over
+    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30"
+    : locked
+      ? "border-amber-400 dark:border-amber-600 bg-amber-50/40 dark:bg-amber-950/20 ring-1 ring-amber-200 dark:ring-amber-800"
+      : muted
+        ? "border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/40"
+        : "border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900";
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); const id = e.dataTransfer.getData("text/plain"); if (id) onDropPlayer(id); }}
-      className={`shrink-0 w-56 rounded-lg border p-2 ${over ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30" : muted ? "border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/40" : "border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"}`}
+      className={`shrink-0 w-56 rounded-lg border p-2 ${base}`}
     >
       {children}
     </div>
