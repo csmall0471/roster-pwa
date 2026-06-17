@@ -23,6 +23,9 @@ export interface Player {
   date_of_birth: string | null;
   grade: string | null;
   shirt_size: string | null;
+  gender: string | null;
+  weight: number | null;
+  external_id: string | null;
   notes: string | null;
   created_at: string;
 }

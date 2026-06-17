@@ -52,6 +52,12 @@ export default async function PlayersPage() {
             Import TSV
           </Link>
           <Link
+            href="/players/import-json"
+            className="rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            Import JSON
+          </Link>
+          <Link
             href="/players/new"
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
           >
