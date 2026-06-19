@@ -3,18 +3,20 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
-// A roster admin only has access to the Roster Creator. RLS already keeps them
-// out of the coach's other data, but this keeps them on the right page rather
-// than landing on empty coach screens.
-export default function ScopedAdminGuard() {
+// A scoped tool user (granted specific tools, not a coach) is held to exactly
+// the tools they were granted. RLS already keeps them out of the coach's other
+// data, but this keeps them on the right pages rather than landing on empty
+// coach screens. `allowedPaths` are the granted tools' base hrefs.
+export default function ScopedAdminGuard({ allowedPaths }: { allowedPaths: string[] }) {
   const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
-    if (!pathname.startsWith("/tools/roster-creator")) {
-      router.replace("/tools/roster-creator");
+    const ok = allowedPaths.some((p) => pathname === p || pathname.startsWith(p + "/"));
+    if (!ok && allowedPaths.length > 0) {
+      router.replace(allowedPaths[0]);
     }
-  }, [pathname, router]);
+  }, [pathname, router, allowedPaths]);
 
   return null;
 }

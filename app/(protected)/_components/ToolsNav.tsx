@@ -2,11 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-
-const TOOLS = [
-  { href: "/tools/roster-creator", label: "Roster Creator" },
-  { href: "/tools/card-creator", label: "Card Creator" },
-];
+import { TOOLS } from "@/lib/tools";
 
 export default function ToolsNav() {
   const [open, setOpen] = useState(false);
@@ -52,7 +48,7 @@ export default function ToolsNav() {
         >
           {TOOLS.map((tool) => (
             <Link
-              key={tool.href}
+              key={tool.key}
               href={tool.href}
               role="menuitem"
               onClick={() => setOpen(false)}
@@ -61,6 +57,15 @@ export default function ToolsNav() {
               {tool.label}
             </Link>
           ))}
+          <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+          <Link
+            href="/access"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="block px-4 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            Manage access…
+          </Link>
         </div>
       )}
     </div>

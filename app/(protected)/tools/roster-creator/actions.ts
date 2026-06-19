@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { phoneKey } from "@/lib/phone";
 import {
   type CanonicalRecord,
   type ColumnMapping,
@@ -1442,51 +1441,10 @@ export async function removeAssistantCoach(seasonId: string, teamId: string, coa
   revalidatePath(`/tools/roster-creator/${seasonId}/setup`);
 }
 
-// ── Shared access (roster admins) ─────────────────────────────────────────────
-// The owner grants others access to ONLY the Roster Creator by phone number;
-// they log in with phone OTP and share these seasons. Managed via the service
-// client (the table is locked to direct client access).
-
-export type RosterAdminRow = { id: string; phone_key: string; label: string | null; linked: boolean };
-
-export async function listRosterAdmins(): Promise<RosterAdminRow[]> {
-  await requireCoachOwner();
-  const service = createServiceClient();
-  const { data } = await service
-    .from("roster_admins")
-    .select("id, phone_key, label, auth_user_id")
-    .order("created_at", { ascending: true });
-  return (data ?? []).map((r) => ({
-    id: r.id as string,
-    phone_key: r.phone_key as string,
-    label: (r.label as string | null) ?? null,
-    linked: !!r.auth_user_id,
-  }));
-}
-
-export async function addRosterAdmin(phone: string, label: string): Promise<{ error?: string }> {
-  await requireCoachOwner();
-  const key = phoneKey(phone);
-  if (key.length < 10) return { error: "Enter a valid 10-digit phone number." };
-  const service = createServiceClient();
-  const { error } = await service
-    .from("roster_admins")
-    .upsert({ phone_key: key, label: label.trim() || null }, { onConflict: "phone_key" });
-  if (error) return { error: error.message };
-  void logToolActivity("rc_access_granted", { label: label.trim() || null });
-  revalidatePath("/tools/roster-creator");
-  return {};
-}
-
-export async function removeRosterAdmin(id: string): Promise<{ error?: string }> {
-  await requireCoachOwner();
-  const service = createServiceClient();
-  const { error } = await service.from("roster_admins").delete().eq("id", id);
-  if (error) return { error: error.message };
-  void logToolActivity("rc_access_revoked", { admin_id: id });
-  revalidatePath("/tools/roster-creator");
-  return {};
-}
+// ── Shared access ─────────────────────────────────────────────────────────────
+// Granting tools to others now lives in the unified permission manager
+// (app/(protected)/access). The roster page only needs to know whether the
+// viewer may manage access, to show the "Manage access →" link.
 
 // For the page: can the viewer manage access (is the coach owner)?
 export async function canManageRosterAccess(): Promise<boolean> {

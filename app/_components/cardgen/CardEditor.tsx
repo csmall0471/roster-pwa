@@ -46,6 +46,18 @@ type Props = {
   // finished card is exported to the photo library / downloaded instead of
   // saved against a player record.
   standalone?: boolean;
+  // Players this principal may attach a standalone card to (owner → their
+  // roster; parent → their kids). When present, the editor offers "save to a
+  // player" alongside "save to photos".
+  assignTargets?: AssignTarget[];
+};
+
+export type AssignTarget = {
+  id: string;
+  name: string;
+  teamId: string | null;
+  teamName: string | null;
+  season: string | null;
 };
 
 const EMPTY_STATS: BackStats = {
@@ -148,6 +160,7 @@ export default function CardEditor({
   returnHref,
   initialDesign,
   standalone = false,
+  assignTargets = [],
 }: Props) {
   const router = useRouter();
 
@@ -171,6 +184,10 @@ export default function CardEditor({
     initialDesign?.cutout_url ? "edit" : "upload"
   );
   const [error, setError] = useState<string | null>(null);
+  // Standalone assign-to-player: which player to attach to ("" = export only),
+  // and a success note after assigning.
+  const [assignPlayerId, setAssignPlayerId] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Layer state
   const [cutoutUrl, setCutoutUrl] = useState<string | null>(
@@ -472,10 +489,11 @@ export default function CardEditor({
 
   // ── Save ────────────────────────────────────────────────────
 
-  async function handleSave() {
+  async function handleSave(assignToPlayerId?: string) {
     if (!stageRef.current || !cutoutUrl) return;
     setStep("saving");
     setError(null);
+    setNotice(null);
     try {
       // Wait for fonts so html-to-image captures Anton correctly.
       if ("fonts" in document) await (document as Document).fonts.ready;
@@ -520,8 +538,8 @@ export default function CardEditor({
         });
       }
 
-      // ── Standalone: no player to attach to — export to Photos / download ──
-      if (standalone) {
+      // ── Standalone with no chosen player — export to Photos / download ──
+      if (standalone && !assignToPlayerId) {
         await exportCardImages(frontDataUrl, backDataUrl);
         track("card_downloaded", {
           standalone: true,
@@ -537,7 +555,11 @@ export default function CardEditor({
         return;
       }
 
-      if (!playerId) throw new Error("No player to attach this card to.");
+      // Otherwise attach to a player: the prop player (player card page) or the
+      // chosen assign target (standalone Card Creator).
+      const targetPlayerId = assignToPlayerId ?? playerId;
+      if (!targetPlayerId) throw new Error("No player to attach this card to.");
+      const target = assignTargets.find((t) => t.id === targetPlayerId);
 
       const supabase = createClient();
       const {
@@ -605,14 +627,14 @@ export default function CardEditor({
       };
 
       const res = await savePlayerPhoto({
-        playerId,
+        playerId: targetPlayerId,
         storagePath: frontPath,
         publicUrl: frontUrlData.publicUrl,
         backStoragePath,
         backPublicUrl,
         teamName: teamText,
         season: seasonText || season || undefined,
-        teamId: teamId ?? undefined,
+        teamId: (target ? target.teamId : teamId) ?? undefined,
         cardDesign: design,
       });
       if (res.error) throw new Error(res.error);
@@ -622,17 +644,27 @@ export default function CardEditor({
         season: seasonText || season || undefined,
         has_back: !!backDesign,
         template: bg.type === "template" ? bg.id : "custom",
+        assigned: !!assignToPlayerId,
       });
       logClientActivity("card_saved", {
         team: teamText,
         season: seasonText || season || null,
         has_back: !!backDesign,
         template: bg.type === "template" ? bg.id : "custom",
+        assigned: !!assignToPlayerId,
       }).catch(() => {});
 
-      setStep("saved");
-      router.push(returnHref);
-      router.refresh();
+      // Standalone assign: stay in the tool with a confirmation (they may make
+      // another). Player-card page: navigate back as before.
+      if (standalone) {
+        setNotice(`Saved to ${target?.name ?? "player"}.`);
+        setStep("edit");
+        router.refresh();
+      } else {
+        setStep("saved");
+        router.push(returnHref);
+        router.refresh();
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       track("card_save_failed", { error: msg });
@@ -1361,27 +1393,59 @@ export default function CardEditor({
         )}
       </div>
 
-      {/* Save */}
-      <div className="mt-4 flex gap-2">
-        <button
-          onClick={() => router.push(returnHref)}
-          className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={!cutoutUrl || step === "saving"}
-          className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {step === "saving"
-            ? standalone
-              ? "Exporting…"
-              : "Saving…"
-            : standalone
-              ? "Save to Photos"
-              : "Save card"}
-        </button>
+      {/* Assign / Save */}
+      <div className="mt-4 space-y-2">
+        {notice && (
+          <p className="text-sm text-green-600 dark:text-green-400">{notice}</p>
+        )}
+
+        {standalone && assignTargets.length > 0 && (
+          <label className="block">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Save to a player (optional)
+            </span>
+            <select
+              value={assignPlayerId}
+              onChange={(e) => {
+                setAssignPlayerId(e.target.value);
+                setNotice(null);
+              }}
+              className="mt-1 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+            >
+              <option value="">— Just save to my photos —</option>
+              {assignTargets.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                  {t.teamName ? ` · ${t.teamName}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => router.push(returnHref)}
+            className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => handleSave(standalone ? assignPlayerId || undefined : undefined)}
+            disabled={!cutoutUrl || step === "saving"}
+            className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {step === "saving"
+              ? standalone && !assignPlayerId
+                ? "Exporting…"
+                : "Saving…"
+              : !standalone
+                ? "Save card"
+                : assignPlayerId
+                  ? `Save to ${assignTargets.find((t) => t.id === assignPlayerId)?.name ?? "player"}`
+                  : "Save to Photos"}
+          </button>
+        </div>
       </div>
     </div>
   );

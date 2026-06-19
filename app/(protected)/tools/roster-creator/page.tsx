@@ -3,8 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import NewSeasonButton from "./NewSeasonButton";
 import DeleteSeasonButton from "./DeleteSeasonButton";
 import DeleteAllSeasonsButton from "./DeleteAllSeasonsButton";
-import RosterAccessManager from "./RosterAccessManager";
-import { canManageRosterAccess, listRosterAdmins } from "./actions";
+import { canManageRosterAccess } from "./actions";
 
 export default async function RosterCreatorPage() {
   const supabase = await createClient();
@@ -16,7 +15,6 @@ export default async function RosterCreatorPage() {
 
   // Only the coach owner manages who else can use the tool.
   const canManage = await canManageRosterAccess();
-  const admins = canManage ? await listRosterAdmins() : [];
 
   // Resolve who created/edited each season — granted admins show their label,
   // anyone else (the team owner) shows as "Owner".
@@ -82,7 +80,19 @@ export default async function RosterCreatorPage() {
         ))}
       </div>
 
-      {canManage && <RosterAccessManager admins={admins} />}
+      {canManage && (
+        <div className="mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 flex items-center justify-between gap-3">
+          <span className="text-sm text-gray-600 dark:text-gray-300">
+            Share the Roster Creator (and other tools) with helpers and parents.
+          </span>
+          <Link
+            href="/access"
+            className="shrink-0 text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800"
+          >
+            Manage access →
+          </Link>
+        </div>
+      )}
 
       {rows.length > 0 ? (
         <div>

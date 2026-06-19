@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { TOOLS, type ToolDef } from "@/lib/tools";
 import SignOutButton from "./_components/SignOutButton";
 import ToolsNav from "./_components/ToolsNav";
 import ThemeToggle from "./_components/ThemeToggle";
@@ -24,67 +25,60 @@ export default async function ProtectedLayout({
 
   const isCoach = (teamCount ?? 0) > 0;
 
-  // Roster admins: people the coach granted Roster-Creator-only access by phone.
-  // They aren't coaches; they get a scoped nav and are held to that one tool.
-  let scopedAdmin = false;
+  // Non-coaches can still be granted specific tools (the permission manager).
+  // A grant to a tools-area tool (e.g. Roster Creator, which has no Parent
+  // Portal home) gives a scoped helper view; otherwise parents fall through to
+  // the Parent Portal, where parent-capable tools (Card Creator) show as tabs.
   let scopedLabel: string | null = null;
+  let scopedTools: ToolDef[] = [];
 
   if (!isCoach) {
-    // Link this phone-authed user to a matching access-list row (if any), then
-    // check. A roster admin skips the parent/no-access flow below.
-    const { data: admin } = await supabase.rpc("link_roster_admin");
-    if (admin) {
-      scopedAdmin = true;
-      // Resolve the name the owner gave them, to show in the header instead of
-      // the raw phone number they logged in with.
-      const { data: labels } = await supabase.rpc("roster_admin_labels");
-      const mine = ((labels ?? []) as { auth_user_id: string; label: string | null }[]).find(
-        (r) => r.auth_user_id === user.id
-      );
-      scopedLabel = mine?.label?.trim() || null;
-    } else {
-      // Check if already linked to a parent record
+    // Link this phone/email-authed user to any matching access-list row, then
+    // read their granted tools.
+    const { data: granted } = await supabase.rpc("link_tool_access");
+    const grantedKeys = new Set<string>((granted as string[] | null) ?? []);
+    const myTools = TOOLS.filter((t) => grantedKeys.has(t.key));
+    const hasToolsAreaGrant = myTools.some((t) => t.parentHref === null);
+
+    if (!hasToolsAreaGrant) {
+      // No tools-area grant — try the parent flow first.
       const { data: parentLink } = await supabase
         .from("parent_auth")
         .select("parent_id")
         .eq("auth_user_id", user.id)
         .maybeSingle();
+      if (parentLink) redirect("/parent");
 
-      if (parentLink) {
-        redirect("/parent");
-      }
-
-      // First sign-in: try to auto-link by matching email or phone
+      // First sign-in: try to auto-link by matching email or phone.
       let matchedId: string | null = null;
-
       if (user.email) {
-        const { data } = await supabase
-          .from("parents")
-          .select("id")
-          .eq("email", user.email)
-          .maybeSingle();
+        const { data } = await supabase.from("parents").select("id").eq("email", user.email).maybeSingle();
         matchedId = data?.id ?? null;
       }
-
       if (!matchedId && user.phone) {
-        const { data } = await supabase.rpc("match_parent_by_phone", {
-          input_phone: user.phone,
-        });
+        const { data } = await supabase.rpc("match_parent_by_phone", { input_phone: user.phone });
         matchedId = data ?? null;
       }
-
       if (matchedId) {
-        await supabase.from("parent_auth").insert({
-          auth_user_id: user.id,
-          parent_id: matchedId,
-        });
+        await supabase.from("parent_auth").insert({ auth_user_id: user.id, parent_id: matchedId });
         redirect("/parent");
       }
 
-      // No matching parent record found
-      redirect("/no-access");
+      // Not a parent — and no parent-capable grant either → no access.
+      if (myTools.length === 0) redirect("/no-access");
     }
+
+    // Scoped helper: hold them to exactly their granted tools.
+    scopedTools = myTools;
+    // Resolve the name the owner gave them, for the header.
+    const { data: labels } = await supabase.rpc("roster_admin_labels");
+    const mine = ((labels ?? []) as { auth_user_id: string; label: string | null }[]).find(
+      (r) => r.auth_user_id === user.id
+    );
+    scopedLabel = mine?.label?.trim() || null;
   }
+
+  const scopedAdmin = scopedTools.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
@@ -92,9 +86,15 @@ export default async function ProtectedLayout({
         <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center justify-between">
           <nav className="flex items-center gap-6">
             {scopedAdmin ? (
-              <Link href="/tools/roster-creator" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                Roster Creator
-              </Link>
+              scopedTools.map((t) => (
+                <Link
+                  key={t.key}
+                  href={t.href}
+                  className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800"
+                >
+                  {t.label}
+                </Link>
+              ))
             ) : (
               <>
                 <Link href="/teams" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
@@ -139,7 +139,7 @@ export default async function ProtectedLayout({
         </div>
       </header>
 
-      {scopedAdmin && <ScopedAdminGuard />}
+      {scopedAdmin && <ScopedAdminGuard allowedPaths={scopedTools.map((t) => t.href)} />}
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full px-4 py-6">
         {children}

@@ -45,7 +45,9 @@ export async function proxy(request: NextRequest) {
   // the family login.
   if (!user && pathname !== "/" && pathname !== "/login" && pathname !== "/roster-login" && pathname !== "/admin" && !pathname.startsWith("/auth") && !pathname.startsWith("/api/cron") && !pathname.startsWith("/event/") && pathname !== "/privacy" && pathname !== "/sms-terms" && pathname !== "/sms-opt-in" && pathname !== "/no-access" && pathname !== "/house") {
     const url = request.nextUrl.clone();
-    url.pathname = pathname.startsWith("/tools/roster-creator") ? "/roster-login" : "/login";
+    // Any tools deep link goes to the phone-based tools login (no family
+    // features) rather than the family login.
+    url.pathname = pathname.startsWith("/tools/") ? "/roster-login" : "/login";
     url.searchParams.set("next", pathname + (request.nextUrl.search ?? ""));
     return NextResponse.redirect(url);
   }

@@ -50,6 +50,10 @@ export type ActivityEvent =
   | "rc_roster_emailed"
   | "rc_access_granted"
   | "rc_access_revoked"
+  // Tool permission manager (/access) — granting/revoking tools per user.
+  | "tool_access_granted"
+  | "tool_access_revoked"
+  | "tool_grant_changed"
 
 export async function logActivity(
   parentId: string,

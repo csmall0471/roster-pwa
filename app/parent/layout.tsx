@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { TOOLS } from "@/lib/tools";
 import SignOutButton from "../(protected)/_components/SignOutButton";
 
 export default async function ParentLayout({ children }: { children: React.ReactNode }) {
@@ -19,6 +20,14 @@ export default async function ParentLayout({ children }: { children: React.React
   if (!parentLink) redirect("/login");
 
   const parent = parentLink.parents as unknown as { first_name: string; last_name: string } | null;
+
+  // Tools the owner has granted this parent that have a Parent Portal home
+  // (e.g. Card Creator) show up as extra tabs. link_tool_access also links this
+  // user to their grant row on first visit (parents never pass through the
+  // (protected) layout where that linking otherwise happens).
+  const { data: granted } = await supabase.rpc("link_tool_access");
+  const grantedKeys = new Set<string>((granted as string[] | null) ?? []);
+  const parentTools = TOOLS.filter((t) => t.parentHref !== null && grantedKeys.has(t.key));
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
@@ -56,6 +65,15 @@ export default async function ParentLayout({ children }: { children: React.React
           >
             Training
           </Link>
+          {parentTools.map((t) => (
+            <Link
+              key={t.key}
+              href={t.parentHref!}
+              className="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+            >
+              {t.label}
+            </Link>
+          ))}
         </div>
       </nav>
 
