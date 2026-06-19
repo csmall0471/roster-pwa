@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import CardEditor, { type AssignTarget } from "@/app/_components/cardgen/CardEditor";
+import { toAssignTargets } from "@/app/_components/cardgen/assign-targets";
 
 // Standalone card creator (Tools → Card Creator). Build a card from any photo
 // without first picking a player; the finished card exports to the photo
@@ -17,40 +18,21 @@ export default async function CardCreatorPage() {
   // (Scoped helpers own no players, so they get export-only.)
   const { data: players } = await supabase
     .from("players")
-    .select("id, first_name, last_name")
+    .select("id, first_name, last_name, date_of_birth")
     .eq("user_id", user.id);
 
-  const assignTargets: AssignTarget[] = [];
+  let assignTargets: AssignTarget[] = [];
   const ids = (players ?? []).map((p) => p.id as string);
   if (ids.length > 0) {
     const { data: rosterRows } = await supabase
       .from("roster")
-      .select("player_id, status, teams(id, name, season)")
+      .select("player_id, status, jersey_number, teams(id, name, season, age_group)")
       .in("player_id", ids)
       .order("created_at", { ascending: false });
-    type RRow = {
-      player_id: string;
-      status: string;
-      teams: { id: string; name: string; season: string | null } | null;
-    };
-    const bestTeam = new Map<string, RRow["teams"]>();
-    for (const r of (rosterRows ?? []) as unknown as RRow[]) {
-      if (!r.teams) continue;
-      const cur = bestTeam.get(r.player_id);
-      // Prefer an active roster entry; otherwise keep the most recent (first seen).
-      if (!cur || r.status === "active") bestTeam.set(r.player_id, r.teams);
-    }
-    for (const p of players ?? []) {
-      const team = bestTeam.get(p.id as string) ?? null;
-      assignTargets.push({
-        id: p.id as string,
-        name: `${p.first_name} ${p.last_name}`.trim(),
-        teamId: team?.id ?? null,
-        teamName: team?.name ?? null,
-        season: team?.season ?? null,
-      });
-    }
-    assignTargets.sort((a, b) => a.name.localeCompare(b.name));
+    assignTargets = toAssignTargets(
+      players ?? [],
+      (rosterRows ?? []) as unknown as Parameters<typeof toAssignTargets>[1]
+    );
   }
 
   return (

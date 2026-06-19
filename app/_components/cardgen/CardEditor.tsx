@@ -55,9 +55,14 @@ type Props = {
 export type AssignTarget = {
   id: string;
   name: string;
+  firstName: string;
+  lastName: string;
   teamId: string | null;
   teamName: string | null;
   season: string | null;
+  ageGroup: string | null;
+  jersey: string | null;
+  playerAge: string | null;
 };
 
 const EMPTY_STATS: BackStats = {
@@ -701,11 +706,53 @@ export default function CardEditor({
     ? "0 2px 8px rgba(0,0,0,0.45)"
     : "0 1px 0 rgba(255,255,255,0.15)";
 
+  // Picking a player auto-fills the card from their details; choosing "no
+  // player" leaves whatever the user already typed alone.
+  function selectTarget(id: string) {
+    setAssignPlayerId(id);
+    setNotice(null);
+    const t = assignTargets.find((x) => x.id === id);
+    if (!t) return;
+    setNameL1((t.firstName || "").toUpperCase());
+    setNameL2((t.lastName || "").toUpperCase());
+    setTeamText((t.teamName || "").toUpperCase());
+    setAgeText(t.ageGroup || "");
+    setSeasonText(t.season || "");
+    setStats((s) => ({ ...s, jersey: t.jersey || "", age: t.playerAge || "" }));
+  }
+
+  // Player picker — shown at the top in standalone mode when there are targets.
+  const playerPicker =
+    standalone && assignTargets.length > 0 ? (
+      <label className="block mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Whose card is this?
+        </span>
+        <select
+          value={assignPlayerId}
+          onChange={(e) => selectTarget(e.target.value)}
+          className="mt-1.5 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+        >
+          <option value="">— No player (save to photos) —</option>
+          {assignTargets.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+              {t.teamName ? ` · ${t.teamName}` : ""}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+          Fills in the name, team, and stats automatically — you can still edit anything.
+        </p>
+      </label>
+    ) : null;
+
   // ── Render ──────────────────────────────────────────────────
 
   if (step === "upload") {
     return (
       <div className="max-w-md mx-auto">
+        {playerPicker}
         {error && (
           <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
         )}
@@ -753,6 +800,7 @@ export default function CardEditor({
 
   return (
     <div className="max-w-md mx-auto">
+      {playerPicker}
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
       )}
@@ -1397,30 +1445,6 @@ export default function CardEditor({
       <div className="mt-4 space-y-2">
         {notice && (
           <p className="text-sm text-green-600 dark:text-green-400">{notice}</p>
-        )}
-
-        {standalone && assignTargets.length > 0 && (
-          <label className="block">
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              Save to a player (optional)
-            </span>
-            <select
-              value={assignPlayerId}
-              onChange={(e) => {
-                setAssignPlayerId(e.target.value);
-                setNotice(null);
-              }}
-              className="mt-1 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
-            >
-              <option value="">— Just save to my photos —</option>
-              {assignTargets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                  {t.teamName ? ` · ${t.teamName}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
         )}
 
         <div className="flex gap-2">
