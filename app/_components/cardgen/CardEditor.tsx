@@ -31,7 +31,7 @@ type BgChoice =
   | { type: "image"; url: string };
 
 type Props = {
-  playerId: string;
+  playerId: string | null;
   teamId: string | null;
   teamName: string;
   ageGroup: string | null;
@@ -42,6 +42,10 @@ type Props = {
   playerAge: string | null;
   returnHref: string;
   initialDesign?: CardDesign | null;
+  // Standalone mode (Tools → Card Creator): no player to attach to, so the
+  // finished card is exported to the photo library / downloaded instead of
+  // saved against a player record.
+  standalone?: boolean;
 };
 
 const EMPTY_STATS: BackStats = {
@@ -98,6 +102,37 @@ async function normalizePhotoForUpload(
   });
 }
 
+async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
+  const blob = await (await fetch(dataUrl)).blob();
+  return new File([blob], name, { type: "image/png" });
+}
+
+// Standalone export: hand the rendered card(s) to the photo library via Web
+// Share on mobile, falling back to browser downloads on desktop. Mirrors the
+// gallery's export path so cards look the same wherever they're saved.
+async function exportCardImages(frontDataUrl: string, backDataUrl?: string) {
+  const files: File[] = [
+    await dataUrlToFile(frontDataUrl, backDataUrl ? "card-front.png" : "card.png"),
+  ];
+  if (backDataUrl) files.push(await dataUrlToFile(backDataUrl, "card-back.png"));
+
+  if (navigator.canShare?.({ files })) {
+    await navigator.share({ files });
+    return;
+  }
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
 // ── Component ─────────────────────────────────────────────────
 
 export default function CardEditor({
@@ -112,6 +147,7 @@ export default function CardEditor({
   playerAge,
   returnHref,
   initialDesign,
+  standalone = false,
 }: Props) {
   const router = useRouter();
 
@@ -465,12 +501,6 @@ export default function CardEditor({
         }
       }
 
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
       // ── Rasterize front ─────────────────────────────────────
       const frontRect = stageRef.current.getBoundingClientRect();
       const frontPixelRatio = Math.max(1, 1050 / frontRect.width);
@@ -478,6 +508,43 @@ export default function CardEditor({
         pixelRatio: frontPixelRatio,
         backgroundColor: "#000",
       });
+
+      // ── Rasterize back (only if there's any back content) ──
+      let backDataUrl: string | undefined;
+      if (backStageRef.current && hasBackContent) {
+        const backRect = backStageRef.current.getBoundingClientRect();
+        const backPixelRatio = Math.max(1, 1050 / backRect.width);
+        backDataUrl = await toPng(backStageRef.current, {
+          pixelRatio: backPixelRatio,
+          backgroundColor: "#000",
+        });
+      }
+
+      // ── Standalone: no player to attach to — export to Photos / download ──
+      if (standalone) {
+        await exportCardImages(frontDataUrl, backDataUrl);
+        track("card_downloaded", {
+          standalone: true,
+          has_back: !!backDataUrl,
+          template: bg.type === "template" ? bg.id : "custom",
+        });
+        logClientActivity("card_downloaded", {
+          standalone: true,
+          has_back: !!backDataUrl,
+          template: bg.type === "template" ? bg.id : "custom",
+        }).catch(() => {});
+        setStep("edit");
+        return;
+      }
+
+      if (!playerId) throw new Error("No player to attach this card to.");
+
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
       const frontBlob = await (await fetch(frontDataUrl)).blob();
       const frontId = crypto.randomUUID();
       const frontPath = `${user.id}/cards/${frontId}.png`;
@@ -492,16 +559,10 @@ export default function CardEditor({
         .from("player-photos")
         .getPublicUrl(frontPath);
 
-      // ── Rasterize back (only if there's any back content) ──
+      // ── Upload back (already rasterized above, if present) ──
       let backStoragePath: string | undefined;
       let backPublicUrl: string | undefined;
-      if (backStageRef.current && hasBackContent) {
-        const backRect = backStageRef.current.getBoundingClientRect();
-        const backPixelRatio = Math.max(1, 1050 / backRect.width);
-        const backDataUrl = await toPng(backStageRef.current, {
-          pixelRatio: backPixelRatio,
-          backgroundColor: "#000",
-        });
+      if (backDataUrl) {
         const backBlob = await (await fetch(backDataUrl)).blob();
         backStoragePath = `${user.id}/cards/${frontId}-back.png`;
         const { error: backUpErr } = await supabase.storage
@@ -622,7 +683,7 @@ export default function CardEditor({
         >
           <div className="text-5xl mb-3">📸</div>
           <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
-            Pick a photo of {firstName}
+            {firstName ? `Pick a photo of ${firstName}` : "Pick a photo"}
           </p>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
             We&apos;ll remove the background and you can build the card.
@@ -1313,7 +1374,13 @@ export default function CardEditor({
           disabled={!cutoutUrl || step === "saving"}
           className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {step === "saving" ? "Saving…" : "Save card"}
+          {step === "saving"
+            ? standalone
+              ? "Exporting…"
+              : "Saving…"
+            : standalone
+              ? "Save to Photos"
+              : "Save card"}
         </button>
       </div>
     </div>

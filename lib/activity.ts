@@ -23,6 +23,7 @@ export type ActivityEvent =
   | "card_lookalike_generated"
   | "card_saved"
   | "card_save_failed"
+  | "card_downloaded"
   | "card_flipped"
   | "card_deleted"
   // Events / signup pages

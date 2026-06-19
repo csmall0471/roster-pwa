@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 const TOOLS = [
   { href: "/tools/roster-creator", label: "Roster Creator" },
+  { href: "/tools/card-creator", label: "Card Creator" },
 ];
 
 export default function ToolsNav() {
