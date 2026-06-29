@@ -21,6 +21,7 @@ type Props = {
   stats: BackStats;
   scoutingReport: string;
   lookAlike: string;
+  headshotUrl?: string | null; // small headshot, upper-right
 };
 
 // Used in CardEditor as the back-side stage. Pure presentational — owns
@@ -37,6 +38,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     stats,
     scoutingReport,
     lookAlike,
+    headshotUrl,
   },
   ref
 ) {
@@ -98,6 +100,26 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           </div>
         )}
       </div>
+
+      {/* Headshot — small circle, upper-right (above the content panel). */}
+      {headshotUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={headshotUrl}
+          alt=""
+          style={{
+            position: "absolute",
+            top: "4.5%",
+            right: "5%",
+            width: "22%",
+            aspectRatio: "1 / 1",
+            objectFit: "cover",
+            borderRadius: "9999px",
+            border: "3px solid rgba(255,255,255,0.92)",
+            boxShadow: "0 4px 10px rgba(0,0,0,0.45)",
+          }}
+        />
+      )}
 
       {/* Content panel — semi-transparent dark sheet anchored to the bottom 75%. */}
       <div

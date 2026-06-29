@@ -92,6 +92,14 @@ export interface CardDesign {
     name_italic?: boolean;
   };
   back?: CardBackDesign;
+  // Hand-drawn signature placed on the front. Position is stored as fractions of
+  // the stage so it scales across screen sizes (same convention as `transform`).
+  signature?: {
+    url: string;
+    x: number;
+    y: number;
+    scale: number;
+  } | null;
 }
 
 export interface CardBackDesign {
@@ -107,6 +115,8 @@ export interface CardBackDesign {
   };
   scouting_report: string;
   look_alike: string;
+  // Small headshot shown in the upper-right of the back.
+  headshot_url?: string | null;
 }
 
 export interface RosterEntry {

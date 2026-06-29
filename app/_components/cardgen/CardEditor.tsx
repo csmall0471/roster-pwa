@@ -21,6 +21,8 @@ import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { TEMPLATES, getTemplate, type Template } from "./templates";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
+import SignaturePad from "./SignaturePad";
+import { pngBlobWithDpi } from "./png-dpi";
 import type { CardDesign, CardBackDesign } from "@/lib/types";
 
 // ── Types ────────────────────────────────────────────────────
@@ -119,19 +121,48 @@ async function normalizePhotoForUpload(
   });
 }
 
-async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
-  const blob = await (await fetch(dataUrl)).blob();
-  return new File([blob], name, { type: "image/png" });
+// Mirror a remote image URL into a data URL (returns an effect cleanup). When
+// the URL is null the mirror is cleared.
+function mirrorToDataUrl(url: string | null, set: (v: string | null) => void) {
+  if (!url) {
+    set(null);
+    return;
+  }
+  let cancelled = false;
+  (async () => {
+    try {
+      const blob = await (await fetch(url)).blob();
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (!cancelled) set(reader.result as string);
+      };
+      reader.readAsDataURL(blob);
+    } catch {
+      if (!cancelled) set(url); // fall back to the remote URL
+    }
+  })();
+  return () => {
+    cancelled = true;
+  };
 }
 
-// Standalone export: hand the rendered card(s) to the photo library via Web
-// Share on mobile, falling back to browser downloads on desktop. Mirrors the
-// gallery's export path so cards look the same wherever they're saved.
-async function exportCardImages(frontDataUrl: string, backDataUrl?: string) {
-  const files: File[] = [
-    await dataUrlToFile(frontDataUrl, backDataUrl ? "card-front.png" : "card.png"),
+// Rasterize a card stage to a true 2.5"×3.5" trading-card PNG: the 5:7 stage is
+// rendered to 750×1050 px and tagged 300 DPI via a pHYs chunk.
+async function cardPng(node: HTMLElement): Promise<Blob> {
+  const rect = node.getBoundingClientRect();
+  const pixelRatio = 1050 / rect.height; // height→1050; 5:7 aspect → width 750
+  const dataUrl = await toPng(node, { pixelRatio, backgroundColor: "#000" });
+  return pngBlobWithDpi(dataUrl, 300);
+}
+
+// Standalone export: hand the rendered card sides to the photo library via Web
+// Share on mobile, falling back to browser downloads on desktop. Both blobs are
+// already sized 2.5"×3.5" at 300 DPI (see cardPng).
+async function exportCardImages(front: Blob, back: Blob) {
+  const files = [
+    new File([front], "card-front.png", { type: "image/png" }),
+    new File([back], "card-back.png", { type: "image/png" }),
   ];
-  if (backDataUrl) files.push(await dataUrlToFile(backDataUrl, "card-back.png"));
 
   if (navigator.canShare?.({ files })) {
     await navigator.share({ files });
@@ -210,6 +241,15 @@ export default function CardEditor({
   const [scale, setScale] = useState(initialDesign?.transform.scale ?? 1);
   const [rotation, setRotation] = useState(initialDesign?.transform.rotation ?? 0);
 
+  // Signature (front overlay). Position is the element's CENTER as fractions of
+  // the stage, so it scales across screen sizes (same idea as the cutout transform).
+  const [sigUrl, setSigUrl] = useState<string | null>(initialDesign?.signature?.url ?? null);
+  const [sigDataUrl, setSigDataUrl] = useState<string | null>(null);
+  const [sigX, setSigX] = useState(initialDesign?.signature?.x ?? 0.5);
+  const [sigY, setSigY] = useState(initialDesign?.signature?.y ?? 0.62);
+  const [sigScale, setSigScale] = useState(initialDesign?.signature?.scale ?? 1);
+  const [showSigPad, setShowSigPad] = useState(false);
+
   const [teamText, setTeamText] = useState(
     initialDesign?.text.team_name ?? teamName.toUpperCase()
   );
@@ -253,6 +293,10 @@ export default function CardEditor({
     initBack?.scouting_report ?? ""
   );
   const [lookAlike, setLookAlike] = useState(initBack?.look_alike ?? "");
+  const [headshotUrl, setHeadshotUrl] = useState<string | null>(
+    initBack?.headshot_url ?? null
+  );
+  const [headshotDataUrl, setHeadshotDataUrl] = useState<string | null>(null);
   const [aiPending, setAiPending] = useState<null | "scouting" | "lookalike">(
     null
   );
@@ -263,36 +307,18 @@ export default function CardEditor({
   const cutoutImgRef = useRef<HTMLImageElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
+  const headshotFileRef = useRef<HTMLInputElement>(null);
 
   function patchStats(patch: Partial<BackStats>) {
     setStats((s) => ({ ...s, ...patch }));
   }
 
-  // Whenever the cutout source changes, materialize it into a data URL.
-  useEffect(() => {
-    if (!cutoutUrl) {
-      setCutoutDataUrl(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(cutoutUrl);
-        const blob = await res.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (!cancelled) setCutoutDataUrl(reader.result as string);
-        };
-        reader.readAsDataURL(blob);
-      } catch {
-        // Fall back to using the remote URL directly; export may still work.
-        if (!cancelled) setCutoutDataUrl(cutoutUrl);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cutoutUrl]);
+  // Mirror a remote image into a data URL so html-to-image rasterizes it
+  // deterministically (cross-origin <img>/bg can race the rasterizer and snapshot
+  // blank). Used for the cutout, the signature, and the headshot.
+  useEffect(() => mirrorToDataUrl(cutoutUrl, setCutoutDataUrl), [cutoutUrl]);
+  useEffect(() => mirrorToDataUrl(sigUrl, setSigDataUrl), [sigUrl]);
+  useEffect(() => mirrorToDataUrl(headshotUrl, setHeadshotDataUrl), [headshotUrl]);
 
   // ── Drag / pinch ────────────────────────────────────────────
 
@@ -367,6 +393,75 @@ export default function CardEditor({
     pointers.current.delete(e.pointerId);
     if (pointers.current.size === 0) dragStart.current = null;
   }, []);
+
+  // ── Signature drag (front overlay; single-pointer move, size via slider) ──
+
+  const sigDrag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+
+  function onSigPointerDown(e: React.PointerEvent) {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    sigDrag.current = { x: sigX, y: sigY, px: e.clientX, py: e.clientY };
+  }
+  function onSigPointerMove(e: React.PointerEvent) {
+    if (!sigDrag.current) return;
+    e.stopPropagation();
+    const { w, h } = stageSize();
+    const dx = (e.clientX - sigDrag.current.px) / w;
+    const dy = (e.clientY - sigDrag.current.py) / h;
+    setSigX(Math.max(0, Math.min(1, sigDrag.current.x + dx)));
+    setSigY(Math.max(0, Math.min(1, sigDrag.current.y + dy)));
+  }
+  function onSigPointerUp() {
+    sigDrag.current = null;
+  }
+
+  // ── Signature pad result + headshot upload ─────────────────
+
+  async function handleSignatureDrawn(dataUrl: string) {
+    setShowSigPad(false);
+    setSigDataUrl(dataUrl); // instant render
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const blob = await (await fetch(dataUrl)).blob();
+      const path = `${user.id}/cardgen-sig/${crypto.randomUUID()}.png`;
+      const { error: upErr } = await supabase.storage
+        .from("player-photos")
+        .upload(path, blob, { upsert: false, contentType: "image/png" });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from("player-photos").getPublicUrl(path);
+      setSigUrl(urlData.publicUrl);
+      track("card_signature_added");
+      logClientActivity("card_signature_added").catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleHeadshotSelected(file: File) {
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      // Instant render from the file while it uploads.
+      const reader = new FileReader();
+      reader.onloadend = () => setHeadshotDataUrl(reader.result as string);
+      reader.readAsDataURL(file);
+      const path = `${user.id}/cardgen-headshot/${crypto.randomUUID()}.${fileExt(file.name)}`;
+      const { error: upErr } = await supabase.storage
+        .from("player-photos")
+        .upload(path, file, { upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from("player-photos").getPublicUrl(path);
+      setHeadshotUrl(urlData.publicUrl);
+      track("card_headshot_added");
+      logClientActivity("card_headshot_added").catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   // ── Photo upload + bg-removal ──────────────────────────────
 
@@ -531,36 +626,21 @@ export default function CardEditor({
         }
       }
 
-      // ── Rasterize front ─────────────────────────────────────
-      const frontRect = stageRef.current.getBoundingClientRect();
-      const frontPixelRatio = Math.max(1, 1050 / frontRect.width);
-      const frontDataUrl = await toPng(stageRef.current, {
-        pixelRatio: frontPixelRatio,
-        backgroundColor: "#000",
-      });
+      // ── Rasterize both sides at 2.5"×3.5" (750×1050 @ 300 DPI) ──
+      const frontBlob = await cardPng(stageRef.current);
+      const backBlob = backStageRef.current
+        ? await cardPng(backStageRef.current)
+        : frontBlob;
 
-      // ── Rasterize back (only if there's any back content) ──
-      let backDataUrl: string | undefined;
-      if (backStageRef.current && hasBackContent) {
-        const backRect = backStageRef.current.getBoundingClientRect();
-        const backPixelRatio = Math.max(1, 1050 / backRect.width);
-        backDataUrl = await toPng(backStageRef.current, {
-          pixelRatio: backPixelRatio,
-          backgroundColor: "#000",
-        });
-      }
-
-      // ── Standalone with no chosen player — export to Photos / download ──
+      // ── Standalone with no chosen player — save both sides to Photos ──
       if (standalone && !assignToPlayerId) {
-        await exportCardImages(frontDataUrl, backDataUrl);
+        await exportCardImages(frontBlob, backBlob);
         track("card_downloaded", {
           standalone: true,
-          has_back: !!backDataUrl,
           template: bg.type === "template" ? bg.id : "custom",
         });
         logClientActivity("card_downloaded", {
           standalone: true,
-          has_back: !!backDataUrl,
           template: bg.type === "template" ? bg.id : "custom",
         }).catch(() => {});
         setStep("edit");
@@ -579,46 +659,32 @@ export default function CardEditor({
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const frontBlob = await (await fetch(frontDataUrl)).blob();
       const frontId = crypto.randomUUID();
       const frontPath = `${user.id}/cards/${frontId}.png`;
       const { error: frontUpErr } = await supabase.storage
         .from("player-photos")
-        .upload(frontPath, frontBlob, {
-          contentType: "image/png",
-          upsert: false,
-        });
+        .upload(frontPath, frontBlob, { contentType: "image/png", upsert: false });
       if (frontUpErr) throw frontUpErr;
       const { data: frontUrlData } = supabase.storage
         .from("player-photos")
         .getPublicUrl(frontPath);
 
-      // ── Upload back (already rasterized above, if present) ──
-      let backStoragePath: string | undefined;
-      let backPublicUrl: string | undefined;
-      if (backDataUrl) {
-        const backBlob = await (await fetch(backDataUrl)).blob();
-        backStoragePath = `${user.id}/cards/${frontId}-back.png`;
-        const { error: backUpErr } = await supabase.storage
-          .from("player-photos")
-          .upload(backStoragePath, backBlob, {
-            contentType: "image/png",
-            upsert: false,
-          });
-        if (backUpErr) throw backUpErr;
-        const { data: backUrlData } = supabase.storage
-          .from("player-photos")
-          .getPublicUrl(backStoragePath);
-        backPublicUrl = backUrlData.publicUrl;
-      }
+      // ── Upload back (always saved, so every card has both sides) ──
+      const backStoragePath = `${user.id}/cards/${frontId}-back.png`;
+      const { error: backUpErr } = await supabase.storage
+        .from("player-photos")
+        .upload(backStoragePath, backBlob, { contentType: "image/png", upsert: false });
+      if (backUpErr) throw backUpErr;
+      const backPublicUrl = supabase.storage
+        .from("player-photos")
+        .getPublicUrl(backStoragePath).data.publicUrl;
 
-      const backDesign: CardBackDesign | undefined = hasBackContent
-        ? {
-            stats,
-            scouting_report: scoutingReport,
-            look_alike: lookAlike,
-          }
-        : undefined;
+      const backDesign: CardBackDesign = {
+        stats,
+        scouting_report: scoutingReport,
+        look_alike: lookAlike,
+        headshot_url: headshotUrl,
+      };
 
       const design: CardDesign = {
         cutout_url: cutoutUrl,
@@ -635,7 +701,8 @@ export default function CardEditor({
           name_size: nameSize,
           name_italic: nameItalic,
         },
-        ...(backDesign ? { back: backDesign } : {}),
+        back: backDesign,
+        signature: sigUrl ? { url: sigUrl, x: sigX, y: sigY, scale: sigScale } : null,
       };
 
       const res = await savePlayerPhoto({
@@ -654,14 +721,12 @@ export default function CardEditor({
       track("card_saved", {
         team: teamText,
         season: seasonText || season || undefined,
-        has_back: !!backDesign,
         template: bg.type === "template" ? bg.id : "custom",
         assigned: !!assignToPlayerId,
       });
       logClientActivity("card_saved", {
         team: teamText,
         season: seasonText || season || null,
-        has_back: !!backDesign,
         template: bg.type === "template" ? bg.id : "custom",
         assigned: !!assignToPlayerId,
       }).catch(() => {});
@@ -685,11 +750,6 @@ export default function CardEditor({
       setStep("edit");
     }
   }
-
-  const hasBackContent =
-    Object.values(stats).some((v) => v.trim().length > 0) ||
-    scoutingReport.trim().length > 0 ||
-    lookAlike.trim().length > 0;
 
   // ── Derived style ───────────────────────────────────────────
 
@@ -857,6 +917,7 @@ export default function CardEditor({
             stats={stats}
             scoutingReport={scoutingReport}
             lookAlike={lookAlike}
+            headshotUrl={headshotDataUrl ?? headshotUrl}
           />
         </div>
 
@@ -998,6 +1059,31 @@ export default function CardEditor({
             {nameL2}
           </div>
         </div>
+
+        {/* Signature overlay — draggable; sized as a fraction of the card. */}
+        {(sigDataUrl ?? sigUrl) && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={sigDataUrl ?? sigUrl ?? undefined}
+            alt=""
+            draggable={false}
+            onPointerDown={onSigPointerDown}
+            onPointerMove={onSigPointerMove}
+            onPointerUp={onSigPointerUp}
+            onPointerCancel={onSigPointerUp}
+            style={{
+              position: "absolute",
+              left: `${sigX * 100}%`,
+              top: `${sigY * 100}%`,
+              width: `${38 * sigScale}%`,
+              transform: "translate(-50%, -50%)",
+              objectFit: "contain",
+              cursor: "grab",
+              touchAction: "none",
+              zIndex: 5,
+            }}
+          />
+        )}
         </div>
       </div>
 
@@ -1088,6 +1174,51 @@ export default function CardEditor({
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
                 Drag the player to move. Pinch to scale on phones. Use sliders for rotation.
               </p>
+
+              {/* Signature */}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Signature</span>
+                  <div className="flex gap-2">
+                    {(sigDataUrl ?? sigUrl) && (
+                      <button
+                        onClick={() => {
+                          setSigUrl(null);
+                          setSigDataUrl(null);
+                        }}
+                        className="text-xs font-medium text-gray-400 hover:text-red-600"
+                      >
+                        Remove
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowSigPad(true)}
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {(sigDataUrl ?? sigUrl) ? "Redraw" : "✍️ Draw signature"}
+                    </button>
+                  </div>
+                </div>
+                {(sigDataUrl ?? sigUrl) && (
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-gray-400">
+                      Signature size: {Math.round(sigScale * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min={0.4}
+                      max={2}
+                      step={0.05}
+                      value={sigScale}
+                      onChange={(e) => setSigScale(parseFloat(e.target.value))}
+                      className="w-full"
+                    />
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                      Drag the signature on the card to position it.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1330,6 +1461,64 @@ export default function CardEditor({
 
         {side === "back" && (
           <div className="p-3 space-y-3">
+            {/* Headshot (upper-right of the back) */}
+            <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+              <div
+                className="h-12 w-12 shrink-0 rounded-full bg-gray-100 dark:bg-gray-800 bg-cover bg-center border border-gray-200 dark:border-gray-700"
+                style={
+                  headshotDataUrl || headshotUrl
+                    ? { backgroundImage: `url(${headshotDataUrl ?? headshotUrl})` }
+                    : undefined
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">Headshot</div>
+                <div className="text-[11px] text-gray-400 dark:text-gray-500">Small photo, upper-right of the back.</div>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex gap-2">
+                  {cutoutUrl && (
+                    <button
+                      onClick={() => {
+                        setHeadshotUrl(cutoutUrl);
+                        setHeadshotDataUrl(cutoutDataUrl);
+                      }}
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Use card photo
+                    </button>
+                  )}
+                  <button
+                    onClick={() => headshotFileRef.current?.click()}
+                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Upload
+                  </button>
+                </div>
+                {(headshotUrl || headshotDataUrl) && (
+                  <button
+                    onClick={() => {
+                      setHeadshotUrl(null);
+                      setHeadshotDataUrl(null);
+                    }}
+                    className="text-xs font-medium text-gray-400 hover:text-red-600"
+                  >
+                    Remove
+                  </button>
+                )}
+                <input
+                  ref={headshotFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleHeadshotSelected(f);
+                  }}
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <Field label="Position">
                 <select
@@ -1482,6 +1671,10 @@ export default function CardEditor({
           </button>
         </div>
       </div>
+
+      {showSigPad && (
+        <SignaturePad onCancel={() => setShowSigPad(false)} onDone={handleSignatureDrawn} />
+      )}
     </div>
   );
 }
