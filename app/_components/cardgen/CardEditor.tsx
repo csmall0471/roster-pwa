@@ -258,6 +258,7 @@ export default function CardEditor({
   );
 
   const stageRef = useRef<HTMLDivElement>(null);
+  const stageWrapRef = useRef<HTMLDivElement>(null);
   const backStageRef = useRef<HTMLDivElement>(null);
   const cutoutImgRef = useRef<HTMLImageElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -413,6 +414,12 @@ export default function CardEditor({
       setScale(1);
       setRotation(0);
       setStep("edit");
+      // Bring the preview to the top of the screen so the controls below are
+      // reachable without dragging the photo while trying to scroll past it.
+      setTimeout(
+        () => stageWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        80
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStep("upload");
@@ -721,10 +728,11 @@ export default function CardEditor({
     setStats((s) => ({ ...s, jersey: t.jersey || "", age: t.playerAge || "" }));
   }
 
-  // Player picker — shown at the top in standalone mode when there are targets.
+  // Player picker — shown just below the preview in standalone mode when there
+  // are targets; choosing a player auto-fills the card.
   const playerPicker =
     standalone && assignTargets.length > 0 ? (
-      <label className="block mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+      <label className="block mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           Whose card is this?
         </span>
@@ -751,8 +759,7 @@ export default function CardEditor({
 
   if (step === "upload") {
     return (
-      <div className="max-w-md mx-auto">
-        {playerPicker}
+      <div className="max-w-md mx-auto overflow-x-hidden">
         {error && (
           <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
         )}
@@ -799,8 +806,7 @@ export default function CardEditor({
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
   return (
-    <div className="max-w-md mx-auto">
-      {playerPicker}
+    <div className="max-w-md mx-auto overflow-x-hidden">
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
       )}
@@ -828,8 +834,10 @@ export default function CardEditor({
         ))}
       </div>
 
-      {/* Stage container — both sides rendered; inactive is offscreen but rasterizable. */}
-      <div className="relative w-full">
+      {/* Stage container — both sides rendered; inactive is offscreen but
+          rasterizable. overflow-hidden contains the offscreen stage so the page
+          can't scroll sideways. scroll-mt offsets the sticky header on auto-scroll. */}
+      <div ref={stageWrapRef} className="relative w-full overflow-hidden scroll-mt-20">
         {/* Back stage (offscreen when not active) */}
         <div
           style={
@@ -992,6 +1000,9 @@ export default function CardEditor({
         </div>
         </div>
       </div>
+
+      {/* Player picker — first thing below the preview (auto-fills the card). */}
+      {playerPicker}
 
       {/* Toolbar — different content for front vs back. */}
       <div className="mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
