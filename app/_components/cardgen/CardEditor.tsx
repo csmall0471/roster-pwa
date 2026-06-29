@@ -17,12 +17,13 @@ import {
   findLookalike,
 } from "@/app/actions/cardgen";
 import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
+import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, getTemplate, type Template } from "./templates";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
 import SignaturePad from "./SignaturePad";
 import { pngBlobWithDpi } from "./png-dpi";
-import type { CardDesign, CardBackDesign } from "@/lib/types";
+import type { CardDesign } from "@/lib/types";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -51,6 +52,10 @@ type Props = {
   // roster; parent → their kids). When present, the editor offers "save to a
   // player" alongside "save to photos".
   assignTargets?: AssignTarget[];
+  // Owner-only: allow saving the card as a draft (player/team info typed in but
+  // not attached to a real player). draftId is set when editing an existing one.
+  allowDrafts?: boolean;
+  draftId?: string;
 };
 
 export type AssignTarget = {
@@ -196,6 +201,8 @@ export default function CardEditor({
   initialDesign,
   standalone = false,
   assignTargets = [],
+  allowDrafts = false,
+  draftId,
 }: Props) {
   const router = useRouter();
 
@@ -634,6 +641,88 @@ export default function CardEditor({
 
   // ── Save ────────────────────────────────────────────────────
 
+  // The full design payload, shared by the save-to-player and draft paths.
+  function buildDesign(): CardDesign {
+    return {
+      cutout_url: cutoutUrl ?? "",
+      background: bg,
+      transform: { x: tx, y: ty, scale, rotation },
+      text: {
+        team_name: teamText,
+        age_group: ageText || null,
+        season: seasonText || null,
+        name_line1: nameL1,
+        name_line2: nameL2,
+        color_scheme: colorScheme,
+        name_font: nameFont,
+        name_size: nameSize,
+        name_italic: nameItalic,
+      },
+      back: {
+        stats,
+        scouting_report: scoutingReport,
+        look_alike: lookAlike,
+        headshot_url: headshotUrl,
+        headshot_x: headshotPosX,
+        headshot_y: headshotPosY,
+      },
+      signature: sigUrl
+        ? { url: sigUrl, x: sigX, y: sigY, scale: sigScale, rotation: sigRotation }
+        : null,
+    };
+  }
+
+  // Save the card as a draft (owner only) — player/team typed in, but not
+  // attached to a real player. Rendered sides are stored for the drafts list.
+  async function handleSaveDraft() {
+    if (!stageRef.current || !cutoutUrl) return;
+    setStep("saving");
+    setError(null);
+    setNotice(null);
+    try {
+      if ("fonts" in document) await (document as Document).fonts.ready;
+      const frontBlob = await cardPng(stageRef.current);
+      const backBlob = backStageRef.current ? await cardPng(backStageRef.current) : frontBlob;
+
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const id = crypto.randomUUID();
+      const up = async (path: string, blob: Blob) => {
+        const { error } = await supabase.storage
+          .from("player-photos")
+          .upload(path, blob, { contentType: "image/png", upsert: false });
+        if (error) throw error;
+        return supabase.storage.from("player-photos").getPublicUrl(path).data.publicUrl;
+      };
+      const frontUrl = await up(`${user.id}/card-drafts/${id}.png`, frontBlob);
+      const backUrl = await up(`${user.id}/card-drafts/${id}-back.png`, backBlob);
+
+      const res = await saveCardDraft({
+        id: draftId,
+        label: [nameL1, nameL2].filter(Boolean).join(" "),
+        teamName: teamText,
+        season: seasonText,
+        frontUrl,
+        backUrl,
+        cardDesign: buildDesign(),
+      });
+      if (res.error) throw new Error(res.error);
+
+      track("card_draft_saved");
+      logClientActivity("card_draft_saved").catch(() => {});
+      setNotice("Draft saved.");
+      setStep("edit");
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setStep("edit");
+    }
+  }
+
   async function handleSave(assignToPlayerId?: string) {
     if (!stageRef.current || !cutoutUrl) return;
     setStep("saving");
@@ -717,36 +806,6 @@ export default function CardEditor({
         .from("player-photos")
         .getPublicUrl(backStoragePath).data.publicUrl;
 
-      const backDesign: CardBackDesign = {
-        stats,
-        scouting_report: scoutingReport,
-        look_alike: lookAlike,
-        headshot_url: headshotUrl,
-        headshot_x: headshotPosX,
-        headshot_y: headshotPosY,
-      };
-
-      const design: CardDesign = {
-        cutout_url: cutoutUrl,
-        background: bg,
-        transform: { x: tx, y: ty, scale, rotation },
-        text: {
-          team_name: teamText,
-          age_group: ageText || null,
-          season: seasonText || null,
-          name_line1: nameL1,
-          name_line2: nameL2,
-          color_scheme: colorScheme,
-          name_font: nameFont,
-          name_size: nameSize,
-          name_italic: nameItalic,
-        },
-        back: backDesign,
-        signature: sigUrl
-          ? { url: sigUrl, x: sigX, y: sigY, scale: sigScale, rotation: sigRotation }
-          : null,
-      };
-
       const res = await savePlayerPhoto({
         playerId: targetPlayerId,
         storagePath: frontPath,
@@ -756,9 +815,12 @@ export default function CardEditor({
         teamName: teamText,
         season: seasonText || season || undefined,
         teamId: (target ? target.teamId : teamId) ?? undefined,
-        cardDesign: design,
+        cardDesign: buildDesign(),
       });
       if (res.error) throw new Error(res.error);
+
+      // A draft that's now a real card → remove it from the drafts list.
+      if (draftId) await deleteCardDraft(draftId).catch(() => {});
 
       track("card_saved", {
         team: teamText,
@@ -1711,6 +1773,16 @@ export default function CardEditor({
                   : "Save to Photos"}
           </button>
         </div>
+
+        {allowDrafts && (
+          <button
+            onClick={handleSaveDraft}
+            disabled={!cutoutUrl || step === "saving"}
+            className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
+          >
+            {draftId ? "💾 Update draft" : "💾 Save as draft (no player yet)"}
+          </button>
+        )}
       </div>
 
       {showSigPad && (
