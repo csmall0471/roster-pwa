@@ -112,10 +112,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
       {/* Headshot — small circle, upper-right (above the content panel). */}
       {headshotUrl && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={headshotUrl}
-          alt=""
-          draggable={false}
+        <div
           onPointerDown={onHeadshotPointerDown}
           onPointerMove={onHeadshotPointerMove}
           onPointerUp={onHeadshotPointerUp}
@@ -126,8 +123,11 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             right: "5%",
             width: "22%",
             aspectRatio: "1 / 1",
-            objectFit: "cover",
-            objectPosition: headshotPosition ?? "center",
+            // background-image (not <img>) so iOS Safari includes it in the snapshot.
+            backgroundImage: `url(${headshotUrl})`,
+            backgroundSize: "cover",
+            backgroundPosition: headshotPosition ?? "center",
+            backgroundRepeat: "no-repeat",
             borderRadius: "9999px",
             border: "3px solid rgba(255,255,255,0.92)",
             boxShadow: "0 4px 10px rgba(0,0,0,0.45)",

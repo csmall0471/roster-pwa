@@ -150,6 +150,18 @@ function mirrorToDataUrl(url: string | null, set: (v: string | null) => void) {
   };
 }
 
+// Ensure an image URL is decoded before we snapshot the card.
+async function preloadImage(src: string | null | undefined) {
+  if (!src) return;
+  try {
+    const img = new window.Image();
+    img.src = src;
+    await img.decode();
+  } catch {
+    /* ignore — the snapshot will still attempt it */
+  }
+}
+
 // Rasterize a card stage to a true 2.5"×3.5" trading-card PNG: the 5:7 stage is
 // rendered to 750×1050 px and tagged 300 DPI via a pHYs chunk.
 async function cardPng(node: HTMLElement): Promise<Blob> {
@@ -255,6 +267,7 @@ export default function CardEditor({
   const [sigY, setSigY] = useState(initialDesign?.signature?.y ?? 0.62);
   const [sigScale, setSigScale] = useState(initialDesign?.signature?.scale ?? 1);
   const [sigRotation, setSigRotation] = useState(initialDesign?.signature?.rotation ?? 0);
+  const [sigAspect, setSigAspect] = useState(3); // width/height; signatures are wide
   const [showSigPad, setShowSigPad] = useState(false);
 
   const [teamText, setTeamText] = useState(
@@ -314,7 +327,6 @@ export default function CardEditor({
   const stageRef = useRef<HTMLDivElement>(null);
   const stageWrapRef = useRef<HTMLDivElement>(null);
   const backStageRef = useRef<HTMLDivElement>(null);
-  const cutoutImgRef = useRef<HTMLImageElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
   const headshotFileRef = useRef<HTMLInputElement>(null);
@@ -330,13 +342,25 @@ export default function CardEditor({
   useEffect(() => mirrorToDataUrl(sigUrl, setSigDataUrl), [sigUrl]);
   useEffect(() => mirrorToDataUrl(headshotUrl, setHeadshotDataUrl), [headshotUrl]);
 
+  // Measure the signature's natural aspect ratio so the background-image box
+  // matches it (no letterboxing).
+  useEffect(() => {
+    const src = sigDataUrl ?? sigUrl;
+    if (!src) return;
+    const img = new window.Image();
+    img.onload = () => {
+      if (img.naturalHeight > 0) setSigAspect(img.naturalWidth / img.naturalHeight);
+    };
+    img.src = src;
+  }, [sigDataUrl, sigUrl]);
+
   // ── Gestures (front stage) ──────────────────────────────────
   // One finger drags; two fingers pinch-scale + rotate. The layer is chosen by
   // the FIRST finger: on the signature → the signature, otherwise the main
   // photo (so the small signature only needs one finger on it to grab; the
   // second finger can land anywhere).
 
-  const sigImgRef = useRef<HTMLImageElement>(null);
+  const sigImgRef = useRef<HTMLDivElement>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
   const gestureLayer = useRef<"photo" | "sig">("photo");
   const gestureStart = useRef<{
@@ -681,6 +705,11 @@ export default function CardEditor({
     setNotice(null);
     try {
       if ("fonts" in document) await (document as Document).fonts.ready;
+      await Promise.all([
+        preloadImage(cutoutDataUrl),
+        preloadImage(sigDataUrl ?? sigUrl),
+        preloadImage(headshotDataUrl ?? headshotUrl),
+      ]);
       const frontBlob = await cardPng(stageRef.current);
       const backBlob = backStageRef.current ? await cardPng(backStageRef.current) : frontBlob;
 
@@ -729,29 +758,14 @@ export default function CardEditor({
     setError(null);
     setNotice(null);
     try {
-      // Wait for fonts so html-to-image captures Anton correctly.
+      // Decode the layer images before snapshotting so the rasterizer can't
+      // race and emit a card missing the photo/signature/headshot.
       if ("fonts" in document) await (document as Document).fonts.ready;
-
-      // Wait for the cutout image to be fully decoded before snapshotting,
-      // otherwise the rasterizer can race and emit a card with no player.
-      if (cutoutImgRef.current) {
-        try {
-          await cutoutImgRef.current.decode();
-        } catch {
-          if (!cutoutImgRef.current.complete) {
-            await new Promise<void>((resolve) => {
-              const img = cutoutImgRef.current!;
-              const done = () => {
-                img.removeEventListener("load", done);
-                img.removeEventListener("error", done);
-                resolve();
-              };
-              img.addEventListener("load", done);
-              img.addEventListener("error", done);
-            });
-          }
-        }
-      }
+      await Promise.all([
+        preloadImage(cutoutDataUrl),
+        preloadImage(sigDataUrl ?? sigUrl),
+        preloadImage(headshotDataUrl ?? headshotUrl),
+      ]);
 
       // ── Rasterize both sides at 2.5"×3.5" (750×1050 @ 300 DPI) ──
       const frontBlob = await cardPng(stageRef.current);
@@ -1047,21 +1061,20 @@ export default function CardEditor({
           className="relative w-full mx-auto rounded-2xl overflow-hidden select-none touch-none shadow-lg"
           style={{ aspectRatio: "5 / 7", ...bgStyle, cursor: "grab" }}
         >
-        {/* Cutout — pointerEvents none; the stage handles all gestures. */}
+        {/* Cutout — a background-image div (not <img>) so iOS Safari includes it
+            in the html-to-image snapshot; the stage handles all gestures. */}
         {cutoutDataUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            ref={cutoutImgRef}
-            src={cutoutDataUrl}
-            alt=""
-            draggable={false}
+          <div
             style={{
               position: "absolute",
               top: 0,
               left: 0,
               width: "100%",
               height: "100%",
-              objectFit: "contain",
+              backgroundImage: `url(${cutoutDataUrl})`,
+              backgroundSize: "contain",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
               transform: `translate(${tx * 100}%, ${ty * 100}%) rotate(${rotation}deg) scale(${scale})`,
               transformOrigin: "center center",
               pointerEvents: "none",
@@ -1168,19 +1181,19 @@ export default function CardEditor({
         {/* Signature overlay — gestures handled at the stage level (pointerEvents
             none); placed/scaled/rotated via stored fractions. */}
         {(sigDataUrl ?? sigUrl) && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <div
             ref={sigImgRef}
-            src={sigDataUrl ?? sigUrl ?? undefined}
-            alt=""
-            draggable={false}
             style={{
               position: "absolute",
               left: `${sigX * 100}%`,
               top: `${sigY * 100}%`,
               width: `${38 * sigScale}%`,
+              aspectRatio: `${sigAspect}`,
               transform: `translate(-50%, -50%) rotate(${sigRotation}deg)`,
-              objectFit: "contain",
+              backgroundImage: `url(${sigDataUrl ?? sigUrl})`,
+              backgroundSize: "contain",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
               pointerEvents: "none",
               zIndex: 5,
             }}
