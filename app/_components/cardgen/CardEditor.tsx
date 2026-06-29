@@ -7,7 +7,6 @@ import {
   type CSSProperties,
 } from "react";
 import { useRouter } from "next/navigation";
-import { toPng } from "html-to-image";
 import { track } from "@vercel/analytics";
 import { logClientActivity } from "@/app/actions/log-activity";
 import { createClient } from "@/lib/supabase/client";
@@ -22,7 +21,7 @@ import { TEMPLATES, getTemplate, type Template } from "./templates";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
 import SignaturePad from "./SignaturePad";
-import { pngBlobWithDpi } from "./png-dpi";
+import { compositeFront, compositeBack } from "./card-raster";
 import type { CardDesign } from "@/lib/types";
 
 // ── Types ────────────────────────────────────────────────────
@@ -162,18 +161,9 @@ async function preloadImage(src: string | null | undefined) {
   }
 }
 
-// Rasterize a card stage to a true 2.5"×3.5" trading-card PNG: the 5:7 stage is
-// rendered to 750×1050 px and tagged 300 DPI via a pHYs chunk.
-async function cardPng(node: HTMLElement): Promise<Blob> {
-  const rect = node.getBoundingClientRect();
-  const pixelRatio = 1050 / rect.height; // height→1050; 5:7 aspect → width 750
-  const dataUrl = await toPng(node, { pixelRatio, backgroundColor: "#000" });
-  return pngBlobWithDpi(dataUrl, 300);
-}
-
 // Standalone export: hand the rendered card sides to the photo library via Web
 // Share on mobile, falling back to browser downloads on desktop. Both blobs are
-// already sized 2.5"×3.5" at 300 DPI (see cardPng).
+// already sized 2.5"×3.5" at 300 DPI (see card-raster).
 async function exportCardImages(front: Blob, back: Blob) {
   const files = [
     new File([front], "card-front.png", { type: "image/png" }),
@@ -326,6 +316,8 @@ export default function CardEditor({
 
   const stageRef = useRef<HTMLDivElement>(null);
   const stageWrapRef = useRef<HTMLDivElement>(null);
+  const bgLayerRef = useRef<HTMLDivElement>(null);
+  const overlayLayerRef = useRef<HTMLDivElement>(null);
   const backStageRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
@@ -665,6 +657,27 @@ export default function CardEditor({
 
   // ── Save ────────────────────────────────────────────────────
 
+  // Composite both card sides to true 2.5"×3.5" PNG blobs (canvas drawImage for
+  // raster layers — reliable on iOS, unlike the foreignObject snapshot).
+  async function renderSides(): Promise<{ frontBlob: Blob; backBlob: Blob }> {
+    const frontBlob = await compositeFront({
+      bgEl: bgLayerRef.current!,
+      overlayEl: overlayLayerRef.current!,
+      cutoutSrc: cutoutDataUrl,
+      cutout: { tx, ty, scale, rotation },
+      sigSrc: sigDataUrl ?? sigUrl,
+      sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
+    });
+    const backBlob = backStageRef.current
+      ? await compositeBack({
+          backEl: backStageRef.current,
+          headshotSrc: headshotDataUrl ?? headshotUrl,
+          headshot: { posX: headshotPosX, posY: headshotPosY },
+        })
+      : frontBlob;
+    return { frontBlob, backBlob };
+  }
+
   // The full design payload, shared by the save-to-player and draft paths.
   function buildDesign(): CardDesign {
     return {
@@ -710,8 +723,7 @@ export default function CardEditor({
         preloadImage(sigDataUrl ?? sigUrl),
         preloadImage(headshotDataUrl ?? headshotUrl),
       ]);
-      const frontBlob = await cardPng(stageRef.current);
-      const backBlob = backStageRef.current ? await cardPng(backStageRef.current) : frontBlob;
+      const { frontBlob, backBlob } = await renderSides();
 
       const supabase = createClient();
       const {
@@ -768,10 +780,7 @@ export default function CardEditor({
       ]);
 
       // ── Rasterize both sides at 2.5"×3.5" (750×1050 @ 300 DPI) ──
-      const frontBlob = await cardPng(stageRef.current);
-      const backBlob = backStageRef.current
-        ? await cardPng(backStageRef.current)
-        : frontBlob;
+      const { frontBlob, backBlob } = await renderSides();
 
       // ── Standalone with no chosen player — save both sides to Photos ──
       if (standalone && !assignToPlayerId) {
@@ -1059,10 +1068,17 @@ export default function CardEditor({
           onPointerUp={onStagePointerUp}
           onPointerCancel={onStagePointerUp}
           className="relative w-full mx-auto rounded-2xl overflow-hidden select-none touch-none shadow-lg"
-          style={{ aspectRatio: "5 / 7", ...bgStyle, cursor: "grab" }}
+          style={{ aspectRatio: "5 / 7", cursor: "grab" }}
         >
-        {/* Cutout — a background-image div (not <img>) so iOS Safari includes it
-            in the html-to-image snapshot; the stage handles all gestures. */}
+        {/* Background layer — captured on its own so the cutout can be drawn
+            between it and the text overlays when compositing. */}
+        <div
+          ref={bgLayerRef}
+          style={{ position: "absolute", inset: 0, ...bgStyle, pointerEvents: "none" }}
+        />
+
+        {/* Cutout — drawn straight onto the canvas at export (iOS drops raster
+            images from the foreignObject snapshot); the stage handles gestures. */}
         {cutoutDataUrl && (
           <div
             style={{
@@ -1082,6 +1098,9 @@ export default function CardEditor({
           />
         )}
 
+        {/* Overlay layer — jersey/plate/name; captured as one transparent layer
+            and composited on top of the photo. */}
+        <div ref={overlayLayerRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         {/* Jersey number badge — top right. */}
         {stats.jersey && (
           <div
@@ -1176,6 +1195,7 @@ export default function CardEditor({
           <div style={{ fontSize: `min(${11 * nameSize}vw, ${64 * nameSize}px)`, marginTop: "2%" }}>
             {nameL2}
           </div>
+        </div>
         </div>
 
         {/* Signature overlay — gestures handled at the stage level (pointerEvents
