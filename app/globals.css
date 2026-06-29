@@ -50,6 +50,16 @@ body {
   color: white;
 }
 
+/* Horizontally-scrollable rows (e.g. the header nav on narrow screens) without
+   a visible scrollbar. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Rendered markdown (event descriptions / builder preview).
 
    These rules are intentionally UNLAYERED. Tailwind v4's preflight resets

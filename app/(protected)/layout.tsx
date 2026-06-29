@@ -83,49 +83,57 @@ export default async function ProtectedLayout({
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
-        <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center justify-between">
-          <nav className="flex items-center gap-6">
+        <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center justify-between gap-3">
+          <nav className="flex items-center gap-4 min-w-0 flex-1">
             {scopedAdmin ? (
-              scopedTools.map((t) => (
-                <Link
-                  key={t.key}
-                  href={t.href}
-                  className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800"
-                >
-                  {t.label}
-                </Link>
-              ))
+              <div className="flex items-center gap-6 overflow-x-auto no-scrollbar min-w-0 [&>*]:shrink-0">
+                {scopedTools.map((t) => (
+                  <Link
+                    key={t.key}
+                    href={t.href}
+                    className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap"
+                  >
+                    {t.label}
+                  </Link>
+                ))}
+              </div>
             ) : (
               <>
-                <Link href="/teams" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Teams
-                </Link>
-                <Link href="/players" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Players
-                </Link>
-                <Link href="/email" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Email
-                </Link>
-                <Link href="/training" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Training
-                </Link>
-                <Link href="/training/skills" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Skills
-                </Link>
-                <Link href="/events" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Events
-                </Link>
-                <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Preview
-                </Link>
-                <Link href="/activity" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800">
-                  Activity
-                </Link>
-                <ToolsNav />
+                {/* Scrolls horizontally on narrow screens instead of widening the page. */}
+                <div className="flex items-center gap-6 overflow-x-auto no-scrollbar min-w-0 flex-1 [&>*]:shrink-0">
+                  <Link href="/teams" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Teams
+                  </Link>
+                  <Link href="/players" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Players
+                  </Link>
+                  <Link href="/email" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Email
+                  </Link>
+                  <Link href="/training" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Training
+                  </Link>
+                  <Link href="/training/skills" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Skills
+                  </Link>
+                  <Link href="/events" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Events
+                  </Link>
+                  <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Preview
+                  </Link>
+                  <Link href="/activity" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Activity
+                  </Link>
+                </div>
+                {/* Kept outside the scroll area so its dropdown isn't clipped. */}
+                <div className="shrink-0">
+                  <ToolsNav />
+                </div>
               </>
             )}
           </nav>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             {scopedAdmin ? (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 Signed in as <span className="font-semibold text-gray-700 dark:text-gray-200">{scopedLabel ?? user.phone ?? user.email}</span>
