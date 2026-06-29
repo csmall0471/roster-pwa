@@ -2,7 +2,6 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
-import { NBA_PLAYERS } from "@/lib/nba-players";
 
 // 851-labs/background-remover (BRIA RMBG) — fast, transparent PNG output.
 // Pinned version id from https://replicate.com/851-labs/background-remover/versions.
@@ -164,10 +163,6 @@ export async function findLookalike(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  const list = NBA_PLAYERS.map(
-    (p) => `- ${p.name}: ${p.style}`
-  ).join("\n");
-
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   try {
     const res = await client.messages.create({
@@ -180,23 +175,21 @@ export async function findLookalike(
             { type: "image", source: { type: "url", url: photoUrl } },
             {
               type: "text",
-              text: `Pick the NBA player whose VIBE and ENERGY best matches this youth basketball player, based on body language, smile, and confidence in the photo. Do NOT use facial features, ethnicity, or skin tone.
+              text: `This is a fun "plays like" label for a youth basketball trading card.
 
-Candidates:
-${list}
+Pick ONE well-known professional basketball player — NBA or WNBA, current or all-time, not limited to any short list — whose VIBE and ENERGY best matches this young player, judged from body language, posture, smile, and confidence in the photo. Match on personality and energy only. Do NOT use facial features, ethnicity, or skin tone.
 
-Respond with ONLY the exact player name from the list. No reasoning, no punctuation.`,
+Respond with ONLY the player's name. No reasoning, no punctuation.`,
             },
           ],
         },
       ],
     });
     const raw = res.content[0].type === "text" ? res.content[0].text.trim() : "";
-    // Match against the curated list (Claude sometimes adds extra punctuation).
-    const match = NBA_PLAYERS.find((p) =>
-      raw.toLowerCase().includes(p.name.toLowerCase())
-    );
-    return { name: match?.name ?? raw };
+    // Use the first line, trimming wrapping quotes / trailing period; keep
+    // internal apostrophes & hyphens (De'Aaron Fox, Karl-Anthony Towns, A'ja Wilson).
+    const name = raw.split("\n")[0].replace(/^["'\s]+|["'.\s]+$/g, "").trim();
+    return { name: name || raw };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Look-alike failed" };
   }
