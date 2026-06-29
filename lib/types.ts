@@ -99,6 +99,7 @@ export interface CardDesign {
     x: number;
     y: number;
     scale: number;
+    rotation?: number;
   } | null;
 }
 
@@ -115,8 +116,11 @@ export interface CardBackDesign {
   };
   scouting_report: string;
   look_alike: string;
-  // Small headshot shown in the upper-right of the back.
+  // Small headshot shown in the upper-right of the back, with object-position
+  // (0–100) so it can be panned within its circle.
   headshot_url?: string | null;
+  headshot_x?: number | null;
+  headshot_y?: number | null;
 }
 
 export interface RosterEntry {

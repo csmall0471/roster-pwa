@@ -3,7 +3,6 @@
 import {
   useState,
   useRef,
-  useCallback,
   useEffect,
   type CSSProperties,
 } from "react";
@@ -248,6 +247,7 @@ export default function CardEditor({
   const [sigX, setSigX] = useState(initialDesign?.signature?.x ?? 0.5);
   const [sigY, setSigY] = useState(initialDesign?.signature?.y ?? 0.62);
   const [sigScale, setSigScale] = useState(initialDesign?.signature?.scale ?? 1);
+  const [sigRotation, setSigRotation] = useState(initialDesign?.signature?.rotation ?? 0);
   const [showSigPad, setShowSigPad] = useState(false);
 
   const [teamText, setTeamText] = useState(
@@ -297,6 +297,9 @@ export default function CardEditor({
     initBack?.headshot_url ?? null
   );
   const [headshotDataUrl, setHeadshotDataUrl] = useState<string | null>(null);
+  // Object-position (0–100) so the headshot can be panned within its circle.
+  const [headshotPosX, setHeadshotPosX] = useState(initBack?.headshot_x ?? 50);
+  const [headshotPosY, setHeadshotPosY] = useState(initBack?.headshot_y ?? 50);
   const [aiPending, setAiPending] = useState<null | "scouting" | "lookalike">(
     null
   );
@@ -320,16 +323,28 @@ export default function CardEditor({
   useEffect(() => mirrorToDataUrl(sigUrl, setSigDataUrl), [sigUrl]);
   useEffect(() => mirrorToDataUrl(headshotUrl, setHeadshotDataUrl), [headshotUrl]);
 
-  // ── Drag / pinch ────────────────────────────────────────────
+  // ── Gestures (front stage) ──────────────────────────────────
+  // One finger drags; two fingers pinch-scale + rotate. The layer is chosen by
+  // the FIRST finger: on the signature → the signature, otherwise the main
+  // photo (so the small signature only needs one finger on it to grab; the
+  // second finger can land anywhere).
 
+  const sigImgRef = useRef<HTMLImageElement>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
-  const dragStart = useRef<{
-    tx: number;
-    ty: number;
-    scale: number;
+  const gestureLayer = useRef<"photo" | "sig">("photo");
+  const gestureStart = useRef<{
     px: number;
     py: number;
     dist?: number;
+    angle?: number;
+    tx: number;
+    ty: number;
+    pScale: number;
+    pRot: number;
+    sx: number;
+    sy: number;
+    sScale: number;
+    sRot: number;
   } | null>(null);
 
   function stageSize() {
@@ -337,83 +352,85 @@ export default function CardEditor({
     return { w: r?.width ?? 1, h: r?.height ?? 1 };
   }
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      (e.target as Element).setPointerCapture?.(e.pointerId);
-      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      const pts = [...pointers.current.values()];
-      if (pts.length === 1) {
-        dragStart.current = {
-          tx,
-          ty,
-          scale,
-          px: pts[0].x,
-          py: pts[0].y,
-        };
-      } else if (pts.length === 2) {
-        const dx = pts[0].x - pts[1].x;
-        const dy = pts[0].y - pts[1].y;
-        dragStart.current = {
-          tx,
-          ty,
-          scale,
-          px: (pts[0].x + pts[1].x) / 2,
-          py: (pts[0].y + pts[1].y) / 2,
-          dist: Math.hypot(dx, dy),
-        };
-      }
-    },
-    [tx, ty, scale]
-  );
+  function overSignature(x: number, y: number): boolean {
+    if (!(sigDataUrl ?? sigUrl) || !sigImgRef.current) return false;
+    const r = sigImgRef.current.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
 
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
+  function gestureSnapshot(pts: { x: number; y: number }[]) {
+    const base = {
+      tx,
+      ty,
+      pScale: scale,
+      pRot: rotation,
+      sx: sigX,
+      sy: sigY,
+      sScale: sigScale,
+      sRot: sigRotation,
+    };
+    if (pts.length >= 2) {
+      const dx = pts[0].x - pts[1].x;
+      const dy = pts[0].y - pts[1].y;
+      return {
+        ...base,
+        px: (pts[0].x + pts[1].x) / 2,
+        py: (pts[0].y + pts[1].y) / 2,
+        dist: Math.hypot(dx, dy),
+        angle: Math.atan2(dy, dx),
+      };
+    }
+    return { ...base, px: pts[0].x, py: pts[0].y };
+  }
+
+  function onStagePointerDown(e: React.PointerEvent) {
+    stageRef.current?.setPointerCapture?.(e.pointerId);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const pts = [...pointers.current.values()];
+    if (pts.length === 1) {
+      gestureLayer.current = overSignature(e.clientX, e.clientY) ? "sig" : "photo";
+    }
+    gestureStart.current = gestureSnapshot(pts);
+  }
+
+  function onStagePointerMove(e: React.PointerEvent) {
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (!dragStart.current) return;
+    const g = gestureStart.current;
+    if (!g) return;
     const pts = [...pointers.current.values()];
     const { w, h } = stageSize();
+    const sig = gestureLayer.current === "sig";
     if (pts.length === 1) {
-      const dx = (pts[0].x - dragStart.current.px) / w;
-      const dy = (pts[0].y - dragStart.current.py) / h;
-      setTx(dragStart.current.tx + dx);
-      setTy(dragStart.current.ty + dy);
-    } else if (pts.length === 2 && dragStart.current.dist) {
-      const dist = Math.hypot(
-        pts[0].x - pts[1].x,
-        pts[0].y - pts[1].y
-      );
-      const ratio = dist / dragStart.current.dist;
-      setScale(
-        Math.max(0.2, Math.min(3, dragStart.current.scale * ratio))
-      );
+      const dx = (pts[0].x - g.px) / w;
+      const dy = (pts[0].y - g.py) / h;
+      if (sig) {
+        setSigX(Math.max(0, Math.min(1, g.sx + dx)));
+        setSigY(Math.max(0, Math.min(1, g.sy + dy)));
+      } else {
+        setTx(g.tx + dx);
+        setTy(g.ty + dy);
+      }
+    } else if (pts.length >= 2 && g.dist) {
+      const dx = pts[0].x - pts[1].x;
+      const dy = pts[0].y - pts[1].y;
+      const ratio = Math.hypot(dx, dy) / g.dist;
+      const dDeg = ((Math.atan2(dy, dx) - (g.angle ?? 0)) * 180) / Math.PI;
+      if (sig) {
+        setSigScale(Math.max(0.2, Math.min(5, g.sScale * ratio)));
+        setSigRotation(g.sRot + dDeg);
+      } else {
+        setScale(Math.max(0.2, Math.min(3, g.pScale * ratio)));
+        setRotation(g.pRot + dDeg);
+      }
     }
-  }, []);
+  }
 
-  const onPointerUp = useCallback((e: React.PointerEvent) => {
+  function onStagePointerUp(e: React.PointerEvent) {
     pointers.current.delete(e.pointerId);
-    if (pointers.current.size === 0) dragStart.current = null;
-  }, []);
-
-  // ── Signature drag (front overlay; single-pointer move, size via slider) ──
-
-  const sigDrag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-
-  function onSigPointerDown(e: React.PointerEvent) {
-    e.stopPropagation();
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    sigDrag.current = { x: sigX, y: sigY, px: e.clientX, py: e.clientY };
-  }
-  function onSigPointerMove(e: React.PointerEvent) {
-    if (!sigDrag.current) return;
-    e.stopPropagation();
-    const { w, h } = stageSize();
-    const dx = (e.clientX - sigDrag.current.px) / w;
-    const dy = (e.clientY - sigDrag.current.py) / h;
-    setSigX(Math.max(0, Math.min(1, sigDrag.current.x + dx)));
-    setSigY(Math.max(0, Math.min(1, sigDrag.current.y + dy)));
-  }
-  function onSigPointerUp() {
-    sigDrag.current = null;
+    const pts = [...pointers.current.values()];
+    // Re-baseline so a remaining finger keeps dragging from the current spot.
+    gestureStart.current = pts.length === 0 ? null : gestureSnapshot(pts);
   }
 
   // ── Signature pad result + headshot upload ─────────────────
@@ -461,6 +478,27 @@ export default function CardEditor({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  // Drag the headshot to pan it within its circle (object-position).
+  const headshotDrag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  function onHeadshotPointerDown(e: React.PointerEvent) {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    headshotDrag.current = { x: headshotPosX, y: headshotPosY, px: e.clientX, py: e.clientY };
+  }
+  function onHeadshotPointerMove(e: React.PointerEvent) {
+    if (!headshotDrag.current) return;
+    e.stopPropagation();
+    const box = (backStageRef.current?.getBoundingClientRect().width ?? 300) * 0.22;
+    const dx = e.clientX - headshotDrag.current.px;
+    const dy = e.clientY - headshotDrag.current.py;
+    const clamp = (v: number) => Math.max(0, Math.min(100, v));
+    setHeadshotPosX(clamp(headshotDrag.current.x - (dx / box) * 100));
+    setHeadshotPosY(clamp(headshotDrag.current.y - (dy / box) * 100));
+  }
+  function onHeadshotPointerUp() {
+    headshotDrag.current = null;
   }
 
   // ── Photo upload + bg-removal ──────────────────────────────
@@ -684,6 +722,8 @@ export default function CardEditor({
         scouting_report: scoutingReport,
         look_alike: lookAlike,
         headshot_url: headshotUrl,
+        headshot_x: headshotPosX,
+        headshot_y: headshotPosY,
       };
 
       const design: CardDesign = {
@@ -702,7 +742,9 @@ export default function CardEditor({
           name_italic: nameItalic,
         },
         back: backDesign,
-        signature: sigUrl ? { url: sigUrl, x: sigX, y: sigY, scale: sigScale } : null,
+        signature: sigUrl
+          ? { url: sigUrl, x: sigX, y: sigY, scale: sigScale, rotation: sigRotation }
+          : null,
       };
 
       const res = await savePlayerPhoto({
@@ -918,26 +960,32 @@ export default function CardEditor({
             scoutingReport={scoutingReport}
             lookAlike={lookAlike}
             headshotUrl={headshotDataUrl ?? headshotUrl}
+            headshotPosition={`${headshotPosX}% ${headshotPosY}%`}
+            onHeadshotPointerDown={onHeadshotPointerDown}
+            onHeadshotPointerMove={onHeadshotPointerMove}
+            onHeadshotPointerUp={onHeadshotPointerUp}
           />
         </div>
 
-        {/* Front stage */}
+        {/* Front stage — wrapped so the captured node (stageRef) is never the
+            offscreen-positioned one (toPng of a left:-99999 node renders black). */}
         <div
-          ref={stageRef}
-          className="relative w-full mx-auto rounded-2xl overflow-hidden select-none touch-none shadow-lg"
           style={
             side === "front"
-              ? { aspectRatio: "5 / 7", ...bgStyle }
-              : {
-                  aspectRatio: "5 / 7",
-                  ...bgStyle,
-                  position: "absolute",
-                  left: -99999,
-                  top: 0,
-                }
+              ? undefined
+              : { position: "absolute", left: -99999, top: 0, width: "100%" }
           }
         >
-        {/* Cutout (draggable) — uses data URL so html-to-image can embed it deterministically. */}
+        <div
+          ref={stageRef}
+          onPointerDown={onStagePointerDown}
+          onPointerMove={onStagePointerMove}
+          onPointerUp={onStagePointerUp}
+          onPointerCancel={onStagePointerUp}
+          className="relative w-full mx-auto rounded-2xl overflow-hidden select-none touch-none shadow-lg"
+          style={{ aspectRatio: "5 / 7", ...bgStyle, cursor: "grab" }}
+        >
+        {/* Cutout — pointerEvents none; the stage handles all gestures. */}
         {cutoutDataUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -945,10 +993,6 @@ export default function CardEditor({
             src={cutoutDataUrl}
             alt=""
             draggable={false}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
             style={{
               position: "absolute",
               top: 0,
@@ -958,8 +1002,7 @@ export default function CardEditor({
               objectFit: "contain",
               transform: `translate(${tx * 100}%, ${ty * 100}%) rotate(${rotation}deg) scale(${scale})`,
               transformOrigin: "center center",
-              cursor: "grab",
-              touchAction: "none",
+              pointerEvents: "none",
             }}
           />
         )}
@@ -1060,30 +1103,28 @@ export default function CardEditor({
           </div>
         </div>
 
-        {/* Signature overlay — draggable; sized as a fraction of the card. */}
+        {/* Signature overlay — gestures handled at the stage level (pointerEvents
+            none); placed/scaled/rotated via stored fractions. */}
         {(sigDataUrl ?? sigUrl) && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            ref={sigImgRef}
             src={sigDataUrl ?? sigUrl ?? undefined}
             alt=""
             draggable={false}
-            onPointerDown={onSigPointerDown}
-            onPointerMove={onSigPointerMove}
-            onPointerUp={onSigPointerUp}
-            onPointerCancel={onSigPointerUp}
             style={{
               position: "absolute",
               left: `${sigX * 100}%`,
               top: `${sigY * 100}%`,
               width: `${38 * sigScale}%`,
-              transform: "translate(-50%, -50%)",
+              transform: `translate(-50%, -50%) rotate(${sigRotation}deg)`,
               objectFit: "contain",
-              cursor: "grab",
-              touchAction: "none",
+              pointerEvents: "none",
               zIndex: 5,
             }}
           />
         )}
+        </div>
         </div>
       </div>
 
@@ -1214,7 +1255,7 @@ export default function CardEditor({
                       className="w-full"
                     />
                     <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                      Drag the signature on the card to position it.
+                      On the card: drag to move, pinch to resize, twist two fingers to rotate.
                     </p>
                   </div>
                 )}
@@ -1473,7 +1514,7 @@ export default function CardEditor({
               />
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">Headshot</div>
-                <div className="text-[11px] text-gray-400 dark:text-gray-500">Small photo, upper-right of the back.</div>
+                <div className="text-[11px] text-gray-400 dark:text-gray-500">Upper-right of the back. Drag it in its circle to reposition.</div>
               </div>
               <div className="flex flex-col items-end gap-1">
                 <div className="flex gap-2">

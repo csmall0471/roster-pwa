@@ -22,6 +22,10 @@ type Props = {
   scoutingReport: string;
   lookAlike: string;
   headshotUrl?: string | null; // small headshot, upper-right
+  headshotPosition?: string; // object-position, e.g. "50% 30%"
+  onHeadshotPointerDown?: (e: React.PointerEvent) => void;
+  onHeadshotPointerMove?: (e: React.PointerEvent) => void;
+  onHeadshotPointerUp?: (e: React.PointerEvent) => void;
 };
 
 // Used in CardEditor as the back-side stage. Pure presentational — owns
@@ -39,6 +43,10 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     scoutingReport,
     lookAlike,
     headshotUrl,
+    headshotPosition,
+    onHeadshotPointerDown,
+    onHeadshotPointerMove,
+    onHeadshotPointerUp,
   },
   ref
 ) {
@@ -107,6 +115,11 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
         <img
           src={headshotUrl}
           alt=""
+          draggable={false}
+          onPointerDown={onHeadshotPointerDown}
+          onPointerMove={onHeadshotPointerMove}
+          onPointerUp={onHeadshotPointerUp}
+          onPointerCancel={onHeadshotPointerUp}
           style={{
             position: "absolute",
             top: "4.5%",
@@ -114,9 +127,12 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             width: "22%",
             aspectRatio: "1 / 1",
             objectFit: "cover",
+            objectPosition: headshotPosition ?? "center",
             borderRadius: "9999px",
             border: "3px solid rgba(255,255,255,0.92)",
             boxShadow: "0 4px 10px rgba(0,0,0,0.45)",
+            cursor: onHeadshotPointerDown ? "move" : undefined,
+            touchAction: onHeadshotPointerDown ? "none" : undefined,
           }}
         />
       )}

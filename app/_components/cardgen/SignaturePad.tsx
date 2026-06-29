@@ -17,7 +17,7 @@ export default function SignaturePad({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
-  const last = useRef<{ x: number; y: number } | null>(null);
+  const pts = useRef<{ x: number; y: number }[]>([]);
   const dpr = useRef(1);
   const [ink, setInk] = useState<Ink>("black");
   const [hasInk, setHasInk] = useState(false);
@@ -35,7 +35,7 @@ export default function SignaturePad({
     const ctx = canvas.getContext("2d");
     if (ctx) {
       ctx.scale(dpr.current, dpr.current);
-      ctx.lineWidth = 2.6;
+      ctx.lineWidth = 3;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
     }
@@ -50,26 +50,42 @@ export default function SignaturePad({
     e.preventDefault();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     drawing.current = true;
-    last.current = pos(e);
+    pts.current = [pos(e)];
   }
 
+  // Smooth the stroke: draw quadratic curves through the midpoints of recent
+  // points (control = the real point), which rounds off the jagged segments you
+  // get from connecting raw samples with straight lines.
   function move(e: React.PointerEvent) {
     if (!drawing.current) return;
     const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx || !last.current) return;
-    const p = pos(e);
+    if (!ctx) return;
+    const a = pts.current;
+    a.push(pos(e));
     ctx.strokeStyle = inkColor;
-    ctx.beginPath();
-    ctx.moveTo(last.current.x, last.current.y);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    last.current = p;
+    if (a.length === 2) {
+      ctx.beginPath();
+      ctx.moveTo(a[0].x, a[0].y);
+      ctx.lineTo(a[1].x, a[1].y);
+      ctx.stroke();
+    } else if (a.length >= 3) {
+      const n = a.length;
+      const p0 = a[n - 3];
+      const p1 = a[n - 2];
+      const p2 = a[n - 1];
+      const m1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+      const m2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      ctx.beginPath();
+      ctx.moveTo(m1.x, m1.y);
+      ctx.quadraticCurveTo(p1.x, p1.y, m2.x, m2.y);
+      ctx.stroke();
+    }
     if (!hasInk) setHasInk(true);
   }
 
   function end() {
     drawing.current = false;
-    last.current = null;
+    pts.current = [];
   }
 
   function clear() {
