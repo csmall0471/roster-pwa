@@ -303,6 +303,9 @@ export default function CardEditor({
     initBack?.scouting_report ?? ""
   );
   const [lookAlike, setLookAlike] = useState(initBack?.look_alike ?? "");
+  const [lookAlikePhoto, setLookAlikePhoto] = useState<string | null>(
+    initBack?.look_alike_photo ?? null
+  );
   const [headshotUrl, setHeadshotUrl] = useState<string | null>(
     initBack?.headshot_url ?? null
   );
@@ -645,6 +648,7 @@ export default function CardEditor({
       if (res.error) throw new Error(res.error);
       if (res.name) {
         setLookAlike(res.name);
+        setLookAlikePhoto(res.photoUrl ?? null);
         track("card_lookalike_generated", { name: res.name });
         logClientActivity("card_lookalike_generated", { name: res.name }).catch(() => {});
       }
@@ -673,6 +677,7 @@ export default function CardEditor({
           backEl: backStageRef.current,
           headshotSrc: headshotDataUrl ?? headshotUrl,
           headshot: { posX: headshotPosX, posY: headshotPosY },
+          lookalikeSrc: lookAlikePhoto,
         })
       : frontBlob;
     return { frontBlob, backBlob };
@@ -699,6 +704,7 @@ export default function CardEditor({
         stats,
         scouting_report: scoutingReport,
         look_alike: lookAlike,
+        look_alike_photo: lookAlikePhoto,
         headshot_url: headshotUrl,
         headshot_x: headshotPosX,
         headshot_y: headshotPosY,
@@ -1044,6 +1050,7 @@ export default function CardEditor({
             stats={stats}
             scoutingReport={scoutingReport}
             lookAlike={lookAlike}
+            lookAlikePhoto={lookAlikePhoto}
             headshotUrl={headshotDataUrl ?? headshotUrl}
             headshotPosition={`${headshotPosX}% ${headshotPosY}%`}
             onHeadshotPointerDown={onHeadshotPointerDown}
@@ -1759,7 +1766,10 @@ export default function CardEditor({
             <Field label="Plays like">
               <input
                 value={lookAlike}
-                onChange={(e) => setLookAlike(e.target.value)}
+                onChange={(e) => {
+                  setLookAlike(e.target.value);
+                  setLookAlikePhoto(null); // typed name → drop the AI-matched photo
+                }}
                 placeholder="Stephen Curry"
                 className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
               />

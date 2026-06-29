@@ -116,6 +116,7 @@ export interface CardBackDesign {
   };
   scouting_report: string;
   look_alike: string;
+  look_alike_photo?: string | null; // photo of the matched pro player
   // Small headshot shown in the upper-right of the back, with object-position
   // (0–100) so it can be panned within its circle.
   headshot_url?: string | null;

@@ -90,10 +90,42 @@ export async function compositeFront(L: FrontLayers): Promise<Blob> {
 }
 
 export type BackLayers = {
-  backEl: HTMLElement; // CardBack root (captured whole; headshot redrawn on top)
+  backEl: HTMLElement; // CardBack root (captured whole; raster layers redrawn on top)
   headshotSrc: string | null;
   headshot: { posX: number; posY: number }; // object-position 0–100
+  lookalikeSrc: string | null; // matched pro player photo
 };
+
+// Draw a cover-fit image clipped to a circle into the given box.
+async function drawCircle(
+  ctx: CanvasRenderingContext2D,
+  src: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  ring: { width: number; color: string }
+) {
+  const img = await loadImage(src);
+  if (!img.naturalWidth) return;
+  const r = Math.max(w / img.naturalWidth, h / img.naturalHeight); // cover
+  const dw = img.naturalWidth * r;
+  const dh = img.naturalHeight * r;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const rad = Math.min(w, h) / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(cx, cy, rad - ring.width / 2, 0, Math.PI * 2);
+  ctx.lineWidth = ring.width;
+  ctx.strokeStyle = ring.color;
+  ctx.stroke();
+}
 
 export async function compositeBack(L: BackLayers): Promise<Blob> {
   const canvas = document.createElement("canvas");
@@ -104,7 +136,7 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
   // 1. Everything except the (raster) headshot — gradient + text/panel survive.
   ctx.drawImage(await layerCanvas(L.backEl), 0, 0, W, H);
 
-  // 2. Headshot circle, upper-right (matches CardBack's CSS box).
+  // 2. Headshot circle, upper-right (matches CardBack's CSS box) with its pan.
   if (L.headshotSrc) {
     const img = await loadImage(L.headshotSrc);
     if (img.naturalWidth) {
@@ -125,12 +157,31 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
       ctx.clip();
       ctx.drawImage(img, left + ox, top + oy, dw, dh);
       ctx.restore();
-      // White ring border.
       ctx.beginPath();
       ctx.arc(cx, cy, rad - 0.007 * W, 0, Math.PI * 2);
       ctx.lineWidth = 0.014 * W;
       ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.stroke();
+    }
+  }
+
+  // 3. "Plays like" pro-player photo — position read from its live box (it sits
+  // in a flex row whose spot depends on the content above it).
+  if (L.lookalikeSrc) {
+    const el = L.backEl.querySelector<HTMLElement>("[data-lookalike-photo]");
+    if (el) {
+      const br = L.backEl.getBoundingClientRect();
+      const er = el.getBoundingClientRect();
+      const s = W / (br.width || W);
+      await drawCircle(
+        ctx,
+        L.lookalikeSrc,
+        (er.left - br.left) * s,
+        (er.top - br.top) * s,
+        er.width * s,
+        er.height * s,
+        { width: 0.006 * W, color: "rgba(10,10,10,0.55)" }
+      );
     }
   }
 

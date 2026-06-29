@@ -21,6 +21,7 @@ type Props = {
   stats: BackStats;
   scoutingReport: string;
   lookAlike: string;
+  lookAlikePhoto?: string | null; // photo of the matched pro player
   headshotUrl?: string | null; // small headshot, upper-right
   headshotPosition?: string; // object-position, e.g. "50% 30%"
   onHeadshotPointerDown?: (e: React.PointerEvent) => void;
@@ -42,6 +43,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     stats,
     scoutingReport,
     lookAlike,
+    lookAlikePhoto,
     headshotUrl,
     headshotPosition,
     onHeadshotPointerDown,
@@ -301,9 +303,26 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               padding: "0.7em 0.9em",
               display: "flex",
               alignItems: "center",
-              gap: "0.8em",
+              gap: "0.7em",
             }}
           >
+            {lookAlikePhoto && (
+              // Drawn onto the canvas at export by the compositor (iOS drops
+              // raster images from the html-to-image snapshot).
+              <div
+                data-lookalike-photo
+                style={{
+                  width: "13%",
+                  aspectRatio: "1 / 1",
+                  flexShrink: 0,
+                  borderRadius: "9999px",
+                  backgroundImage: `url(${lookAlikePhoto})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  border: "2px solid rgba(10,10,10,0.55)",
+                }}
+              />
+            )}
             <span
               style={{
                 fontSize: "min(2vw, 10px)",

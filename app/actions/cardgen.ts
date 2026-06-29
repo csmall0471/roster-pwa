@@ -152,9 +152,33 @@ Respond with just the two sentences. No quotes, no labels, no preamble.`,
 // energy, and body language — explicitly NOT facial features. Designed for
 // kids, where face-match would be both creepy and inaccurate.
 
+// Look up a player's photo from Wikipedia (free, broad coverage, CORS-enabled so
+// the card canvas can draw it). Searches "<name> basketball player" to dodge
+// disambiguation, and returns the page's lead thumbnail.
+async function wikipediaPhoto(name: string): Promise<string | null> {
+  try {
+    const url =
+      "https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages" +
+      "&piprop=thumbnail&pithumbsize=400&generator=search&gsrlimit=1&gsrsearch=" +
+      encodeURIComponent(`${name} basketball player`);
+    const res = await fetch(url, {
+      headers: { "User-Agent": "roster-pwa/1.0 (card plays-like)" },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      query?: { pages?: Record<string, { thumbnail?: { source?: string } }> };
+    };
+    const pages = json.query?.pages;
+    if (!pages) return null;
+    return Object.values(pages)[0]?.thumbnail?.source ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function findLookalike(
   photoUrl: string
-): Promise<{ name?: string; error?: string }> {
+): Promise<{ name?: string; photoUrl?: string; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { error: "ANTHROPIC_API_KEY not configured" };
   }
@@ -189,7 +213,9 @@ Respond with ONLY the player's name. No reasoning, no punctuation.`,
     // Use the first line, trimming wrapping quotes / trailing period; keep
     // internal apostrophes & hyphens (De'Aaron Fox, Karl-Anthony Towns, A'ja Wilson).
     const name = raw.split("\n")[0].replace(/^["'\s]+|["'.\s]+$/g, "").trim();
-    return { name: name || raw };
+    if (!name) return { name: raw };
+    const photo = await wikipediaPhoto(name);
+    return { name, photoUrl: photo ?? undefined };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Look-alike failed" };
   }
