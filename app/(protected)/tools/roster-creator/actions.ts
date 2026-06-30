@@ -285,6 +285,56 @@ export async function seasonPlayerKeys(seasonId: string): Promise<string[]> {
   );
 }
 
+// Remove duplicate players already in a season (same name + age group), keeping
+// the most complete copy of each kid: an assigned one over an unassigned one,
+// a coach-matched one over an unmatched one, otherwise the earliest.
+export async function dedupeSeasonPlayers(
+  seasonId: string
+): Promise<{ removed: number; error?: string }> {
+  const { supabase } = await requireOwner();
+  const rows = await selectAll((from, to) =>
+    supabase
+      .from("tb_players")
+      .select("id, first_name, last_name, age_group, team_id, resolved_coach_id")
+      .eq("season_id", seasonId)
+      .order("id")
+      .range(from, to)
+  );
+
+  const groups = new Map<string, typeof rows>();
+  for (const p of rows) {
+    const key = playerDedupeKey(
+      (p.first_name as string) ?? "",
+      (p.last_name as string) ?? "",
+      (p.age_group as string) ?? ""
+    );
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(p);
+  }
+
+  const toDelete: string[] = [];
+  for (const grp of groups.values()) {
+    if (grp.length < 2) continue;
+    const keeper = grp.find((p) => p.team_id) ?? grp.find((p) => p.resolved_coach_id) ?? grp[0];
+    for (const p of grp) if (p.id !== keeper.id) toDelete.push(p.id as string);
+  }
+  if (toDelete.length === 0) return { removed: 0 };
+
+  for (let i = 0; i < toDelete.length; i += 100) {
+    const { error } = await supabase
+      .from("tb_players")
+      .delete()
+      .in("id", toDelete.slice(i, i + 100))
+      .eq("season_id", seasonId);
+    if (error) return { removed: 0, error: error.message };
+  }
+
+  void logToolActivity("rc_duplicates_removed", { season_id: seasonId, count: toDelete.length });
+  revalidatePath(`/tools/roster-creator/${seasonId}`);
+  revalidatePath(`/tools/roster-creator/${seasonId}/players`);
+  return { removed: toDelete.length };
+}
+
 // ── Set up a season from the coach/teams workbook (the new first step) ────────
 // One sheet per division, one row per team (a coach name, or "Team N" for an
 // open slot). This is the authoritative source of divisions, coaches, and the

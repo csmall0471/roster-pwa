@@ -4,8 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import Stepper from "../../Stepper";
 import UploadCard from "../../UploadCard";
 import { selectAll } from "../../db";
+import { playerDedupeKey } from "../../fields";
 import ConfirmView from "../confirm/ConfirmView";
 import PlayerEditor, { type EditPlayer, type EditDivision } from "./PlayerEditor";
+import DedupeButton from "./DedupeButton";
 
 export default async function PlayersPage({
   params,
@@ -39,6 +41,16 @@ export default async function PlayersPage({
   const seasonOption = { id: season.id as string, name: season.name as string };
   const editDivisions: EditDivision[] = (divisions ?? []).map((d) => ({ id: d.id as string, name: d.name as string }));
   const editPlayers = (players ?? []) as EditPlayer[];
+
+  // Count players that duplicate an earlier one (same name + age group) so the
+  // dedupe button can offer to clean them up.
+  const seenKeys = new Set<string>();
+  let duplicateCount = 0;
+  for (const p of editPlayers) {
+    const key = playerDedupeKey(p.first_name, p.last_name, p.age_group ?? "");
+    if (seenKeys.has(key)) duplicateCount++;
+    else seenKeys.add(key);
+  }
 
   return (
     <div>
@@ -98,6 +110,8 @@ export default async function PlayersPage({
           </div>
         </details>
       )}
+
+      {editPlayers.length > 0 && <DedupeButton seasonId={id} count={duplicateCount} />}
 
       <PlayerEditor seasonId={id} divisions={editDivisions} players={editPlayers} />
     </div>
