@@ -132,6 +132,21 @@ export function canonicalRecord(row: RowData, mapping: ColumnMapping): Canonical
   return out;
 }
 
+// Identity key for de-duping players when re-uploading into a season already in
+// progress: normalized first + last name, plus age group so two same-named kids
+// in different brackets stay distinct. Computed the same way on client + server.
+export function playerDedupeKey(
+  firstName: string,
+  lastName: string,
+  ageGroup: string
+): string {
+  return [normalize(firstName || ""), normalize(lastName || ""), normalize(ageGroup || "")].join("|");
+}
+
+export function recordDedupeKey(record: CanonicalRecord): string {
+  return playerDedupeKey(record.first_name, record.last_name, record.age_group);
+}
+
 // Fallback bucket name when a row has no package_name value.
 export const NO_PACKAGE = "(no division)";
 

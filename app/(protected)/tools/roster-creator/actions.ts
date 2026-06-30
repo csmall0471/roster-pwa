@@ -12,6 +12,8 @@ import {
   isCoachChild,
   isNoRequest,
   packageOf,
+  playerDedupeKey,
+  recordDedupeKey,
 } from "./fields";
 import { buildProposal, type EntityProposal, type PlayerInput } from "./resolve/engine";
 import { canonicalizeEntities, matchBuddiesWithClaude } from "./resolve/claude";
@@ -109,7 +111,9 @@ export type CommitImportInput = {
 // Parse-and-review is done client-side; this commits the result into a season:
 // creates/uses the season, records the import, ensures a division exists per
 // distinct package_name, and inserts players with materialized fields.
-export async function commitImport(input: CommitImportInput): Promise<string> {
+export async function commitImport(
+  input: CommitImportInput
+): Promise<{ seasonId: string; added: number; skipped: number }> {
   const { supabase } = await requireOwner();
 
   // 1. Season (new or existing).
@@ -151,7 +155,47 @@ export async function commitImport(input: CommitImportInput): Promise<string> {
   //    no player is silently dropped. Legacy/player-first seasons (no divisions
   //    yet) keep the original behaviour: one division per distinct package.
   const records = input.rows.map((row) => canonicalRecord(row, input.columnMapping));
-  const packages = [...new Set(records.map(packageOf))].filter(Boolean);
+
+  // When appending to a season already in progress, drop any row that matches a
+  // player already in it (same name + age group) or a duplicate within this same
+  // file — so re-uploading a refreshed list never adds the same kid twice. A
+  // brand-new season keeps every row (nothing to collide with).
+  let keptIdx = input.rows.map((_, i) => i);
+  let skipped = 0;
+  if (input.existingSeasonId) {
+    const existingPlayers = await selectAll((from, to) =>
+      supabase
+        .from("tb_players")
+        .select("first_name, last_name, age_group")
+        .eq("season_id", seasonId)
+        .order("id")
+        .range(from, to)
+    );
+    const existingKeys = new Set(
+      existingPlayers.map((p) =>
+        playerDedupeKey(
+          (p.first_name as string) ?? "",
+          (p.last_name as string) ?? "",
+          (p.age_group as string) ?? ""
+        )
+      )
+    );
+    const seen = new Set<string>();
+    keptIdx = [];
+    input.rows.forEach((_, i) => {
+      const key = recordDedupeKey(records[i]);
+      if (existingKeys.has(key) || seen.has(key)) {
+        skipped++;
+        return;
+      }
+      seen.add(key);
+      keptIdx.push(i);
+    });
+  }
+  const keptRows = keptIdx.map((i) => input.rows[i]);
+  const keptRecords = keptIdx.map((i) => records[i]);
+
+  const packages = [...new Set(keptRecords.map(packageOf))].filter(Boolean);
 
   const { data: existing } = await supabase
     .from("tb_divisions")
@@ -188,8 +232,8 @@ export async function commitImport(input: CommitImportInput): Promise<string> {
   }
 
   // 4. Insert players with materialized canonical fields + their division.
-  const players = input.rows.map((row, i) => {
-    const rec = records[i];
+  const players = keptRows.map((row, i) => {
+    const rec = keptRecords[i];
     return {
       season_id: seasonId,
       import_id: imp.id,
@@ -217,7 +261,28 @@ export async function commitImport(input: CommitImportInput): Promise<string> {
 
   revalidatePath("/tools/roster-creator");
   revalidatePath(`/tools/roster-creator/${seasonId}`);
-  return seasonId;
+  return { seasonId, added: keptRows.length, skipped };
+}
+
+// Existing players' identity keys for a season — lets the import review screen
+// flag how many incoming rows are already present before committing.
+export async function seasonPlayerKeys(seasonId: string): Promise<string[]> {
+  const { supabase } = await requireOwner();
+  const rows = await selectAll((from, to) =>
+    supabase
+      .from("tb_players")
+      .select("first_name, last_name, age_group")
+      .eq("season_id", seasonId)
+      .order("id")
+      .range(from, to)
+  );
+  return rows.map((p) =>
+    playerDedupeKey(
+      (p.first_name as string) ?? "",
+      (p.last_name as string) ?? "",
+      (p.age_group as string) ?? ""
+    )
+  );
 }
 
 // ── Set up a season from the coach/teams workbook (the new first step) ────────

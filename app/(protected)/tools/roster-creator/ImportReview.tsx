@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { commitImport } from "./actions";
+import { useEffect, useMemo, useState } from "react";
+import { commitImport, seasonPlayerKeys } from "./actions";
 import {
   type CanonicalField,
   type ColumnMapping,
@@ -10,6 +10,7 @@ import {
   canonicalRecord,
   isNoRequest,
   packageOf,
+  recordDedupeKey,
 } from "./fields";
 import { type Weights, DEFAULT_CONFIG } from "./group/engine";
 import { extractAge } from "./resolve/hints";
@@ -75,6 +76,39 @@ export default function ImportReview({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // When importing into an existing season, load its players' identity keys so
+  // we can warn (and skip) duplicates before committing.
+  const [existingKeys, setExistingKeys] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (mode !== "existing" || !existingSeasonId) {
+      setExistingKeys(null);
+      return;
+    }
+    let active = true;
+    setExistingKeys(null);
+    seasonPlayerKeys(existingSeasonId)
+      .then((keys) => active && setExistingKeys(new Set(keys)))
+      .catch(() => active && setExistingKeys(new Set()));
+    return () => {
+      active = false;
+    };
+  }, [mode, existingSeasonId]);
+
+  // How many incoming rows are already in the chosen season (or repeat within
+  // the file). These get skipped on import.
+  const dupeCount = useMemo(() => {
+    if (mode !== "existing" || !existingKeys) return 0;
+    const seen = new Set<string>();
+    let dupes = 0;
+    for (const row of parsed.rows) {
+      const key = recordDedupeKey(canonicalRecord(row, mapping));
+      if (existingKeys.has(key) || seen.has(key)) dupes++;
+      else seen.add(key);
+    }
+    return dupes;
+  }, [mode, existingKeys, parsed.rows, mapping]);
+  const newCount = parsed.rows.length - dupeCount;
+
   // Team settings — set up front so the rest of the flow is straight-through.
   const [target, setTarget] = useState(DEFAULT_CONFIG.target);
   const [order, setOrder] = useState<(keyof Weights)[]>([...WEIGHT_KEYS]);
@@ -129,7 +163,7 @@ export default function ImportReview({
     try {
       const weights = {} as Weights;
       order.forEach((k, idx) => (weights[k] = SCALE[idx] ?? 1));
-      const seasonId = await commitImport({
+      const { seasonId } = await commitImport({
         existingSeasonId: mode === "existing" ? existingSeasonId : undefined,
         seasonName: mode === "new" ? seasonName : undefined,
         sport: mode === "new" ? sport : undefined,
@@ -166,7 +200,11 @@ export default function ImportReview({
           disabled={busy || missingRequired.length > 0}
           className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {busy ? "Importing…" : `Import ${parsed.rows.length} players`}
+          {busy
+            ? "Importing…"
+            : mode === "existing" && dupeCount > 0
+              ? `Import ${newCount} new player${newCount === 1 ? "" : "s"}`
+              : `Import ${parsed.rows.length} players`}
         </button>
         <button
           type="button"
@@ -179,6 +217,11 @@ export default function ImportReview({
         <span className="text-xs text-gray-400">
           {groups.length} {groups.length === 1 ? "division" : "divisions"} detected
         </span>
+        {mode === "existing" && dupeCount > 0 && (
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+            {dupeCount} already in this season — will be skipped
+          </span>
+        )}
         {missingRequired.length > 0 && (
           <span className="ml-auto text-xs text-amber-600 dark:text-amber-400">
             Map required fields first: {missingRequired.map((f) => f.label).join(", ")}
