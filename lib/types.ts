@@ -108,13 +108,19 @@ export interface CardBackDesign {
     position: string;
     height: string;
     jersey: string;
-    hand: string;
+    age: string;
     favorite_team: string;
     favorite_player: string;
     signature_move: string;
-    age: string;
+    favorite_drill: string;
+    // Fun "questionnaire" fields — the player's answers, all optional.
+    biggest_fan: string;
+    loudest_parent: string;
+    picks_me_up: string;
   };
   scouting_report: string;
+  // A short quote from the player about their season.
+  season_quote?: string;
   look_alike: string;
   look_alike_photo?: string | null; // photo of the matched pro player
   // Small headshot shown in the upper-right of the back, with object-position

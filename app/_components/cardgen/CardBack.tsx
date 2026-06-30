@@ -4,11 +4,14 @@ export type BackStats = {
   position: string;
   height: string;
   jersey: string;
-  hand: string;
+  age: string;
   favorite_team: string;
   favorite_player: string;
   signature_move: string;
-  age: string;
+  favorite_drill: string;
+  biggest_fan: string;
+  loudest_parent: string;
+  picks_me_up: string;
 };
 
 type Props = {
@@ -20,6 +23,7 @@ type Props = {
   jersey: string;
   stats: BackStats;
   scoutingReport: string;
+  seasonQuote?: string;
   lookAlike: string;
   lookAlikePhoto?: string | null; // photo of the matched pro player
   headshotUrl?: string | null; // small headshot, upper-right
@@ -42,6 +46,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     jersey,
     stats,
     scoutingReport,
+    seasonQuote,
     lookAlike,
     lookAlikePhoto,
     headshotUrl,
@@ -56,7 +61,6 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     ["POS", stats.position],
     ["HT", stats.height],
     ["#", jersey || stats.jersey],
-    ["HAND", stats.hand],
     ["AGE", stats.age],
   ].filter(([, v]) => v && v.length > 0) as Array<[string, string]>;
 
@@ -243,6 +247,29 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           </div>
         )}
 
+        {/* Season quote — the player's own words, set off like a pull-quote. */}
+        {seasonQuote && (
+          <div
+            style={{
+              borderLeft: "3px solid #fbbf24",
+              paddingLeft: "0.7em",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "min(3.1vw, 15px)",
+                lineHeight: 1.35,
+                fontStyle: "italic",
+                fontWeight: 600,
+                color: "#fff",
+                margin: 0,
+              }}
+            >
+              &ldquo;{seasonQuote}&rdquo;
+            </p>
+          </div>
+        )}
+
         {/* Scouting report */}
         {scoutingReport && (
           <div>
@@ -271,8 +298,14 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           </div>
         )}
 
-        {/* Favorites + signature move list */}
-        {(stats.favorite_team || stats.favorite_player || stats.signature_move) && (
+        {/* Favorites, signature move + fun "questionnaire" answers */}
+        {(stats.favorite_team ||
+          stats.favorite_player ||
+          stats.signature_move ||
+          stats.favorite_drill ||
+          stats.biggest_fan ||
+          stats.loudest_parent ||
+          stats.picks_me_up) && (
           <div
             style={{
               display: "flex",
@@ -288,6 +321,18 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             )}
             {stats.signature_move && (
               <FavRow label="SIG MOVE" value={stats.signature_move} />
+            )}
+            {stats.favorite_drill && (
+              <FavRow label="FAV DRILL" value={stats.favorite_drill} />
+            )}
+            {stats.biggest_fan && (
+              <FavRow label="BIGGEST FAN" value={stats.biggest_fan} />
+            )}
+            {stats.loudest_parent && (
+              <FavRow label="LOUDEST FAN" value={stats.loudest_parent} />
+            )}
+            {stats.picks_me_up && (
+              <FavRow label="PICKS ME UP" value={stats.picks_me_up} />
             )}
           </div>
         )}
@@ -368,10 +413,12 @@ function FavRow({ label, value }: { label: string; value: string }) {
       <span
         style={{
           fontSize: "min(2vw, 10px)",
-          letterSpacing: "0.2em",
+          letterSpacing: "0.16em",
           color: "rgba(255,255,255,0.55)",
           fontWeight: 700,
-          minWidth: "5.5em",
+          minWidth: "6.5em",
+          whiteSpace: "nowrap",
+          flexShrink: 0,
         }}
       >
         {label}

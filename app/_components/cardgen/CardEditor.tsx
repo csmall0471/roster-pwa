@@ -17,7 +17,7 @@ import {
 } from "@/app/actions/cardgen";
 import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
-import { TEMPLATES, getTemplate, type Template } from "./templates";
+import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
 import SignaturePad from "./SignaturePad";
@@ -76,11 +76,14 @@ const EMPTY_STATS: BackStats = {
   position: "",
   height: "",
   jersey: "",
-  hand: "",
+  age: "",
   favorite_team: "",
   favorite_player: "",
   signature_move: "",
-  age: "",
+  favorite_drill: "",
+  biggest_fan: "",
+  loudest_parent: "",
+  picks_me_up: "",
 };
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -304,6 +307,7 @@ export default function CardEditor({
   const [scoutingReport, setScoutingReport] = useState(
     initBack?.scouting_report ?? ""
   );
+  const [seasonQuote, setSeasonQuote] = useState(initBack?.season_quote ?? "");
   const [lookAlike, setLookAlike] = useState(initBack?.look_alike ?? "");
   const [lookAlikePhoto, setLookAlikePhoto] = useState<string | null>(
     initBack?.look_alike_photo ?? null
@@ -705,6 +709,7 @@ export default function CardEditor({
       back: {
         stats,
         scouting_report: scoutingReport,
+        season_quote: seasonQuote,
         look_alike: lookAlike,
         look_alike_photo: lookAlikePhoto,
         headshot_url: headshotUrl,
@@ -1052,6 +1057,7 @@ export default function CardEditor({
             jersey={stats.jersey}
             stats={stats}
             scoutingReport={scoutingReport}
+            seasonQuote={seasonQuote}
             lookAlike={lookAlike}
             lookAlikePhoto={lookAlikePhoto}
             headshotUrl={headshotDataUrl ?? headshotUrl}
@@ -1369,9 +1375,17 @@ export default function CardEditor({
           )}
 
           {tab === "bg" && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2">
-                {TEMPLATES.map((t) => {
+            <div className="space-y-4">
+              {TEMPLATE_CATEGORIES.map((cat) => {
+                const items = TEMPLATES.filter((t) => t.category === cat.key);
+                if (items.length === 0) return null;
+                return (
+                  <div key={cat.key} className="space-y-1.5">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                      {cat.label}
+                    </h4>
+                    <div className="grid grid-cols-3 gap-2">
+                {items.map((t) => {
                   const selected = bg.type === "template" && bg.id === t.id;
                   const lightText = t.textColor === "light";
                   return (
@@ -1455,7 +1469,10 @@ export default function CardEditor({
                     </button>
                   );
                 })}
-              </div>
+                    </div>
+                  </div>
+                );
+              })}
               <button
                 onClick={() => bgFileRef.current?.click()}
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -1695,18 +1712,6 @@ export default function CardEditor({
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
-              <Field label="Shooting hand">
-                <select
-                  value={stats.hand}
-                  onChange={(e) => patchStats({ hand: e.target.value })}
-                  className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
-                >
-                  <option value="">—</option>
-                  <option value="RIGHT">Right</option>
-                  <option value="LEFT">Left</option>
-                  <option value="BOTH">Both</option>
-                </select>
-              </Field>
               <Field label="Age">
                 <input
                   value={stats.age}
@@ -1745,7 +1750,57 @@ export default function CardEditor({
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
+              <Field label="Fav practice drill">
+                <input
+                  value={stats.favorite_drill}
+                  onChange={(e) => patchStats({ favorite_drill: e.target.value })}
+                  placeholder="Suicides"
+                  className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                />
+              </Field>
             </div>
+
+            <div className="pt-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1.5">
+                Fun questions <span className="font-normal normal-case">(optional)</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Biggest fan in the stands">
+                  <input
+                    value={stats.biggest_fan}
+                    onChange={(e) => patchStats({ biggest_fan: e.target.value })}
+                    placeholder="Grandma"
+                    className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                </Field>
+                <Field label="Loudest from the sideline">
+                  <input
+                    value={stats.loudest_parent}
+                    onChange={(e) => patchStats({ loudest_parent: e.target.value })}
+                    placeholder="Dad"
+                    className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                </Field>
+                <Field label="Teammate who picks me up">
+                  <input
+                    value={stats.picks_me_up}
+                    onChange={(e) => patchStats({ picks_me_up: e.target.value })}
+                    placeholder="Jordan"
+                    className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <Field label="Quote for the season">
+              <textarea
+                value={seasonQuote}
+                onChange={(e) => setSeasonQuote(e.target.value)}
+                rows={2}
+                placeholder="In the player's own words…"
+                className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white resize-none"
+              />
+            </Field>
 
             <Field label="Scouting report">
               <textarea
