@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import Stepper from "../../Stepper";
 import UploadCard from "../../UploadCard";
 import { selectAll } from "../../db";
-import { playerDedupeKey } from "../../fields";
+import { clusterPlayers } from "../../fields";
 import ConfirmView from "../confirm/ConfirmView";
 import PlayerEditor, { type EditPlayer, type EditDivision } from "./PlayerEditor";
 import DedupeButton from "./DedupeButton";
@@ -42,15 +42,13 @@ export default async function PlayersPage({
   const editDivisions: EditDivision[] = (divisions ?? []).map((d) => ({ id: d.id as string, name: d.name as string }));
   const editPlayers = (players ?? []) as EditPlayer[];
 
-  // Count players that duplicate an earlier one (same name + age group) so the
-  // dedupe button can offer to clean them up.
-  const seenKeys = new Set<string>();
-  let duplicateCount = 0;
-  for (const p of editPlayers) {
-    const key = playerDedupeKey(p.first_name, p.last_name, p.age_group ?? "");
-    if (seenKeys.has(key)) duplicateCount++;
-    else seenKeys.add(key);
-  }
+  // Count players that duplicate another (same name; blank age groups tolerated)
+  // so the dedupe button can offer to clean them up. Duplicates = players beyond
+  // the first in each cluster.
+  const clusters = clusterPlayers(
+    editPlayers.map((p) => ({ first: p.first_name, last: p.last_name, age: p.age_group ?? "" }))
+  );
+  const duplicateCount = clusters.length - new Set(clusters).size;
 
   return (
     <div>

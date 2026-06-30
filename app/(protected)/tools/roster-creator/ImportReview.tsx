@@ -2,15 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { commitImport, seasonPlayerKeys } from "./actions";
+import { commitImport, seasonPlayerIdentities } from "./actions";
 import {
   type CanonicalField,
   type ColumnMapping,
+  type PlayerIdentity,
   FIELD_DEFS,
   canonicalRecord,
   isNoRequest,
   packageOf,
-  recordDedupeKey,
+  recordIdentity,
+  splitByDuplicates,
 } from "./fields";
 import { type Weights, DEFAULT_CONFIG } from "./group/engine";
 import { extractAge } from "./resolve/hints";
@@ -76,19 +78,19 @@ export default function ImportReview({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  // When importing into an existing season, load its players' identity keys so
-  // we can warn (and skip) duplicates before committing.
-  const [existingKeys, setExistingKeys] = useState<Set<string> | null>(null);
+  // When importing into an existing season, load its players' identities so we
+  // can warn (and skip) duplicates before committing.
+  const [existingIds, setExistingIds] = useState<PlayerIdentity[] | null>(null);
   useEffect(() => {
     if (mode !== "existing" || !existingSeasonId) {
-      setExistingKeys(null);
+      setExistingIds(null);
       return;
     }
     let active = true;
-    setExistingKeys(null);
-    seasonPlayerKeys(existingSeasonId)
-      .then((keys) => active && setExistingKeys(new Set(keys)))
-      .catch(() => active && setExistingKeys(new Set()));
+    setExistingIds(null);
+    seasonPlayerIdentities(existingSeasonId)
+      .then((ids) => active && setExistingIds(ids))
+      .catch(() => active && setExistingIds([]));
     return () => {
       active = false;
     };
@@ -97,16 +99,10 @@ export default function ImportReview({
   // How many incoming rows are already in the chosen season (or repeat within
   // the file). These get skipped on import.
   const dupeCount = useMemo(() => {
-    if (mode !== "existing" || !existingKeys) return 0;
-    const seen = new Set<string>();
-    let dupes = 0;
-    for (const row of parsed.rows) {
-      const key = recordDedupeKey(canonicalRecord(row, mapping));
-      if (existingKeys.has(key) || seen.has(key)) dupes++;
-      else seen.add(key);
-    }
-    return dupes;
-  }, [mode, existingKeys, parsed.rows, mapping]);
+    if (mode !== "existing" || !existingIds) return 0;
+    const incoming = parsed.rows.map((row) => recordIdentity(canonicalRecord(row, mapping)));
+    return splitByDuplicates(existingIds, incoming).skipped;
+  }, [mode, existingIds, parsed.rows, mapping]);
   const newCount = parsed.rows.length - dupeCount;
 
   // Team settings — set up front so the rest of the flow is straight-through.

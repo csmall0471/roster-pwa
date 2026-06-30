@@ -7,13 +7,15 @@ import {
   type ColumnMapping,
   type RowData,
   FIELD_DEFS,
+  type PlayerIdentity,
   accountNameOf,
   canonicalRecord,
+  clusterPlayers,
   isCoachChild,
   isNoRequest,
   packageOf,
-  playerDedupeKey,
-  recordDedupeKey,
+  recordIdentity,
+  splitByDuplicates,
 } from "./fields";
 import { buildProposal, type EntityProposal, type PlayerInput } from "./resolve/engine";
 import { canonicalizeEntities, matchBuddiesWithClaude } from "./resolve/claude";
@@ -171,26 +173,14 @@ export async function commitImport(
         .order("id")
         .range(from, to)
     );
-    const existingKeys = new Set(
-      existingPlayers.map((p) =>
-        playerDedupeKey(
-          (p.first_name as string) ?? "",
-          (p.last_name as string) ?? "",
-          (p.age_group as string) ?? ""
-        )
-      )
-    );
-    const seen = new Set<string>();
-    keptIdx = [];
-    input.rows.forEach((_, i) => {
-      const key = recordDedupeKey(records[i]);
-      if (existingKeys.has(key) || seen.has(key)) {
-        skipped++;
-        return;
-      }
-      seen.add(key);
-      keptIdx.push(i);
-    });
+    const existing: PlayerIdentity[] = existingPlayers.map((p) => ({
+      first: (p.first_name as string) ?? "",
+      last: (p.last_name as string) ?? "",
+      age: (p.age_group as string) ?? "",
+    }));
+    const res = splitByDuplicates(existing, records.map(recordIdentity));
+    keptIdx = res.keptIdx;
+    skipped = res.skipped;
   }
   const keptRows = keptIdx.map((i) => input.rows[i]);
   const keptRecords = keptIdx.map((i) => records[i]);
@@ -264,9 +254,9 @@ export async function commitImport(
   return { seasonId, added: keptRows.length, skipped };
 }
 
-// Existing players' identity keys for a season — lets the import review screen
-// flag how many incoming rows are already present before committing.
-export async function seasonPlayerKeys(seasonId: string): Promise<string[]> {
+// Existing players' identities for a season — lets the import review screen flag
+// how many incoming rows are already present before committing.
+export async function seasonPlayerIdentities(seasonId: string): Promise<PlayerIdentity[]> {
   const { supabase } = await requireOwner();
   const rows = await selectAll((from, to) =>
     supabase
@@ -276,13 +266,11 @@ export async function seasonPlayerKeys(seasonId: string): Promise<string[]> {
       .order("id")
       .range(from, to)
   );
-  return rows.map((p) =>
-    playerDedupeKey(
-      (p.first_name as string) ?? "",
-      (p.last_name as string) ?? "",
-      (p.age_group as string) ?? ""
-    )
-  );
+  return rows.map((p) => ({
+    first: (p.first_name as string) ?? "",
+    last: (p.last_name as string) ?? "",
+    age: (p.age_group as string) ?? "",
+  }));
 }
 
 // Remove duplicate players already in a season (same name + age group), keeping
@@ -301,16 +289,19 @@ export async function dedupeSeasonPlayers(
       .range(from, to)
   );
 
-  const groups = new Map<string, typeof rows>();
-  for (const p of rows) {
-    const key = playerDedupeKey(
-      (p.first_name as string) ?? "",
-      (p.last_name as string) ?? "",
-      (p.age_group as string) ?? ""
-    );
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(p);
-  }
+  const clusters = clusterPlayers(
+    rows.map((p) => ({
+      first: (p.first_name as string) ?? "",
+      last: (p.last_name as string) ?? "",
+      age: (p.age_group as string) ?? "",
+    }))
+  );
+  const groups = new Map<number, typeof rows>();
+  rows.forEach((p, i) => {
+    const c = clusters[i];
+    if (!groups.has(c)) groups.set(c, []);
+    groups.get(c)!.push(p);
+  });
 
   const toDelete: string[] = [];
   for (const grp of groups.values()) {

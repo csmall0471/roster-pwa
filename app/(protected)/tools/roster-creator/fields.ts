@@ -132,19 +132,78 @@ export function canonicalRecord(row: RowData, mapping: ColumnMapping): Canonical
   return out;
 }
 
-// Identity key for de-duping players when re-uploading into a season already in
-// progress: normalized first + last name, plus age group so two same-named kids
-// in different brackets stay distinct. Computed the same way on client + server.
-export function playerDedupeKey(
-  firstName: string,
-  lastName: string,
-  ageGroup: string
-): string {
-  return [normalize(firstName || ""), normalize(lastName || ""), normalize(ageGroup || "")].join("|");
+// ── Player de-duplication ────────────────────────────────────────────────────
+// Real exports duplicate a kid as a full row PLUS an "Unassigned" stub whose age
+// group is blank, so age can't be part of a rigid key. Instead we cluster by
+// NAME and only let age SPLIT a name-group when two copies carry different,
+// non-blank ages (e.g. real siblings "Landon Smith U8" vs "U10"). A blank age
+// matches any age for the same name. Same logic on client + server.
+
+export type PlayerIdentity = { first: string; last: string; age: string };
+
+export function recordIdentity(record: CanonicalRecord): PlayerIdentity {
+  return { first: record.first_name, last: record.last_name, age: record.age_group };
 }
 
-export function recordDedupeKey(record: CanonicalRecord): string {
-  return playerDedupeKey(record.first_name, record.last_name, record.age_group);
+// Assign each item a cluster id; items sharing an id are the same player.
+export function clusterPlayers(items: PlayerIdentity[]): number[] {
+  const byName = new Map<string, number[]>();
+  items.forEach((it, i) => {
+    const name = `${normalize(it.first)}|${normalize(it.last)}`;
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name)!.push(i);
+  });
+
+  const cluster = new Array<number>(items.length).fill(-1);
+  let next = 0;
+  for (const idxs of byName.values()) {
+    const ages = new Set(idxs.map((i) => normalize(items[i].age)).filter(Boolean));
+    if (ages.size <= 1) {
+      // One real age (or all blank) → one kid.
+      const c = next++;
+      for (const i of idxs) cluster[i] = c;
+    } else {
+      // Multiple distinct real ages → separate kids by age; blanks are ambiguous
+      // so each gets its own cluster (never merged into a specific age).
+      const idByAge = new Map<string, number>();
+      for (const i of idxs) {
+        const age = normalize(items[i].age);
+        if (!age) cluster[i] = next++;
+        else {
+          if (!idByAge.has(age)) idByAge.set(age, next++);
+          cluster[i] = idByAge.get(age)!;
+        }
+      }
+    }
+  }
+  return cluster;
+}
+
+// Split incoming rows into the ones to keep vs skip when importing into a season
+// that already has `existing` players. An incoming row is skipped if its cluster
+// already contains an existing player or an earlier incoming row.
+export function splitByDuplicates(
+  existing: PlayerIdentity[],
+  incoming: PlayerIdentity[]
+): { keptIdx: number[]; skipped: number } {
+  const clusters = clusterPlayers([...existing, ...incoming]);
+  const E = existing.length;
+  const hasExisting = new Set<number>();
+  for (let i = 0; i < E; i++) hasExisting.add(clusters[i]);
+
+  const used = new Set<number>();
+  const keptIdx: number[] = [];
+  let skipped = 0;
+  incoming.forEach((_, j) => {
+    const c = clusters[E + j];
+    if (hasExisting.has(c) || used.has(c)) {
+      skipped++;
+      return;
+    }
+    used.add(c);
+    keptIdx.push(j);
+  });
+  return { keptIdx, skipped };
 }
 
 // Fallback bucket name when a row has no package_name value.
