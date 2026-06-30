@@ -325,6 +325,15 @@ export default function CardEditor({
 
   const stageRef = useRef<HTMLDivElement>(null);
   const stageWrapRef = useRef<HTMLDivElement>(null);
+
+  // Bring the card preview to the top of the screen (used after a photo loads and
+  // when a background is picked, so the change is visible without scrolling up).
+  function scrollToPreview() {
+    setTimeout(
+      () => stageWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      80
+    );
+  }
   const bgLayerRef = useRef<HTMLDivElement>(null);
   const overlayLayerRef = useRef<HTMLDivElement>(null);
   const backStageRef = useRef<HTMLDivElement>(null);
@@ -581,10 +590,7 @@ export default function CardEditor({
       setStep("edit");
       // Bring the preview to the top of the screen so the controls below are
       // reachable without dragging the photo while trying to scroll past it.
-      setTimeout(
-        () => stageWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
-        80
-      );
+      scrollToPreview();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStep("upload");
@@ -607,6 +613,7 @@ export default function CardEditor({
         .from("player-photos")
         .getPublicUrl(path);
       setBg({ type: "image", url: urlData.publicUrl });
+      scrollToPreview();
       track("card_bg_image_uploaded");
       logClientActivity("card_bg_image_uploaded").catch(() => {});
     } catch (e) {
@@ -1393,6 +1400,7 @@ export default function CardEditor({
                       key={t.id}
                       onClick={() => {
                         setBg({ type: "template", id: t.id });
+                        scrollToPreview();
                         track("card_template_picked", { template_id: t.id });
                         logClientActivity("card_template_picked", {
                           template_id: t.id,
