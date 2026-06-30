@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-export type TemplateCategory = "solid" | "gradient" | "stripes" | "rainbow" | "pattern";
+export type TemplateCategory = "solid" | "gradient" | "stripes" | "rainbow" | "pattern" | "basketball" | "football";
 
 export type Template = {
   id: string;
@@ -17,6 +17,8 @@ export const TEMPLATE_CATEGORIES: { key: TemplateCategory; label: string }[] = [
   { key: "stripes", label: "Stripes" },
   { key: "rainbow", label: "Rainbow" },
   { key: "pattern", label: "Patterns" },
+  { key: "basketball", label: "Basketball" },
+  { key: "football", label: "Football" },
 ];
 
 // Backgrounds inspired by NBA card sets (Prizm, Optic, Mosaic, Select, etc.)
@@ -581,6 +583,140 @@ export const TEMPLATES: Template[] = [
         "linear-gradient(180deg, #c2410c 0%, #d97706 38%, #f59e0b 100%)",
     },
     textColor: "dark",
+  },
+
+  // ── Basketball ─────────────────────────────────────────────
+  {
+    id: "suns-classic",
+    name: "Suns",
+    category: "basketball",
+    style: {
+      background:
+        "linear-gradient(160deg, #1d1160 0%, #3a1d8a 35%, #e56020 80%, #f9a01b 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "suns-valley",
+    name: "The Valley",
+    category: "basketball",
+    style: {
+      background:
+        "radial-gradient(ellipse at 50% 100%, #f9a01b 0%, #e56020 22%, #9b2d0f 45%, #1d1160 70%, #0a0a0a 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "suns-sunburst",
+    name: "Suns Sunburst",
+    category: "basketball",
+    style: {
+      background:
+        "repeating-conic-gradient(from 0deg at 50% 50%, #1d1160 0deg, #1d1160 14deg, #e56020 14deg, #e56020 28deg)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "bball-hardwood",
+    name: "Hardwood",
+    category: "basketball",
+    style: {
+      background:
+        "repeating-linear-gradient(180deg, #c8843c 0px, #d99a52 8px, #a3672a 8px, #c8843c 16px), linear-gradient(180deg, #d99a52 0%, #a3672a 100%)",
+    },
+    textColor: "dark",
+  },
+  {
+    id: "bball-leather",
+    name: "Game Ball",
+    category: "basketball",
+    style: {
+      background:
+        "radial-gradient(ellipse at 30% 30%, rgba(255,180,80,0.35) 0%, transparent 50%), radial-gradient(circle at 50% 50%, #e07b27 0%, #c4631a 45%, #8a4112 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "bball-court-lines",
+    name: "Court Lines",
+    category: "basketball",
+    style: {
+      background:
+        "linear-gradient(rgba(255,255,255,0.55) 1px, transparent 1px) 0 0 / 100% 14%, linear-gradient(90deg, rgba(255,255,255,0.55) 1px, transparent 1px) 0 0 / 20% 100%, linear-gradient(180deg, #c8843c 0%, #a3672a 100%)",
+    },
+    textColor: "dark",
+  },
+  {
+    id: "bball-paint",
+    name: "The Paint",
+    category: "basketball",
+    style: {
+      background:
+        "radial-gradient(ellipse at 50% 110%, rgba(255,255,255,0.18) 0%, transparent 55%), linear-gradient(180deg, #c2410c 0%, #b45309 55%, #92400e 100%)",
+    },
+    textColor: "light",
+  },
+
+  // ── Football ───────────────────────────────────────────────
+  {
+    id: "fb-turf",
+    name: "Turf",
+    category: "football",
+    style: {
+      background:
+        "repeating-linear-gradient(180deg, #1b5e20 0px, #2e7d32 18px, #1b5e20 18px, #1b5e20 36px), linear-gradient(180deg, #1b5e20 0%, #2e7d32 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-gridiron",
+    name: "Gridiron",
+    category: "football",
+    style: {
+      background:
+        "repeating-linear-gradient(90deg, rgba(255,255,255,0.35) 0px, rgba(255,255,255,0.35) 2px, transparent 2px, transparent 40px), linear-gradient(180deg, #1b5e20 0%, #2e7d32 50%, #1b5e20 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-pigskin",
+    name: "Pigskin",
+    category: "football",
+    style: {
+      background:
+        "radial-gradient(ellipse at 50% 50%, #a0522d 0%, #6b3a1d 45%, #3b1a08 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-endzone",
+    name: "End Zone",
+    category: "football",
+    style: {
+      background:
+        "repeating-linear-gradient(90deg, rgba(255,255,255,0.4) 0px, rgba(255,255,255,0.4) 2px, transparent 2px, transparent 30px), linear-gradient(180deg, #0d3b0d 0%, #145214 45%, #0d3b0d 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-friday-night",
+    name: "Friday Night",
+    category: "football",
+    style: {
+      background:
+        "radial-gradient(ellipse at 50% 0%, rgba(255,220,100,0.28) 0%, transparent 55%), radial-gradient(ellipse at 20% 10%, rgba(255,200,60,0.18) 0%, transparent 40%), radial-gradient(ellipse at 80% 10%, rgba(255,200,60,0.18) 0%, transparent 40%), linear-gradient(180deg, #0a1a0a 0%, #0d2b0d 45%, #061406 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-leather-stitch",
+    name: "Leather & Laces",
+    category: "football",
+    style: {
+      background:
+        "repeating-linear-gradient(90deg, rgba(255,255,255,0.22) 0px, rgba(255,255,255,0.22) 2px, transparent 2px, transparent 24px), linear-gradient(180deg, #8a4d27 0%, #6b3a1d 45%, #4a260f 100%)",
+    },
+    textColor: "light",
   },
 ];
 
