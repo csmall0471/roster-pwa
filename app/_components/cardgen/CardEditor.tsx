@@ -58,6 +58,8 @@ type Props = {
 };
 
 export type AssignTarget = {
+  // Unique per player+team, so a kid on multiple teams shows once per team.
+  key: string;
   id: string;
   name: string;
   firstName: string;
@@ -230,7 +232,7 @@ export default function CardEditor({
   const [error, setError] = useState<string | null>(null);
   // Standalone assign-to-player: which player to attach to ("" = export only),
   // and a success note after assigning.
-  const [assignPlayerId, setAssignPlayerId] = useState("");
+  const [assignTargetKey, setAssignTargetKey] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
   // Layer state
@@ -770,7 +772,7 @@ export default function CardEditor({
     }
   }
 
-  async function handleSave(assignToPlayerId?: string) {
+  async function handleSave(targetKey?: string) {
     if (!stageRef.current || !cutoutUrl) return;
     setStep("saving");
     setError(null);
@@ -789,7 +791,7 @@ export default function CardEditor({
       const { frontBlob, backBlob } = await renderSides();
 
       // ── Standalone with no chosen player — save both sides to Photos ──
-      if (standalone && !assignToPlayerId) {
+      if (standalone && !targetKey) {
         await exportCardImages(frontBlob, backBlob);
         track("card_downloaded", {
           standalone: true,
@@ -804,10 +806,11 @@ export default function CardEditor({
       }
 
       // Otherwise attach to a player: the prop player (player card page) or the
-      // chosen assign target (standalone Card Creator).
-      const targetPlayerId = assignToPlayerId ?? playerId;
+      // chosen assign target (standalone Card Creator). A target carries the
+      // specific team picked, so a multi-team kid saves under the right team.
+      const target = targetKey ? assignTargets.find((t) => t.key === targetKey) : undefined;
+      const targetPlayerId = target?.id ?? playerId;
       if (!targetPlayerId) throw new Error("No player to attach this card to.");
-      const target = assignTargets.find((t) => t.id === targetPlayerId);
 
       const supabase = createClient();
       const {
@@ -855,13 +858,13 @@ export default function CardEditor({
         team: teamText,
         season: seasonText || season || undefined,
         template: bg.type === "template" ? bg.id : "custom",
-        assigned: !!assignToPlayerId,
+        assigned: !!targetKey,
       });
       logClientActivity("card_saved", {
         team: teamText,
         season: seasonText || season || null,
         template: bg.type === "template" ? bg.id : "custom",
-        assigned: !!assignToPlayerId,
+        assigned: !!targetKey,
       }).catch(() => {});
 
       // Standalone assign: stay in the tool with a confirmation (they may make
@@ -908,10 +911,10 @@ export default function CardEditor({
 
   // Picking a player auto-fills the card from their details; choosing "no
   // player" leaves whatever the user already typed alone.
-  function selectTarget(id: string) {
-    setAssignPlayerId(id);
+  function selectTarget(key: string) {
+    setAssignTargetKey(key);
     setNotice(null);
-    const t = assignTargets.find((x) => x.id === id);
+    const t = assignTargets.find((x) => x.key === key);
     if (!t) return;
     setNameL1((t.firstName || "").toUpperCase());
     setNameL2((t.lastName || "").toUpperCase());
@@ -930,13 +933,13 @@ export default function CardEditor({
           Whose card is this?
         </span>
         <select
-          value={assignPlayerId}
+          value={assignTargetKey}
           onChange={(e) => selectTarget(e.target.value)}
           className="mt-1.5 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
         >
           <option value="">— No player (save to photos) —</option>
           {assignTargets.map((t) => (
-            <option key={t.id} value={t.id}>
+            <option key={t.key} value={t.key}>
               {t.name}
               {t.teamName ? ` · ${t.teamName}` : ""}
             </option>
@@ -1801,18 +1804,18 @@ export default function CardEditor({
             Cancel
           </button>
           <button
-            onClick={() => handleSave(standalone ? assignPlayerId || undefined : undefined)}
+            onClick={() => handleSave(standalone ? assignTargetKey || undefined : undefined)}
             disabled={!cutoutUrl || step === "saving"}
             className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {step === "saving"
-              ? standalone && !assignPlayerId
+              ? standalone && !assignTargetKey
                 ? "Exporting…"
                 : "Saving…"
               : !standalone
                 ? "Save card"
-                : assignPlayerId
-                  ? `Save to ${assignTargets.find((t) => t.id === assignPlayerId)?.name ?? "player"}`
+                : assignTargetKey
+                  ? `Save to ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
                   : "Save to Photos"}
           </button>
         </div>
