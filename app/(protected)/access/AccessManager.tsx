@@ -3,15 +3,28 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { TOOLS, type ToolKey } from "@/lib/tools";
-import { addToolUser, setToolGrant, removeToolUser, type ToolUserRow } from "./actions";
+import {
+  addToolUser,
+  setToolGrant,
+  removeToolUser,
+  type ToolUserRow,
+  type ParentOption,
+} from "./actions";
 
 function fmtPhone(key: string | null): string {
   if (!key) return "";
   return key.length === 10 ? `(${key.slice(0, 3)}) ${key.slice(3, 6)}-${key.slice(6)}` : key;
 }
 
-export default function AccessManager({ users }: { users: ToolUserRow[] }) {
+export default function AccessManager({
+  users,
+  parents,
+}: {
+  users: ToolUserRow[];
+  parents: ParentOption[];
+}) {
   const router = useRouter();
+  const [parentId, setParentId] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -19,6 +32,16 @@ export default function AccessManager({ users }: { users: ToolUserRow[] }) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pending, start] = useTransition();
+
+  // Picking a parent pre-fills the form; editing any field afterward is fine.
+  function pickParent(id: string) {
+    setParentId(id);
+    const p = parents.find((x) => x.id === id);
+    if (!p) return;
+    setName(p.name);
+    setPhone(p.phone ?? "");
+    setEmail(p.email ?? "");
+  }
 
   const loginUrl =
     typeof window !== "undefined" ? `${window.location.origin}/roster-login` : "/roster-login";
@@ -34,6 +57,7 @@ export default function AccessManager({ users }: { users: ToolUserRow[] }) {
       if (res.error) {
         setError(res.error);
       } else {
+        setParentId("");
         setName("");
         setPhone("");
         setEmail("");
@@ -156,12 +180,38 @@ export default function AccessManager({ users }: { users: ToolUserRow[] }) {
       {/* Add person */}
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Add a person</h2>
+
+        {parents.length > 0 && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-0.5">
+              Pick a parent
+            </label>
+            <select
+              value={parentId}
+              onChange={(e) => pickParent(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-1.5 text-sm"
+            >
+              <option value="">Choose a parent…</option>
+              {parents.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name || p.email || p.phone}
+                  {p.phone || p.email ? ` — ${[p.phone, p.email].filter(Boolean).join(", ")}` : ""}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-gray-400">Or fill in the fields below to invite someone new.</p>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex-1 min-w-[140px]">
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-0.5">Name</label>
             <input
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setParentId("");
+              }}
               placeholder="Their name"
               className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-1.5 text-sm"
             />
@@ -170,7 +220,10 @@ export default function AccessManager({ users }: { users: ToolUserRow[] }) {
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-0.5">Phone</label>
             <input
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                setParentId("");
+              }}
               placeholder="(623) 555-1234"
               inputMode="tel"
               className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-1.5 text-sm"
@@ -182,7 +235,10 @@ export default function AccessManager({ users }: { users: ToolUserRow[] }) {
             </label>
             <input
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setParentId("");
+              }}
               placeholder="name@email.com"
               inputMode="email"
               className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-1.5 text-sm"

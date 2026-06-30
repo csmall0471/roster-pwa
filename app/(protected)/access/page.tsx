@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { listToolUsers } from "./actions";
+import { listToolUsers, listParents } from "./actions";
 import AccessManager from "./AccessManager";
 
 // Owner-only permission manager: grant specific tools to specific people
@@ -20,7 +20,7 @@ export default async function AccessPage() {
     .eq("user_id", user.id);
   if ((count ?? 0) === 0) redirect("/teams");
 
-  const users = await listToolUsers();
+  const [users, parents] = await Promise.all([listToolUsers(), listParents()]);
 
   return (
     <div className="max-w-3xl">
@@ -31,7 +31,7 @@ export default async function AccessPage() {
           see only what you&rsquo;ve granted — never your other coach screens.
         </p>
       </div>
-      <AccessManager users={users} />
+      <AccessManager users={users} parents={parents} />
     </div>
   );
 }

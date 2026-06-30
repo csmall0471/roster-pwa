@@ -34,6 +34,32 @@ export type ToolUserRow = {
   tools: string[];
 };
 
+// A parent the owner can pick from the add form to pre-fill name/phone/email.
+export type ParentOption = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+};
+
+export async function listParents(): Promise<ParentOption[]> {
+  const { supabase, user } = await requireCoachOwner();
+  const { data } = await supabase
+    .from("parents")
+    .select("id, first_name, last_name, email, phone")
+    .eq("user_id", user.id)
+    .order("first_name", { ascending: true });
+  return (data ?? [])
+    .map((p) => ({
+      id: p.id as string,
+      name: [p.first_name, p.last_name].filter(Boolean).join(" ").trim(),
+      phone: (p.phone as string | null) ?? null,
+      email: (p.email as string | null) ?? null,
+    }))
+    // A parent we can't key on (no phone and no email) can't be granted access.
+    .filter((p) => p.phone || p.email);
+}
+
 export async function listToolUsers(): Promise<ToolUserRow[]> {
   await requireCoachOwner();
   const service = createServiceClient();

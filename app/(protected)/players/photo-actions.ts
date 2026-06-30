@@ -2,7 +2,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import type { CardDesign } from "@/lib/types";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -132,17 +132,45 @@ export async function savePlayerPhoto({
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  // Clear existing primary for this player
-  await supabase
+  // The card must be owned by the player's coach (players.user_id), NOT by
+  // whoever is creating it — a granted parent's auth.uid() differs from the
+  // coach's, and an owner-keyed row is the one both the coach page (filters by
+  // user_id) and the parent page (RLS parents_read_photos) can see. We read the
+  // owner and write the row with the service client so a parent can attach a
+  // card under the coach's user_id (RLS WITH CHECK would otherwise block it).
+  const service = createServiceClient();
+  const { data: player } = await service
+    .from("players")
+    .select("user_id")
+    .eq("id", playerId)
+    .single();
+  if (!player) return { error: "Player not found" };
+  const ownerId = player.user_id as string;
+
+  // Authorize: the coach themselves, or a parent of this kid who holds the
+  // card-creator grant. Anyone else can't assign a card to this player.
+  let authorized = user.id === ownerId;
+  if (!authorized) {
+    const { data: hasTool } = await supabase.rpc("has_tool_access", { tool: "card-creator" });
+    if (hasTool) {
+      const { data: kidRows } = await supabase.rpc("get_my_player_ids");
+      const kidIds = new Set(((kidRows ?? []) as { player_id: string }[]).map((r) => r.player_id));
+      authorized = kidIds.has(playerId);
+    }
+  }
+  if (!authorized) return { error: "You don't have access to save a card to this player." };
+
+  // Clear existing primary for this player (scoped to the coach's rows).
+  await service
     .from("player_photos")
     .update({ is_primary: false })
     .eq("player_id", playerId)
-    .eq("user_id", user.id);
+    .eq("user_id", ownerId);
 
-  const { data, error } = await supabase
+  const { data, error } = await service
     .from("player_photos")
     .insert({
-      user_id: user.id,
+      user_id: ownerId,
       player_id: playerId,
       storage_path: storagePath,
       public_url: publicUrl,
