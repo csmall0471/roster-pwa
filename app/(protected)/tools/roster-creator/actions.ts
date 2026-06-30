@@ -18,6 +18,7 @@ import { canonicalizeEntities, matchBuddiesWithClaude } from "./resolve/claude";
 import { runAnalysis } from "./analyze";
 import { selectAll } from "./db";
 import type { ScheduleConfig } from "./schedule";
+import { sheetToCsvUrl } from "./practice-import";
 import {
   type GroupConfig,
   type GroupPlayer,
@@ -381,6 +382,61 @@ export async function setTeamSchedule(
     .eq("id", teamId);
   if (error) throw new Error(error.message);
   revalidatePath(`/tools/roster-creator/${seasonId}/schedule`);
+}
+
+// Fetch a Google Sheet (or any CSV-export URL) server-side — the browser can't,
+// because Google's export endpoint doesn't send CORS headers. Returns raw CSV;
+// the client parses + matches it (it already has the team/coach data).
+export async function fetchPracticeSheetCsv(
+  url: string
+): Promise<{ csv?: string; error?: string }> {
+  await requireOwner();
+  const csvUrl = sheetToCsvUrl(url);
+  if (!csvUrl) return { error: "That doesn't look like a Google Sheets link." };
+  try {
+    const res = await fetch(csvUrl, { redirect: "follow" });
+    if (!res.ok) {
+      return {
+        error:
+          res.status === 401 || res.status === 403 || res.status === 404
+            ? "Couldn't open the sheet. In Google Sheets: Share → General access → Anyone with the link → Viewer."
+            : `Couldn't read the sheet (HTTP ${res.status}).`,
+      };
+    }
+    const text = await res.text();
+    const ct = res.headers.get("content-type") || "";
+    // A sheet that isn't link-shared returns the Google sign-in HTML with 200.
+    if (ct.includes("text/html") || /^\s*<(!doctype|html)/i.test(text)) {
+      return {
+        error:
+          "That sheet isn't viewable by link. In Google Sheets: Share → Anyone with the link → Viewer.",
+      };
+    }
+    return { csv: text };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to fetch the sheet." };
+  }
+}
+
+// Apply imported day/time to a batch of teams (field is left untouched).
+export async function applyPracticeTimes(
+  seasonId: string,
+  assignments: { teamId: string; day: string | null; time: string | null }[]
+): Promise<{ error?: string; count?: number }> {
+  const { supabase } = await requireOwner();
+  let count = 0;
+  for (const a of assignments) {
+    const { error } = await supabase
+      .from("tb_teams")
+      .update({ practice_night: a.day, practice_time: a.time })
+      .eq("id", a.teamId)
+      .eq("season_id", seasonId);
+    if (error) return { error: error.message };
+    count++;
+  }
+  void logToolActivity("rc_practice_times_imported", { season_id: seasonId, count });
+  revalidatePath(`/tools/roster-creator/${seasonId}/schedule`);
+  return { count };
 }
 
 export async function movePlayer(

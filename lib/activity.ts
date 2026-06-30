@@ -51,6 +51,7 @@ export type ActivityEvent =
   | "rc_lock_changed"
   | "rc_csv_exported"
   | "rc_roster_emailed"
+  | "rc_practice_times_imported"
   | "rc_access_granted"
   | "rc_access_revoked"
   // Tool permission manager (/access) — granting/revoking tools per user.

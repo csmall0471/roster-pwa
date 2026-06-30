@@ -6,6 +6,7 @@ import { setTeamSchedule, updateScheduleConfig } from "../../actions";
 import { NIGHTS } from "../../group/engine";
 import { toCsv } from "../../export-csv";
 import { type ScheduleConfig, timeSlots, fmtTime } from "../../schedule";
+import ImportPracticeTimes from "./ImportPracticeTimes";
 
 export type SchedTeam = {
   id: string;
@@ -205,6 +206,9 @@ export default function ScheduleBoard({
           </div>
         </div>
       </div>
+
+      {/* Import practice times from a league spreadsheet */}
+      <ImportPracticeTimes seasonId={seasonId} teams={teams} divisions={divisions} />
 
       {/* Settings: fields + time window */}
       <section className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
