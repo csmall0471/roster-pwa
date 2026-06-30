@@ -72,15 +72,18 @@ body {
    others. Unlayered rules always outrank ANY @layer, so headings/tables/etc.
    render consistently everywhere.
 
-   Colors are kept inheritance-friendly: headings/body/code/table text inherit
-   the container color (admin uses gray on dark, public uses gray on light),
-   so markdown stays readable in both light and dark mode. Only the few
-   decorative colors (links, borders, code/th backgrounds) are pinned, with a
-   prefers-color-scheme override to match this app's dark mode. */
+   Text color is intentionally NOT set here: the element's own `text-*` utility
+   drives it (e.g. `text-gray-600` on the public signup page, `text-gray-700
+   dark:text-gray-200` in the admin) and the generated children inherit it. We
+   must NOT pin `color` on `.markdown-body` — these rules are unlayered, so a
+   `color` here would beat the Tailwind utility (utilities live in a cascade
+   layer, which unlayered rules outrank) and the description would wrongly
+   inherit the <body> foreground — invisible on the always-light public page
+   whenever the app/OS is in dark mode. Only the few decorative colors (links,
+   borders, code/th backgrounds) are pinned, with a `.dark` override. */
 .markdown-body {
   font-size: 0.875rem;
   line-height: 1.6;
-  color: inherit;
 }
 .markdown-body > :first-child {
   margin-top: 0;
