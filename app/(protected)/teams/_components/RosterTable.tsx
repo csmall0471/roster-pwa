@@ -183,6 +183,7 @@ function RosterRow({
     entry.status as "active" | "inactive"
   );
   const [pending, startTransition] = useTransition();
+  const [savedTick, setSavedTick] = useState(false);
 
   useEffect(() => {
     setJersey(entry.jersey_number?.toString() ?? "");
@@ -190,13 +191,24 @@ function RosterRow({
   }, [entry.jersey_number, entry.status]);
 
   const savedJersey = entry.jersey_number?.toString() ?? "";
-  const isDirty = jersey !== savedJersey || status !== entry.status;
 
-  function save() {
-    const num = jersey === "" ? null : parseInt(jersey, 10);
+  // Auto-save: persist whenever the jersey field is left or a status is toggled.
+  // Skips the write when nothing actually changed from what's stored.
+  function commit(nextJersey: string, nextStatus: "active" | "inactive") {
+    const parsed = nextJersey === "" ? null : parseInt(nextJersey, 10);
+    const num = parsed === null || Number.isNaN(parsed) ? null : parsed;
+    if ((num?.toString() ?? "") === savedJersey && nextStatus === entry.status) return;
     startTransition(async () => {
-      await updateRosterEntry(entry.id, teamId, num, status);
+      await updateRosterEntry(entry.id, teamId, num, nextStatus);
+      setSavedTick(true);
+      setTimeout(() => setSavedTick(false), 1500);
     });
+  }
+
+  function toggleStatus() {
+    const next = status === "active" ? "inactive" : "active";
+    setStatus(next);
+    commit(jersey, next);
   }
 
   function handleRemove() {
@@ -223,6 +235,10 @@ function RosterRow({
             max={99}
             value={jersey}
             onChange={(e) => setJersey(e.target.value)}
+            onBlur={() => commit(jersey, status)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
             placeholder="—"
             aria-label="Jersey number"
             className="w-10 text-center rounded border border-gray-200 dark:border-gray-600 py-0.5 text-sm font-mono text-gray-900 dark:text-white bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -302,7 +318,7 @@ function RosterRow({
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0 text-sm">
           <button
-            onClick={() => setStatus((s) => (s === "active" ? "inactive" : "active"))}
+            onClick={toggleStatus}
             className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
               status === "active"
                 ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900"
@@ -312,10 +328,10 @@ function RosterRow({
             {status}
           </button>
 
-          {isDirty && (
-            <button onClick={save} className="text-blue-600 hover:underline font-medium">
-              Save
-            </button>
+          {pending ? (
+            <span className="text-xs text-gray-400">Saving…</span>
+          ) : (
+            savedTick && <span className="text-xs text-green-600 dark:text-green-400">Saved ✓</span>
           )}
 
           <button onClick={handleRemove} className="text-red-500 hover:underline">
