@@ -14,6 +14,7 @@ export type ActivityEvent =
   // Card generator
   | "card_editor_opened"
   | "card_photo_uploaded"
+  | "card_original_saved"
   | "card_bg_removed"
   | "card_bg_removal_failed"
   | "card_template_picked"

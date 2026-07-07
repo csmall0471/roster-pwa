@@ -107,6 +107,7 @@ export async function matchCardToPlayer(imageUrl: string): Promise<CardMatch> {
 
 export async function savePlayerPhoto({
   playerId,
+  photoId,
   storagePath,
   publicUrl,
   backStoragePath,
@@ -117,6 +118,9 @@ export async function savePlayerPhoto({
   cardDesign,
 }: {
   playerId: string;
+  // When set, the card is edited in place (updates this existing row) instead of
+  // inserting a new one — so re-editing doesn't leave a duplicate behind.
+  photoId?: string;
   storagePath: string;
   publicUrl: string;
   backStoragePath?: string;
@@ -167,23 +171,33 @@ export async function savePlayerPhoto({
     .eq("player_id", playerId)
     .eq("user_id", ownerId);
 
-  const { data, error } = await service
-    .from("player_photos")
-    .insert({
-      user_id: ownerId,
-      player_id: playerId,
-      storage_path: storagePath,
-      public_url: publicUrl,
-      back_storage_path: backStoragePath ?? null,
-      back_public_url: backPublicUrl ?? null,
-      team_name: teamName ?? null,
-      season: season ?? null,
-      is_primary: true,
-      team_id: teamId ?? null,
-      card_design: cardDesign ?? null,
-    })
-    .select("id")
-    .single();
+  const fields = {
+    storage_path: storagePath,
+    public_url: publicUrl,
+    back_storage_path: backStoragePath ?? null,
+    back_public_url: backPublicUrl ?? null,
+    team_name: teamName ?? null,
+    season: season ?? null,
+    is_primary: true,
+    team_id: teamId ?? null,
+    card_design: cardDesign ?? null,
+  };
+
+  // Editing an existing card updates that row in place; a fresh card inserts.
+  const { data, error } = photoId
+    ? await service
+        .from("player_photos")
+        .update(fields)
+        .eq("id", photoId)
+        .eq("player_id", playerId)
+        .eq("user_id", ownerId)
+        .select("id")
+        .single()
+    : await service
+        .from("player_photos")
+        .insert({ user_id: ownerId, player_id: playerId, ...fields })
+        .select("id")
+        .single();
 
   if (error) return { error: error.message };
   revalidatePath(`/players/${playerId}`);

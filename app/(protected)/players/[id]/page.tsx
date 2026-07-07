@@ -55,6 +55,8 @@ export default async function PlayerDetailPage({
   );
 
   const primary = (photos ?? []).find((p: PlayerPhoto) => p.is_primary);
+  // A card built in the Card Creator carries a design that can be reopened.
+  const hasCard = (photos ?? []).some((p: PlayerPhoto) => p.card_design);
 
   type SeasonRow = {
     jersey_number: number | null;
@@ -137,7 +139,7 @@ export default async function PlayerDetailPage({
               href={`/players/${id}/card`}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
             >
-              Create card
+              {hasCard ? "Edit card" : "Create card"}
             </Link>
             <Link
               href={`/players/upload?player=${id}`}

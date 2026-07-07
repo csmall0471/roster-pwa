@@ -11,6 +11,9 @@ type TeamPhoto = {
   team_name: string | null;
   season: string | null;
   is_primary: boolean;
+  // Present only on cards built in the Card Creator — those can be reopened and
+  // edited. Uploaded-image cards have no design, so they aren't editable.
+  card_design: unknown | null;
   players: { id: string; first_name: string; last_name: string } | null;
 };
 
@@ -55,13 +58,21 @@ function PhotoCard({
         </button>
       </div>
       {photo.players && (
-        <div className="px-2 py-1.5">
+        <div className="px-2 py-1.5 flex items-center justify-between gap-1">
           <Link
             href={`/players/${photo.players.id}`}
-            className="text-xs font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 truncate block"
+            className="text-xs font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 truncate"
           >
             {photo.players.first_name} {photo.players.last_name}
           </Link>
+          {!!photo.card_design && (
+            <Link
+              href={`/players/${photo.players.id}/card?team=${teamId}&photo=${photo.id}`}
+              className="shrink-0 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Edit
+            </Link>
+          )}
         </div>
       )}
     </div>

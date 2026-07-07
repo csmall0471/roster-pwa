@@ -20,10 +20,10 @@ export default async function PlayerCardPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ team?: string }>;
+  searchParams: Promise<{ team?: string; photo?: string }>;
 }) {
   const { id } = await params;
-  const { team: teamIdParam } = await searchParams;
+  const { team: teamIdParam, photo: photoParam } = await searchParams;
 
   const supabase = await createClient();
   const {
@@ -85,11 +85,28 @@ export default async function PlayerCardPage({
     playerAge = String(age);
   }
 
+  // Prefer a specific card (Edit button on a card in the grid); otherwise fall
+  // back to the most recent card for this team. Either way we keep its row id so
+  // saving edits that card in place instead of adding a duplicate.
   let initialDesign: CardDesign | null = null;
-  if (teamId) {
+  let initialPhotoId: string | null = null;
+  if (photoParam) {
     const { data: existing } = await supabase
       .from("player_photos")
-      .select("card_design")
+      .select("id, card_design")
+      .eq("id", photoParam)
+      .eq("player_id", id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (existing?.card_design) {
+      initialDesign = existing.card_design as CardDesign;
+      initialPhotoId = existing.id as string;
+    }
+  }
+  if (!initialDesign && teamId) {
+    const { data: existing } = await supabase
+      .from("player_photos")
+      .select("id, card_design")
       .eq("player_id", id)
       .eq("team_id", teamId)
       .eq("user_id", user.id)
@@ -97,7 +114,10 @@ export default async function PlayerCardPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    initialDesign = (existing?.card_design as CardDesign | null) ?? null;
+    if (existing) {
+      initialDesign = (existing.card_design as CardDesign | null) ?? null;
+      initialPhotoId = initialDesign ? (existing.id as string) : null;
+    }
   }
 
   const returnHref = teamId ? `/teams/${teamId}` : `/players/${id}`;
@@ -113,7 +133,7 @@ export default async function PlayerCardPage({
 
       <div className="mt-3 mb-5">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          Create card for {player.first_name}
+          {initialDesign ? "Edit" : "Create"} card for {player.first_name}
         </h1>
         {teamName && (
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
@@ -140,6 +160,7 @@ export default async function PlayerCardPage({
           playerAge={playerAge}
           returnHref={returnHref}
           initialDesign={initialDesign}
+          initialPhotoId={initialPhotoId}
         />
       )}
     </div>

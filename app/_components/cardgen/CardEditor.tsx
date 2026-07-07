@@ -43,6 +43,9 @@ type Props = {
   playerAge: string | null;
   returnHref: string;
   initialDesign?: CardDesign | null;
+  // The player_photos row `initialDesign` came from. When set, saving edits that
+  // card in place rather than adding a new one to the player.
+  initialPhotoId?: string | null;
   // Standalone mode (Tools → Card Creator): no player to attach to, so the
   // finished card is exported to the photo library / downloaded instead of
   // saved against a player record.
@@ -206,6 +209,7 @@ export default function CardEditor({
   playerAge,
   returnHref,
   initialDesign,
+  initialPhotoId,
   standalone = false,
   assignTargets = [],
   allowDrafts = false,
@@ -237,6 +241,11 @@ export default function CardEditor({
   // and a success note after assigning.
   const [assignTargetKey, setAssignTargetKey] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  // The full-res photo the user just picked/took, kept so they can save it back
+  // to their device before we downscale it for background removal. Null when the
+  // editor is reopened on a saved design (we never had the original file).
+  const [originalPhoto, setOriginalPhoto] = useState<File | null>(null);
+  const [savingOriginal, setSavingOriginal] = useState(false);
 
   // Layer state
   const [cutoutUrl, setCutoutUrl] = useState<string | null>(
@@ -547,6 +556,9 @@ export default function CardEditor({
   async function handlePhotoSelected(file: File) {
     setStep("processing");
     setError(null);
+    // Hold onto the untouched original so it can be saved to the device below;
+    // everything downstream works off a downscaled copy.
+    setOriginalPhoto(file);
     const startedAt = Date.now();
     try {
       const supabase = createClient();
@@ -594,6 +606,36 @@ export default function CardEditor({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStep("upload");
+    }
+  }
+
+  // Hand the untouched original back to the device. On phones this opens the
+  // share sheet ("Save Image" → Photos / "Save to Files"); on desktop it falls
+  // back to a download. iOS can't write to Photos silently, so this is the one
+  // reliable way to keep the full-res shot.
+  async function saveOriginalToDevice() {
+    if (!originalPhoto || savingOriginal) return;
+    setSavingOriginal(true);
+    try {
+      const file = originalPhoto;
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name || `${(firstName || "photo").toLowerCase()}-original.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+      track("card_original_saved");
+      logClientActivity("card_original_saved").catch(() => {});
+    } catch {
+      // User dismissed the share sheet — nothing to do.
+    } finally {
+      setSavingOriginal(false);
     }
   }
 
@@ -852,6 +894,9 @@ export default function CardEditor({
 
       const res = await savePlayerPhoto({
         playerId: targetPlayerId,
+        // Only edit in place when saving back to the same card the editor opened
+        // (no assign target picked). Assigning to a chosen player always inserts.
+        photoId: !targetKey ? initialPhotoId ?? undefined : undefined,
         storagePath: frontPath,
         publicUrl: frontUrlData.publicUrl,
         backStoragePath,
@@ -1333,6 +1378,15 @@ export default function CardEditor({
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
                 Drag the player to move. Pinch to scale on phones. Use sliders for rotation.
               </p>
+              {originalPhoto && (
+                <button
+                  onClick={saveOriginalToDevice}
+                  disabled={savingOriginal}
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {savingOriginal ? "Saving…" : "⬇︎ Save original photo to your device"}
+                </button>
+              )}
 
               {/* Signature */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
