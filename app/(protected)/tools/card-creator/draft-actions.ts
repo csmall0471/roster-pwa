@@ -38,6 +38,10 @@ export async function saveCardDraft(input: {
   frontUrl: string;
   backUrl: string;
   cardDesign: CardDesign;
+  // Optional: earmark the draft for a specific kid. Stored on the draft only —
+  // nothing is written to player_photos, so it stays off the kid's profile.
+  playerId?: string;
+  teamId?: string;
 }): Promise<{ id?: string; error?: string }> {
   const { supabase, user } = await requireOwner();
   const row = {
@@ -48,6 +52,8 @@ export async function saveCardDraft(input: {
     front_url: input.frontUrl,
     back_url: input.backUrl,
     card_design: input.cardDesign,
+    player_id: input.playerId || null,
+    team_id: input.teamId || null,
     updated_at: new Date().toISOString(),
   };
 

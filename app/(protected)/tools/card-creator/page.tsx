@@ -50,25 +50,50 @@ export default async function CardCreatorPage({
     );
   }
 
-  // Reopen a draft (owner only). RLS scopes to this user.
+  // Names for earmarked drafts, keyed by player id (owner's own players).
+  const nameById = new Map(
+    (players ?? []).map((p) => [p.id as string, `${p.first_name} ${p.last_name}`.trim()])
+  );
+
+  // Reopen a draft (owner only). RLS scopes to this user. Try the assignment
+  // columns first; fall back if the player_id/team_id migration isn't applied.
   let initialDesign: CardDesign | null = null;
+  let initialAssignKey: string | undefined;
   if (isOwner && draftId) {
-    const { data } = await supabase
+    const rich = await supabase
       .from("card_drafts")
-      .select("card_design")
+      .select("card_design, player_id, team_id")
       .eq("id", draftId)
       .maybeSingle();
-    initialDesign = (data?.card_design as CardDesign | null) ?? null;
+    const row = rich.error
+      ? (await supabase.from("card_drafts").select("card_design").eq("id", draftId).maybeSingle()).data
+      : rich.data;
+    initialDesign = (row?.card_design as CardDesign | null) ?? null;
+    const playerId = (row as { player_id?: string | null } | null)?.player_id ?? null;
+    const teamId = (row as { team_id?: string | null } | null)?.team_id ?? null;
+    if (playerId) initialAssignKey = `${playerId}::${teamId ?? "none"}`;
   }
 
-  // The drafts list (graceful empty if the table isn't migrated yet).
+  // The drafts list (graceful empty if the table isn't migrated yet; falls back
+  // to the pre-assignment columns so existing drafts still show before migrate).
   let drafts: DraftRow[] = [];
   if (isOwner) {
-    const { data } = await supabase
+    const rich = await supabase
       .from("card_drafts")
-      .select("id, label, team_name, season, front_url, updated_at")
+      .select("id, label, team_name, season, front_url, updated_at, player_id")
       .order("updated_at", { ascending: false });
-    drafts = (data ?? []) as DraftRow[];
+    const rows = rich.error
+      ? (
+          await supabase
+            .from("card_drafts")
+            .select("id, label, team_name, season, front_url, updated_at")
+            .order("updated_at", { ascending: false })
+        ).data
+      : rich.data;
+    drafts = ((rows ?? []) as (DraftRow & { player_id?: string | null })[]).map((r) => ({
+      ...r,
+      player_name: r.player_id ? nameById.get(r.player_id) ?? null : null,
+    }));
   }
 
   return (
@@ -102,6 +127,7 @@ export default async function CardCreatorPage({
         allowDrafts={isOwner}
         draftId={draftId}
         initialDesign={initialDesign}
+        initialAssignKey={initialAssignKey}
       />
 
       {isOwner && <DraftsList drafts={drafts} activeId={draftId ?? null} />}

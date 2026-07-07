@@ -12,6 +12,8 @@ export type DraftRow = {
   season: string | null;
   front_url: string | null;
   updated_at: string;
+  // Set when the draft is earmarked for a kid (still off their profile).
+  player_name?: string | null;
 };
 
 export default function DraftsList({
@@ -50,16 +52,23 @@ export default function DraftsList({
             }`}
           >
             <Link href={`/tools/card-creator?draft=${d.id}`} className="block">
-              {d.front_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={d.front_url}
-                  alt=""
-                  className="w-full aspect-[5/7] object-cover rounded-lg bg-gray-100 dark:bg-gray-800"
-                />
-              ) : (
-                <div className="w-full aspect-[5/7] rounded-lg bg-gray-100 dark:bg-gray-800" />
-              )}
+              <div className="relative">
+                {d.front_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={d.front_url}
+                    alt=""
+                    className="w-full aspect-[5/7] object-cover rounded-lg bg-gray-100 dark:bg-gray-800"
+                  />
+                ) : (
+                  <div className="w-full aspect-[5/7] rounded-lg bg-gray-100 dark:bg-gray-800" />
+                )}
+                {d.player_name && (
+                  <span className="absolute top-1.5 left-1.5 max-w-[85%] truncate rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    For {d.player_name}
+                  </span>
+                )}
+              </div>
               <div className="mt-1.5 text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">
                 {d.label || "Untitled"}
               </div>

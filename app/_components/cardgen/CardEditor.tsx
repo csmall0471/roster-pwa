@@ -58,6 +58,9 @@ type Props = {
   // not attached to a real player). draftId is set when editing an existing one.
   allowDrafts?: boolean;
   draftId?: string;
+  // Pre-selected assign target (a "playerId::teamId" key) when reopening a draft
+  // that was earmarked for a kid, so publishing it is one tap.
+  initialAssignKey?: string;
 };
 
 export type AssignTarget = {
@@ -214,6 +217,7 @@ export default function CardEditor({
   assignTargets = [],
   allowDrafts = false,
   draftId,
+  initialAssignKey,
 }: Props) {
   const router = useRouter();
 
@@ -239,7 +243,10 @@ export default function CardEditor({
   const [error, setError] = useState<string | null>(null);
   // Standalone assign-to-player: which player to attach to ("" = export only),
   // and a success note after assigning.
-  const [assignTargetKey, setAssignTargetKey] = useState("");
+  // Pre-select the earmarked kid on a reopened draft. We don't call selectTarget
+  // here — the design is already loaded from initialDesign, so we only want the
+  // dropdown selected, not the fields overwritten.
+  const [assignTargetKey, setAssignTargetKey] = useState(initialAssignKey ?? "");
   const [notice, setNotice] = useState<string | null>(null);
   // The full-res photo the user just picked/took, kept so they can save it back
   // to their device before we downscale it for background removal. Null when the
@@ -804,6 +811,12 @@ export default function CardEditor({
       const frontUrl = await up(`${user.id}/card-drafts/${id}.png`, frontBlob);
       const backUrl = await up(`${user.id}/card-drafts/${id}-back.png`, backBlob);
 
+      // Earmark the draft for the kid picked in "Whose card is this?" (if any).
+      // This only tags the draft — no player_photos row, so it stays off the
+      // kid's profile until it's published.
+      const draftTarget = assignTargetKey
+        ? assignTargets.find((t) => t.key === assignTargetKey)
+        : undefined;
       const res = await saveCardDraft({
         id: draftId,
         label: [nameL1, nameL2].filter(Boolean).join(" "),
@@ -812,6 +825,8 @@ export default function CardEditor({
         frontUrl,
         backUrl,
         cardDesign: buildDesign(),
+        playerId: draftTarget?.id,
+        teamId: draftTarget?.teamId ?? undefined,
       });
       if (res.error) throw new Error(res.error);
 
@@ -1943,7 +1958,11 @@ export default function CardEditor({
             disabled={!cutoutUrl || step === "saving"}
             className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
           >
-            {draftId ? "💾 Update draft" : "💾 Save as draft (no player yet)"}
+            {draftId
+              ? "💾 Update draft"
+              : assignTargetKey
+                ? `💾 Save as draft for ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
+                : "💾 Save as draft (no player yet)"}
           </button>
         )}
       </div>
