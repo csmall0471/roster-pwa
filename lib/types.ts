@@ -129,6 +129,7 @@ export interface CardBackDesign {
   season_quote?: string;
   look_alike: string;
   look_alike_photo?: string | null; // photo of the matched pro player
+  look_alike_blurb?: string; // one-line play-style description of the pro
   // Small headshot shown in the upper-right of the back, with object-position
   // (0–100) so it can be panned within its circle.
   headshot_url?: string | null;

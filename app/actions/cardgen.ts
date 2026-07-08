@@ -199,7 +199,7 @@ const LOOKALIKE_LENSES = [
 export async function findLookalike(
   photoUrl: string,
   context?: { firstName?: string; position?: string; height?: string }
-): Promise<{ name?: string; photoUrl?: string; error?: string }> {
+): Promise<{ name?: string; blurb?: string; photoUrl?: string; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { error: "ANTHROPIC_API_KEY not configured" };
   }
@@ -240,20 +240,24 @@ Choose ONE real professional basketball player — NBA or WNBA, any era (current
 
 Make it feel personal and specific. Cast a wide net across the whole history of the sport. Avoid defaulting to the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant) unless the fit is genuinely the strongest — a less obvious but well-fitting pick is better. ${roleHint}For variety, lean toward the vibe of ${lens} if the photo supports it.
 
-Respond with ONLY the player's name — no reasoning, no preamble, no punctuation.`,
+Respond with exactly two lines and nothing else:
+Line 1 — the player's name only (no punctuation).
+Line 2 — one short, punchy sentence (about 8-14 words) on how that player plays: their signature style and skills. Present tense, no name, no quotation marks.`,
             },
           ],
         },
       ],
     });
     const raw = res.content[0]?.type === "text" ? res.content[0].text.trim() : "";
-    // Use the first non-empty line, trimming wrapping quotes / trailing period;
-    // keep internal apostrophes & hyphens (De'Aaron Fox, Karl-Anthony Towns, A'ja Wilson).
-    const firstLine = raw.split("\n").find((l) => l.trim()) ?? raw;
-    const name = firstLine.replace(/^["'\s]+|["'.\s]+$/g, "").trim();
+    // Line 1 is the name, line 2 the play-style blurb. Trim wrapping quotes /
+    // trailing period on the name but keep internal apostrophes & hyphens
+    // (De'Aaron Fox, Karl-Anthony Towns, A'ja Wilson); keep the blurb's period.
+    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+    const name = (lines[0] ?? raw).replace(/^["'\s]+|["'.\s]+$/g, "").trim();
     if (!name) return { name: raw };
+    const blurb = (lines[1] ?? "").replace(/^["'\s]+|["'\s]+$/g, "").trim();
     const photo = await wikipediaPhoto(name);
-    return { name, photoUrl: photo ?? undefined };
+    return { name, blurb: blurb || undefined, photoUrl: photo ?? undefined };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Look-alike failed" };
   }

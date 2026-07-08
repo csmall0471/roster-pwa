@@ -26,6 +26,7 @@ type Props = {
   seasonQuote?: string;
   lookAlike: string;
   lookAlikePhoto?: string | null; // photo of the matched pro player
+  lookAlikeBlurb?: string; // one-line play-style description of the pro
   headshotUrl?: string | null; // small headshot, upper-right
   headshotPosition?: string; // object-position, e.g. "50% 30%"
   onHeadshotPointerDown?: (e: React.PointerEvent) => void;
@@ -49,6 +50,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     seasonQuote,
     lookAlike,
     lookAlikePhoto,
+    lookAlikeBlurb,
     headshotUrl,
     headshotPosition,
     onHeadshotPointerDown,
@@ -58,7 +60,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
   ref
 ) {
   const statRows: Array<[string, string]> = [
-    ["POS", stats.position],
+    ["POS", abbreviatePosition(stats.position)],
     ["HT", stats.height],
     ["#", jersey || stats.jersey],
     ["AGE", stats.age],
@@ -159,7 +161,10 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           color: "#fff",
           display: "flex",
           flexDirection: "column",
-          gap: "3%",
+          // Spread the sections to fill the panel instead of leaving a big void
+          // above the "plays like" banner; gap is the minimum spacing.
+          justifyContent: "space-between",
+          gap: "3.5%",
           fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
         }}
       >
@@ -234,7 +239,9 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
                 <div
                   style={{
                     fontFamily: "var(--font-anton), Impact, sans-serif",
-                    fontSize: "min(4.2vw, 22px)",
+                    // Shrink so longer values (e.g. an un-abbreviated position or
+                    // a tall height like 5'11") stay on one line inside the pill.
+                    fontSize: v.length > 4 ? "min(3vw, 15px)" : "min(4.2vw, 22px)",
                     lineHeight: 1.1,
                     marginTop: "2px",
                     overflow: "hidden",
@@ -312,7 +319,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             style={{
               display: "flex",
               flexDirection: "column",
-              gap: "0.35em",
+              gap: "0.55em",
             }}
           >
             {stats.favorite_team && (
@@ -343,14 +350,13 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
         {lookAlike && (
           <div
             style={{
-              marginTop: "auto",
               background: "linear-gradient(90deg, rgba(251,191,36,0.95) 0%, rgba(251,146,60,0.95) 100%)",
               color: "#0a0a0a",
               borderRadius: "10px",
               padding: "0.7em 0.9em",
               display: "flex",
               alignItems: "center",
-              gap: "0.7em",
+              gap: "0.8em",
             }}
           >
             {lookAlikePhoto && (
@@ -359,48 +365,95 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               <div
                 data-lookalike-photo
                 style={{
-                  width: "13%",
+                  width: "16%",
                   aspectRatio: "1 / 1",
                   flexShrink: 0,
                   borderRadius: "9999px",
                   backgroundImage: `url(${lookAlikePhoto})`,
                   backgroundSize: "cover",
-                  backgroundPosition: "center",
+                  // Bias toward the top so the face shows, not the jersey/torso.
+                  backgroundPosition: "center 22%",
                   border: "2px solid rgba(10,10,10,0.55)",
                 }}
               />
             )}
-            <span
-              style={{
-                fontSize: "min(2vw, 10px)",
-                letterSpacing: "0.22em",
-                fontWeight: 800,
-                whiteSpace: "nowrap",
-              }}
-            >
-              PLAYS LIKE
-            </span>
-            <span
-              style={{
-                fontFamily: "var(--font-anton), Impact, sans-serif",
-                fontSize: "min(5.5vw, 28px)",
-                lineHeight: 1,
-                letterSpacing: "0.03em",
-                flex: 1,
-                minWidth: 0,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {lookAlike.toUpperCase()}
-            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: "0.55em",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "min(2vw, 10px)",
+                    letterSpacing: "0.22em",
+                    fontWeight: 800,
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                  }}
+                >
+                  PLAYS LIKE
+                </span>
+                <span
+                  style={{
+                    fontFamily: "var(--font-anton), Impact, sans-serif",
+                    fontSize: "min(5.5vw, 28px)",
+                    lineHeight: 1,
+                    letterSpacing: "0.03em",
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {lookAlike.toUpperCase()}
+                </span>
+              </div>
+              {lookAlikeBlurb && (
+                <p
+                  style={{
+                    margin: "0.3em 0 0",
+                    fontSize: "min(2.5vw, 12px)",
+                    lineHeight: 1.25,
+                    fontWeight: 600,
+                    fontStyle: "italic",
+                    color: "rgba(10,10,10,0.82)",
+                  }}
+                >
+                  {lookAlikeBlurb}
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>
     </div>
   );
 });
+
+// Shorten common positions to a badge code so they fit the stat pill; custom
+// values (e.g. "Wing") pass through and the pill shrinks the font to fit.
+function abbreviatePosition(pos: string): string {
+  const key = pos.trim().toLowerCase().replace(/\s+/g, " ");
+  const map: Record<string, string> = {
+    "point guard": "PG",
+    "shooting guard": "SG",
+    "small forward": "SF",
+    "power forward": "PF",
+    center: "C",
+    guard: "G",
+    forward: "F",
+    "guard/forward": "G/F",
+    "forward/center": "F/C",
+    "combo guard": "CG",
+    wing: "W",
+    utility: "UTIL",
+  };
+  return map[key] ?? pos;
+}
 
 function FavRow({ label, value }: { label: string; value: string }) {
   return (
@@ -409,12 +462,12 @@ function FavRow({ label, value }: { label: string; value: string }) {
         display: "flex",
         alignItems: "baseline",
         gap: "0.6em",
-        fontSize: "min(2.8vw, 13px)",
+        fontSize: "min(3.1vw, 15px)",
       }}
     >
       <span
         style={{
-          fontSize: "min(2vw, 10px)",
+          fontSize: "min(2.1vw, 10.5px)",
           letterSpacing: "0.16em",
           color: "rgba(255,255,255,0.55)",
           fontWeight: 700,

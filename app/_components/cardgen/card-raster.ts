@@ -104,7 +104,11 @@ async function drawCircle(
   y: number,
   w: number,
   h: number,
-  ring: { width: number; color: string }
+  ring: { width: number; color: string },
+  // Vertical anchor (0 = top, 0.5 = center): which point of the image sits at
+  // the circle's center. Lower biases toward the face on a portrait. Clamped so
+  // the image still fully covers the circle.
+  anchorY = 0.5
 ) {
   const img = await loadImage(src);
   if (!img.naturalWidth) return;
@@ -114,11 +118,13 @@ async function drawCircle(
   const cx = x + w / 2;
   const cy = y + h / 2;
   const rad = Math.min(w, h) / 2;
+  const minA = rad / dh;
+  const a = Math.max(minA, Math.min(1 - minA, anchorY));
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, rad, 0, Math.PI * 2);
   ctx.clip();
-  ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
+  ctx.drawImage(img, cx - dw / 2, cy - a * dh, dw, dh);
   ctx.restore();
   ctx.beginPath();
   ctx.arc(cx, cy, rad - ring.width / 2, 0, Math.PI * 2);
@@ -180,7 +186,8 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
         (er.top - br.top) * s,
         er.width * s,
         er.height * s,
-        { width: 0.006 * W, color: "rgba(10,10,10,0.55)" }
+        { width: 0.006 * W, color: "rgba(10,10,10,0.55)" },
+        0.3 // bias toward the face
       );
     }
   }

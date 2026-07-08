@@ -348,6 +348,9 @@ export default function CardEditor({
   const [lookAlikePhoto, setLookAlikePhoto] = useState<string | null>(
     initBack?.look_alike_photo ?? null
   );
+  const [lookAlikeBlurb, setLookAlikeBlurb] = useState(
+    initBack?.look_alike_blurb ?? ""
+  );
   const [headshotUrl, setHeadshotUrl] = useState<string | null>(
     initBack?.headshot_url ?? null
   );
@@ -758,6 +761,7 @@ export default function CardEditor({
       if (res.name) {
         setLookAlike(res.name);
         setLookAlikePhoto(res.photoUrl ?? null);
+        setLookAlikeBlurb(res.blurb ?? "");
         track("card_lookalike_generated", { name: res.name });
         logClientActivity("card_lookalike_generated", { name: res.name }).catch(() => {});
       }
@@ -815,6 +819,7 @@ export default function CardEditor({
         season_quote: seasonQuote,
         look_alike: lookAlike,
         look_alike_photo: lookAlikePhoto,
+        look_alike_blurb: lookAlikeBlurb || undefined,
         headshot_url: headshotUrl,
         headshot_x: headshotPosX,
         headshot_y: headshotPosY,
@@ -1209,6 +1214,7 @@ export default function CardEditor({
             seasonQuote={seasonQuote}
             lookAlike={lookAlike}
             lookAlikePhoto={lookAlikePhoto}
+            lookAlikeBlurb={lookAlikeBlurb}
             headshotUrl={headshotDataUrl ?? headshotUrl}
             headshotPosition={`${headshotPosX}% ${headshotPosY}%`}
             onHeadshotPointerDown={onHeadshotPointerDown}
@@ -2038,6 +2044,7 @@ export default function CardEditor({
                 onChange={(e) => {
                   setLookAlike(e.target.value);
                   setLookAlikePhoto(null); // typed name → drop the AI-matched photo
+                  setLookAlikeBlurb(""); // and its AI blurb
                 }}
                 placeholder="Stephen Curry"
                 className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
