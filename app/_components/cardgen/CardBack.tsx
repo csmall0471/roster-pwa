@@ -72,11 +72,12 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
       className="relative w-full mx-auto rounded-2xl overflow-hidden shadow-lg"
       style={{ aspectRatio: "5 / 7", ...bgStyle }}
     >
-      {/* Header chevron chips — matches the front. */}
+      {/* Header chevron chips — matches the front. Flush-left plate with the
+          text inset so print trim can't clip it. */}
       <div
         style={{
           position: "absolute",
-          top: "5%",
+          top: "6.5%",
           left: 0,
           pointerEvents: "none",
           filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))",
@@ -86,7 +87,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           style={{
             background: "#fff",
             color: "#0a0a0a",
-            padding: "0.38em 1.6em 0.38em 5%",
+            padding: "0.38em 1.6em 0.38em 8%",
             clipPath: "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
             fontFamily: "var(--font-anton), Impact, sans-serif",
             fontSize: "min(7vw, 38px)",
@@ -102,7 +103,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             style={{
               background: "#0a0a0a",
               color: "#fff",
-              padding: "0.45em 1.6em 0.45em 5%",
+              padding: "0.45em 1.6em 0.45em 8%",
               clipPath: "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
               fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
               fontSize: "min(2.7vw, 14px)",
@@ -127,8 +128,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           onPointerCancel={onHeadshotPointerUp}
           style={{
             position: "absolute",
-            top: "4.5%",
-            right: "5%",
+            top: "6%",
+            right: "7%",
             width: "22%",
             aspectRatio: "1 / 1",
             // background-image (not <img>) so iOS Safari includes it in the snapshot.

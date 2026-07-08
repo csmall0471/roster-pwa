@@ -1277,8 +1277,8 @@ export default function CardEditor({
           <div
             style={{
               position: "absolute",
-              top: "4.5%",
-              right: "5%",
+              top: "6%",
+              right: "7%",
               minWidth: "14%",
               aspectRatio: "1 / 1",
               borderRadius: "9999px",
@@ -1300,11 +1300,13 @@ export default function CardEditor({
           </div>
         )}
 
-        {/* Team name plate — stacked chevron-cut chips. */}
+        {/* Team name plate — stacked chevron-cut chips. Plate stays flush to the
+            left edge (full-bleed), but the text is inset so print trim can't
+            clip it. */}
         <div
           style={{
             position: "absolute",
-            top: "5%",
+            top: "6.5%",
             left: 0,
             pointerEvents: "none",
             filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))",
@@ -1314,7 +1316,7 @@ export default function CardEditor({
             style={{
               background: "#fff",
               color: "#0a0a0a",
-              padding: "0.38em 1.6em 0.38em 5%",
+              padding: "0.38em 1.6em 0.38em 8%",
               clipPath:
                 "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
               fontFamily: "var(--font-anton), Impact, sans-serif",
@@ -1331,7 +1333,7 @@ export default function CardEditor({
               style={{
                 background: "#0a0a0a",
                 color: "#fff",
-                padding: "0.45em 1.6em 0.45em 5%",
+                padding: "0.45em 1.6em 0.45em 8%",
                 clipPath:
                   "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
                 fontFamily:
@@ -1352,9 +1354,9 @@ export default function CardEditor({
         <div
           style={{
             position: "absolute",
-            left: "5%",
-            right: "5%",
-            bottom: "5%",
+            left: "8%",
+            right: "8%",
+            bottom: "7%",
             pointerEvents: "none",
             fontFamily: getNameFont(nameFont).family,
             fontStyle: nameItalic ? "italic" : "normal",

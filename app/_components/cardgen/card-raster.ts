@@ -147,8 +147,8 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
     const img = await loadImage(L.headshotSrc);
     if (img.naturalWidth) {
       const size = 0.22 * W;
-      const left = 0.95 * W - size; // right: 5%
-      const top = 0.045 * H; // top: 4.5%
+      const left = 0.93 * W - size; // right: 7% (matches CardBack's print-safe inset)
+      const top = 0.06 * H; // top: 6%
       const r = Math.max(size / img.naturalWidth, size / img.naturalHeight); // cover
       const dw = img.naturalWidth * r;
       const dh = img.naturalHeight * r;
