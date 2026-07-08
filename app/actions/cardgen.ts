@@ -176,8 +176,29 @@ async function wikipediaPhoto(name: string): Promise<string | null> {
   }
 }
 
+// A rotating set of "lenses" — each call picks one at random so the same photo
+// doesn't keep resolving to the same handful of superstars. It's a soft nudge
+// ("if it fits"), not a hard constraint, so the match still reflects the kid.
+const LOOKALIKE_LENSES = [
+  "a lightning-quick guard",
+  "a crafty playmaker",
+  "a lockdown defender",
+  "a smooth mid-range scorer",
+  "a high-energy hustle player",
+  "a knockdown sharpshooter",
+  "a fearless slasher who attacks the rim",
+  "a poised floor general",
+  "an old-school throwback",
+  "a modern positionless star",
+  "a WNBA standout",
+  "a beloved cult-favorite role player",
+  "a relentless rebounder",
+  "a flashy showman",
+];
+
 export async function findLookalike(
-  photoUrl: string
+  photoUrl: string,
+  context?: { firstName?: string; position?: string; height?: string }
 ): Promise<{ name?: string; photoUrl?: string; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { error: "ANTHROPIC_API_KEY not configured" };
@@ -187,11 +208,23 @@ export async function findLookalike(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
+  const lens =
+    LOOKALIKE_LENSES[Math.floor(Math.random() * LOOKALIKE_LENSES.length)];
+  const roleHint = context?.position
+    ? `They play ${context.position}${
+        context.height ? `, listed around ${context.height}` : ""
+      } — prefer a pro who plays a similar role, not just the most famous name. `
+    : "";
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   try {
     const res = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 60,
+      // Opus reads vibe/energy from a photo far better than Haiku, which kept
+      // defaulting to the same few household names. (Sampling params like
+      // temperature aren't accepted on this model — diversity comes from the
+      // prompt + the random lens above.)
+      model: "claude-opus-4-8",
+      max_tokens: 100,
       messages: [
         {
           role: "user",
@@ -199,20 +232,25 @@ export async function findLookalike(
             { type: "image", source: { type: "url", url: photoUrl } },
             {
               type: "text",
-              text: `This is a fun "plays like" label for a youth basketball trading card.
+              text: `Pick a fun "plays like" comparison for a youth basketball trading card${
+                context?.firstName ? ` for a player named ${context.firstName}` : ""
+              }.
 
-Pick ONE well-known professional basketball player — NBA or WNBA, current or all-time, not limited to any short list — whose VIBE and ENERGY best matches this young player, judged from body language, posture, smile, and confidence in the photo. Match on personality and energy only. Do NOT use facial features, ethnicity, or skin tone.
+Choose ONE real professional basketball player — NBA or WNBA, any era (current stars, all-time greats, international players, or beloved role players), any position — whose VIBE and ENERGY match this kid, judged only from body language, posture, smile, and confidence in the photo. Match on personality and energy — NOT facial features, ethnicity, or skin tone.
 
-Respond with ONLY the player's name. No reasoning, no punctuation.`,
+Make it feel personal and specific. Cast a wide net across the whole history of the sport. Avoid defaulting to the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant) unless the fit is genuinely the strongest — a less obvious but well-fitting pick is better. ${roleHint}For variety, lean toward the vibe of ${lens} if the photo supports it.
+
+Respond with ONLY the player's name — no reasoning, no preamble, no punctuation.`,
             },
           ],
         },
       ],
     });
-    const raw = res.content[0].type === "text" ? res.content[0].text.trim() : "";
-    // Use the first line, trimming wrapping quotes / trailing period; keep
-    // internal apostrophes & hyphens (De'Aaron Fox, Karl-Anthony Towns, A'ja Wilson).
-    const name = raw.split("\n")[0].replace(/^["'\s]+|["'.\s]+$/g, "").trim();
+    const raw = res.content[0]?.type === "text" ? res.content[0].text.trim() : "";
+    // Use the first non-empty line, trimming wrapping quotes / trailing period;
+    // keep internal apostrophes & hyphens (De'Aaron Fox, Karl-Anthony Towns, A'ja Wilson).
+    const firstLine = raw.split("\n").find((l) => l.trim()) ?? raw;
+    const name = firstLine.replace(/^["'\s]+|["'.\s]+$/g, "").trim();
     if (!name) return { name: raw };
     const photo = await wikipediaPhoto(name);
     return { name, photoUrl: photo ?? undefined };

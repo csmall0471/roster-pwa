@@ -749,7 +749,11 @@ export default function CardEditor({
     setAiPending("lookalike");
     setError(null);
     try {
-      const res = await findLookalike(cutoutUrl);
+      const res = await findLookalike(cutoutUrl, {
+        firstName,
+        position: stats.position,
+        height: stats.height,
+      });
       if (res.error) throw new Error(res.error);
       if (res.name) {
         setLookAlike(res.name);
