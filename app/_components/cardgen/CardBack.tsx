@@ -136,7 +136,9 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             backgroundRepeat: "no-repeat",
             borderRadius: "9999px",
             border: "3px solid rgba(255,255,255,0.92)",
-            boxShadow: "0 4px 10px rgba(0,0,0,0.45)",
+            // drop-shadow (not box-shadow): box-shadow on a round element
+            // rasterizes to a rectangular shadow through html-to-image.
+            filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))",
             cursor: onHeadshotPointerDown ? "move" : undefined,
             touchAction: onHeadshotPointerDown ? "none" : undefined,
           }}

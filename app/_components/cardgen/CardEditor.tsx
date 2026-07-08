@@ -1229,7 +1229,9 @@ export default function CardEditor({
               fontFamily: "var(--font-anton), Impact, sans-serif",
               fontSize: "min(7vw, 36px)",
               letterSpacing: "0.02em",
-              boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+              // drop-shadow (not box-shadow): box-shadow on a round element
+              // rasterizes to a rectangular shadow through html-to-image.
+              filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.4))",
               pointerEvents: "none",
             }}
           >
