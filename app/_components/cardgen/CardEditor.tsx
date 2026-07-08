@@ -253,6 +253,7 @@ export default function CardEditor({
   // editor is reopened on a saved design (we never had the original file).
   const [originalPhoto, setOriginalPhoto] = useState<File | null>(null);
   const [savingOriginal, setSavingOriginal] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // Layer state
   const [cutoutUrl, setCutoutUrl] = useState<string | null>(
@@ -776,6 +777,32 @@ export default function CardEditor({
         ? { url: sigUrl, x: sigX, y: sigY, scale: sigScale, rotation: sigRotation }
         : null,
     };
+  }
+
+  // Download the rendered front & back straight to the device without saving a
+  // draft or attaching to a player — share sheet on phones, downloads on desktop.
+  async function handleDownloadCard() {
+    if (!stageRef.current || !cutoutUrl || downloading) return;
+    setDownloading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if ("fonts" in document) await (document as Document).fonts.ready;
+      await Promise.all([
+        preloadImage(cutoutDataUrl),
+        preloadImage(sigDataUrl ?? sigUrl),
+        preloadImage(headshotDataUrl ?? headshotUrl),
+      ]);
+      const { frontBlob, backBlob } = await renderSides();
+      await exportCardImages(frontBlob, backBlob);
+      const template = bg.type === "template" ? bg.id : "custom";
+      track("card_downloaded", { standalone, template });
+      logClientActivity("card_downloaded", { standalone, template }).catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloading(false);
+    }
   }
 
   // Save the card as a draft (owner only) — player/team typed in, but not
@@ -1937,7 +1964,7 @@ export default function CardEditor({
           </button>
           <button
             onClick={() => handleSave(standalone ? assignTargetKey || undefined : undefined)}
-            disabled={!cutoutUrl || step === "saving"}
+            disabled={!cutoutUrl || step === "saving" || downloading}
             className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {step === "saving"
@@ -1952,10 +1979,18 @@ export default function CardEditor({
           </button>
         </div>
 
+        <button
+          onClick={handleDownloadCard}
+          disabled={!cutoutUrl || step === "saving" || downloading}
+          className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+        >
+          {downloading ? "Preparing…" : "⬇︎ Download front & back"}
+        </button>
+
         {allowDrafts && (
           <button
             onClick={handleSaveDraft}
-            disabled={!cutoutUrl || step === "saving"}
+            disabled={!cutoutUrl || step === "saving" || downloading}
             className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
           >
             {draftId
