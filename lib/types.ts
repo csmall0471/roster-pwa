@@ -100,6 +100,12 @@ export interface CardDesign {
     y: number;
     scale: number;
     rotation?: number;
+    // Vector strokes (points normalized so x=1 = the signature width) kept so
+    // the color/thickness can be changed later without redrawing. Absent on
+    // signatures drawn before this was added — those can only be redrawn.
+    strokes?: { x: number; y: number }[][];
+    color?: string;
+    thickness?: number;
   } | null;
 }
 

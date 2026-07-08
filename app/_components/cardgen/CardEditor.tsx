@@ -20,7 +20,12 @@ import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-cre
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
-import SignaturePad from "./SignaturePad";
+import SignaturePad, { type SignatureResult } from "./SignaturePad";
+import {
+  renderSignaturePng,
+  DEFAULT_SIG_THICKNESS,
+  type SigStroke,
+} from "./signature-render";
 import { compositeFront, compositeBack } from "./card-raster";
 import type { CardDesign } from "@/lib/types";
 
@@ -198,6 +203,10 @@ async function exportCardImages(front: Blob, back: Blob) {
   }
 }
 
+// Quick ink swatches for restyling a signature (black, white, blue, red, gold);
+// a custom color picker sits alongside them.
+const SIG_PRESET_COLORS = ["#0a0a0a", "#ffffff", "#1d4ed8", "#dc2626", "#f59e0b"];
+
 // ── Component ─────────────────────────────────────────────────
 
 export default function CardEditor({
@@ -281,6 +290,16 @@ export default function CardEditor({
   const [sigRotation, setSigRotation] = useState(initialDesign?.signature?.rotation ?? 0);
   const [sigAspect, setSigAspect] = useState(3); // width/height; signatures are wide
   const [showSigPad, setShowSigPad] = useState(false);
+  // Retained vector strokes + style, so color/thickness can change without a
+  // redraw. Null strokes = a signature drawn before this existed (redraw only).
+  const [sigStrokes, setSigStrokes] = useState<SigStroke[] | null>(
+    initialDesign?.signature?.strokes ?? null
+  );
+  const [sigColor, setSigColor] = useState(initialDesign?.signature?.color ?? "#0a0a0a");
+  const [sigThickness, setSigThickness] = useState(
+    initialDesign?.signature?.thickness ?? DEFAULT_SIG_THICKNESS
+  );
+  const sigUploadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [teamText, setTeamText] = useState(
     initialDesign?.text.team_name ?? teamName.toUpperCase()
@@ -493,9 +512,8 @@ export default function CardEditor({
 
   // ── Signature pad result + headshot upload ─────────────────
 
-  async function handleSignatureDrawn(dataUrl: string) {
-    setShowSigPad(false);
-    setSigDataUrl(dataUrl); // instant render
+  // Upload a rendered signature PNG and point sigUrl at it (for persistence).
+  async function uploadSignature(dataUrl: string) {
     try {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -508,11 +526,35 @@ export default function CardEditor({
       if (upErr) throw upErr;
       const { data: urlData } = supabase.storage.from("player-photos").getPublicUrl(path);
       setSigUrl(urlData.publicUrl);
-      track("card_signature_added");
-      logClientActivity("card_signature_added").catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  async function handleSignatureDrawn(sig: SignatureResult) {
+    setShowSigPad(false);
+    setSigStrokes(sig.strokes);
+    setSigColor(sig.color);
+    setSigThickness(sig.thickness);
+    setSigDataUrl(sig.dataUrl); // instant render
+    track("card_signature_added");
+    logClientActivity("card_signature_added").catch(() => {});
+    await uploadSignature(sig.dataUrl);
+  }
+
+  // Recolor / re-thicken the existing signature from its retained strokes — no
+  // redraw. Preview updates instantly; the re-upload (for persistence) is
+  // debounced so dragging a slider doesn't spam storage.
+  function restyleSignature(color: string, thickness: number) {
+    if (!sigStrokes) return;
+    setSigColor(color);
+    setSigThickness(thickness);
+    const dataUrl = renderSignaturePng(sigStrokes, color, thickness);
+    setSigDataUrl(dataUrl);
+    if (sigUploadTimer.current) clearTimeout(sigUploadTimer.current);
+    sigUploadTimer.current = setTimeout(() => {
+      uploadSignature(dataUrl).catch(() => {});
+    }, 500);
   }
 
   async function handleHeadshotSelected(file: File) {
@@ -774,7 +816,16 @@ export default function CardEditor({
         headshot_y: headshotPosY,
       },
       signature: sigUrl
-        ? { url: sigUrl, x: sigX, y: sigY, scale: sigScale, rotation: sigRotation }
+        ? {
+            url: sigUrl,
+            x: sigX,
+            y: sigY,
+            scale: sigScale,
+            rotation: sigRotation,
+            ...(sigStrokes
+              ? { strokes: sigStrokes, color: sigColor, thickness: sigThickness }
+              : {}),
+          }
         : null,
     };
   }
@@ -1442,6 +1493,7 @@ export default function CardEditor({
                         onClick={() => {
                           setSigUrl(null);
                           setSigDataUrl(null);
+                          setSigStrokes(null);
                         }}
                         className="text-xs font-medium text-gray-400 hover:text-red-600"
                       >
@@ -1473,6 +1525,55 @@ export default function CardEditor({
                     <p className="text-[11px] text-gray-400 dark:text-gray-500">
                       On the card: drag to move, pinch to resize, twist two fingers to rotate.
                     </p>
+                  </div>
+                )}
+                {sigStrokes && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        Ink color
+                      </label>
+                      <div className="flex items-center gap-2">
+                        {SIG_PRESET_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => restyleSignature(c, sigThickness)}
+                            className={`h-6 w-6 rounded-full border-2 ${
+                              sigColor.toLowerCase() === c.toLowerCase()
+                                ? "border-blue-500"
+                                : "border-gray-300 dark:border-gray-600"
+                            }`}
+                            style={{ background: c }}
+                            aria-label={`ink ${c}`}
+                          />
+                        ))}
+                        <input
+                          type="color"
+                          value={sigColor}
+                          onChange={(e) => restyleSignature(e.target.value, sigThickness)}
+                          className="h-6 w-8 rounded border border-gray-300 dark:border-gray-600 bg-transparent p-0"
+                          aria-label="Custom ink color"
+                          title="Custom color"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400">
+                        Thickness
+                      </label>
+                      <input
+                        type="range"
+                        min={3}
+                        max={20}
+                        step={1}
+                        value={sigThickness}
+                        onChange={(e) =>
+                          restyleSignature(sigColor, parseFloat(e.target.value))
+                        }
+                        className="w-full"
+                      />
+                    </div>
                   </div>
                 )}
               </div>

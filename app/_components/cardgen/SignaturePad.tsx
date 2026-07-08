@@ -1,23 +1,39 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  renderSignaturePng,
+  DEFAULT_SIG_THICKNESS,
+  type SigStroke,
+} from "./signature-render";
 
-// Finger/mouse signature pad. Draws onto a transparent canvas, trims to the
-// drawn area, and hands back a transparent PNG data URL for placement on the
-// card front. Ink color is selectable so it stays visible on light or dark cards.
+// Finger/mouse signature pad. Draws onto a transparent canvas for live feedback
+// but ALSO keeps the raw strokes (normalized so x=1 = the signature width). It
+// hands those strokes back with the rendered PNG so the editor can recolor or
+// re-thicken the signature later without a redraw. See signature-render.ts.
 
 type Ink = "black" | "white";
+
+export type SignatureResult = {
+  dataUrl: string;
+  strokes: SigStroke[];
+  color: string;
+  thickness: number;
+};
 
 export default function SignaturePad({
   onCancel,
   onDone,
 }: {
   onCancel: () => void;
-  onDone: (dataUrl: string) => void;
+  onDone: (sig: SignatureResult) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const pts = useRef<{ x: number; y: number }[]>([]);
+  // Completed strokes, normalized by the canvas CSS width (aspect preserved).
+  const strokes = useRef<SigStroke[]>([]);
+  const cssW = useRef(1);
   const dpr = useRef(1);
   const [ink, setInk] = useState<Ink>("black");
   const [hasInk, setHasInk] = useState(false);
@@ -29,6 +45,7 @@ export default function SignaturePad({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+    cssW.current = rect.width || 1;
     dpr.current = window.devicePixelRatio || 1;
     canvas.width = Math.round(rect.width * dpr.current);
     canvas.height = Math.round(rect.height * dpr.current);
@@ -85,6 +102,11 @@ export default function SignaturePad({
 
   function end() {
     drawing.current = false;
+    if (pts.current.length) {
+      const w = cssW.current || 1;
+      const r = (v: number) => Math.round((v / w) * 1e4) / 1e4;
+      strokes.current.push(pts.current.map((p) => ({ x: r(p.x), y: r(p.y) })));
+    }
     pts.current = [];
   }
 
@@ -92,47 +114,22 @@ export default function SignaturePad({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    strokes.current = [];
+    pts.current = [];
     setHasInk(false);
   }
 
-  // Crop to the drawn bounding box so the placed signature isn't a huge mostly-
-  // empty rectangle, then export a transparent PNG.
+  // Re-render from the retained strokes (not the live canvas) so the output is
+  // identical to a later restyle, then hand back both the PNG and the strokes.
   function done() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const { width, height } = canvas;
-    const data = ctx.getImageData(0, 0, width, height).data;
-    let minX = width,
-      minY = height,
-      maxX = 0,
-      maxY = 0,
-      found = false;
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (data[(y * width + x) * 4 + 3] > 8) {
-          found = true;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-    if (!found) return;
-    const pad = Math.round(6 * dpr.current);
-    minX = Math.max(0, minX - pad);
-    minY = Math.max(0, minY - pad);
-    maxX = Math.min(width - 1, maxX + pad);
-    maxY = Math.min(height - 1, maxY + pad);
-    const w = maxX - minX + 1;
-    const h = maxY - minY + 1;
-    const out = document.createElement("canvas");
-    out.width = w;
-    out.height = h;
-    out.getContext("2d")!.drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
-    onDone(out.toDataURL("image/png"));
+    if (strokes.current.length === 0) return;
+    const dataUrl = renderSignaturePng(strokes.current, inkColor, DEFAULT_SIG_THICKNESS);
+    onDone({
+      dataUrl,
+      strokes: strokes.current,
+      color: inkColor,
+      thickness: DEFAULT_SIG_THICKNESS,
+    });
   }
 
   return (
