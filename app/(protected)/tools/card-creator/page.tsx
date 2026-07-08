@@ -80,13 +80,13 @@ export default async function CardCreatorPage({
   if (isOwner) {
     const rich = await supabase
       .from("card_drafts")
-      .select("id, label, team_name, season, front_url, updated_at, player_id")
+      .select("id, label, team_name, season, front_url, back_url, updated_at, player_id")
       .order("updated_at", { ascending: false });
     const rows = rich.error
       ? (
           await supabase
             .from("card_drafts")
-            .select("id, label, team_name, season, front_url, updated_at")
+            .select("id, label, team_name, season, front_url, back_url, updated_at")
             .order("updated_at", { ascending: false })
         ).data
       : rich.data;
