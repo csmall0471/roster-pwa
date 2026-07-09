@@ -379,39 +379,31 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               />
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Section title (like the other panel headers), with the matched
+                  pro's name beneath it. */}
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: "0.55em",
+                  fontSize: "min(2vw, 10px)",
+                  letterSpacing: "0.22em",
+                  fontWeight: 800,
+                  color: "rgba(10,10,10,0.6)",
+                  marginBottom: "0.15em",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: "min(2vw, 10px)",
-                    letterSpacing: "0.22em",
-                    fontWeight: 800,
-                    whiteSpace: "nowrap",
-                    flexShrink: 0,
-                  }}
-                >
-                  PLAYS LIKE
-                </span>
-                <span
-                  style={{
-                    fontFamily: "var(--font-anton), Impact, sans-serif",
-                    fontSize: "min(5.5vw, 28px)",
-                    lineHeight: 1,
-                    letterSpacing: "0.03em",
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {lookAlike.toUpperCase()}
-                </span>
+                PLAYER MATCH
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-anton), Impact, sans-serif",
+                  fontSize: "min(5.5vw, 28px)",
+                  lineHeight: 1,
+                  letterSpacing: "0.03em",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {lookAlike.toUpperCase()}
               </div>
               {lookAlikeBlurb && (
                 <p
