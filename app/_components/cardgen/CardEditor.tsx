@@ -30,6 +30,7 @@ import {
   type SigStroke,
 } from "./signature-render";
 import { compositeFront, compositeBack } from "./card-raster";
+import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign } from "@/lib/types";
 
 // ── Types ────────────────────────────────────────────────────
@@ -347,6 +348,10 @@ async function buildBackgroundSheet(
 // a custom color picker sits alongside them.
 const SIG_PRESET_COLORS = ["#0a0a0a", "#ffffff", "#1d4ed8", "#dc2626", "#f59e0b"];
 
+// Most copies to render into one serialized .zip. Each card is a full-res PNG,
+// so we cap the in-memory bundle (a run of 100 is already a big collectible set).
+const SERIAL_CAP = 100;
+
 // ── Component ─────────────────────────────────────────────────
 
 export default function CardEditor({
@@ -471,11 +476,16 @@ export default function CardEditor({
   const [nameItalic, setNameItalic] = useState(
     initialDesign?.text.name_italic ?? false
   );
-  // Number of copies "in circulation" — a limited-edition stamp on the front.
-  // Kept as a string for the input; parsed to a number when saved.
+  // Number of copies "in circulation" — a serialized limited-edition stamp on
+  // the front. Kept as a string for the input; parsed to a number when saved.
   const [circulation, setCirculation] = useState(
     initialDesign?.circulation != null ? String(initialDesign.circulation) : ""
   );
+  // The copy number shown in the stamp. null in normal editing (previews as #1);
+  // driven 1..N while rendering the serialized set for export.
+  const [serialOverride, setSerialOverride] = useState<number | null>(null);
+  const [exportingSerials, setExportingSerials] = useState(false);
+  const [serialProgress, setSerialProgress] = useState(0);
 
   const [tab, setTab] = useState<"photo" | "bg" | "text">("photo");
   const [side, setSide] = useState<"front" | "back">("front");
@@ -927,6 +937,7 @@ export default function CardEditor({
         firstName,
         position: stats.position,
         height: stats.height,
+        favoritePlayer: stats.favorite_player,
       });
       if (res.error) throw new Error(res.error);
       if (res.options && res.options.length) {
@@ -1118,6 +1129,93 @@ export default function CardEditor({
       flushSync(() => setBg(originalBg));
       setExportingAll(false);
       setExportProgress(0);
+    }
+  }
+
+  // Render the serialized run: the same card N times, each stamped a different
+  // copy number (1/N … N/N), bundled into one .zip of print-ready PNGs plus a
+  // single shared back. Same live-layer + flushSync approach as the background
+  // sheet; a covering overlay hides the per-copy flicker.
+  async function exportSerializedSet() {
+    const total = Math.floor(Number(circulation));
+    if (
+      !stageRef.current ||
+      !cutoutUrl ||
+      exportingSerials ||
+      !circulation.trim() ||
+      !Number.isFinite(total) ||
+      total < 1
+    )
+      return;
+    const count = Math.min(total, SERIAL_CAP);
+    const savedSerial = serialOverride;
+    setExportingSerials(true);
+    setSerialProgress(0);
+    setError(null);
+    setNotice(null);
+    try {
+      if ("fonts" in document) await (document as Document).fonts.ready;
+      await Promise.all([
+        preloadImage(cutoutDataUrl),
+        preloadImage(sigDataUrl ?? sigUrl),
+        preloadImage(headshotDataUrl ?? headshotUrl),
+      ]);
+
+      const width = String(count).length;
+      const entries: ZipEntry[] = [];
+      for (let i = 1; i <= count; i++) {
+        flushSync(() => setSerialOverride(i));
+        await new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r))
+        );
+        const frontBlob = await compositeFront({
+          bgEl: bgLayerRef.current!,
+          overlayEl: overlayLayerRef.current!,
+          cutoutSrc: cutoutDataUrl,
+          cutout: { tx, ty, scale, rotation },
+          sigSrc: sigDataUrl ?? sigUrl,
+          sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
+        });
+        entries.push({
+          name: `front-${String(i).padStart(width, "0")}-of-${total}.png`,
+          data: new Uint8Array(await frontBlob.arrayBuffer()),
+        });
+        setSerialProgress(i);
+      }
+
+      // The back is identical across copies — include it once.
+      if (backStageRef.current) {
+        const backBlob = await compositeBack({
+          backEl: backStageRef.current,
+          headshotSrc: headshotDataUrl ?? headshotUrl,
+          headshot: { posX: headshotPosX, posY: headshotPosY },
+          lookalikeSrc: lookAlikePhoto,
+        });
+        entries.push({
+          name: "back-(same-for-all).png",
+          data: new Uint8Array(await backBlob.arrayBuffer()),
+        });
+      }
+
+      const who = [nameL1, nameL2].filter(Boolean).join(" ").trim();
+      const zip = buildZip(entries);
+      await shareFile(
+        zip,
+        `${(who || "card").toLowerCase().replace(/\s+/g, "-")}-serialized-1-to-${count}.zip`
+      );
+      if (count < total) {
+        setNotice(
+          `Made the first ${count} of ${total}. Serialized sets are capped at ${SERIAL_CAP} per download.`
+        );
+      }
+      track("card_serials_exported", { count });
+      logClientActivity("card_serials_exported", { count }).catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      flushSync(() => setSerialOverride(savedSerial));
+      setExportingSerials(false);
+      setSerialProgress(0);
     }
   }
 
@@ -1657,18 +1755,20 @@ export default function CardEditor({
                 fontSize: "calc(var(--cardw, 22rem) * 1.7 / 100)",
                 letterSpacing: "0.18em",
                 fontWeight: 700,
+                whiteSpace: "nowrap",
               }}
             >
-              IN CIRCULATION
+              LIMITED EDITION
             </div>
             <div
               style={{
                 fontFamily: "var(--font-anton), Impact, sans-serif",
                 fontSize: "calc(var(--cardw, 22rem) * 4 / 100)",
                 letterSpacing: "0.02em",
+                whiteSpace: "nowrap",
               }}
             >
-              {circulation}
+              {serialOverride ?? 1} / {circulation}
             </div>
           </div>
         )}
@@ -2183,7 +2283,7 @@ export default function CardEditor({
                 </button>
               </div>
 
-              {/* Circulation — limited-edition run size, stamped on the front. */}
+              {/* Circulation — limited-edition run size, serialized on the front. */}
               <Field label="Cards in circulation (optional)">
                 <input
                   type="number"
@@ -2195,8 +2295,21 @@ export default function CardEditor({
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
                 <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
-                  Adds an &ldquo;In circulation&rdquo; stamp near the jersey number — like a limited-edition print run.
+                  Adds a serialized &ldquo;LIMITED EDITION&rdquo; stamp near the jersey number
+                  (the preview shows #1). Download the whole run below and each copy is numbered
+                  1&thinsp;/&thinsp;{circulation.trim() && Number(circulation) >= 1 ? circulation : "N"} … {circulation.trim() && Number(circulation) >= 1 ? circulation : "N"}&thinsp;/&thinsp;{circulation.trim() && Number(circulation) >= 1 ? circulation : "N"}.
                 </p>
+                {circulation.trim() && Number.isFinite(Number(circulation)) && Number(circulation) >= 1 && (
+                  <button
+                    onClick={exportSerializedSet}
+                    disabled={exportingSerials}
+                    className="mt-2 w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
+                  >
+                    {exportingSerials
+                      ? `Rendering ${serialProgress}/${Math.min(Math.floor(Number(circulation)), SERIAL_CAP)}…`
+                      : `⬇︎ Download serialized set (1–${Math.min(Math.floor(Number(circulation)), SERIAL_CAP)})`}
+                  </button>
+                )}
               </Field>
             </div>
           )}
@@ -2572,6 +2685,22 @@ export default function CardEditor({
                 {aiPending === "lookalike" ? "Finding…" : "🔄 Show 10 different players"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Covers the flicker while each serialized copy is rendered. */}
+      {exportingSerials && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+            <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Rendering serialized cards…
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {serialProgress} of{" "}
+              {Math.min(Math.floor(Number(circulation)) || 0, SERIAL_CAP)}
+            </p>
           </div>
         </div>
       )}

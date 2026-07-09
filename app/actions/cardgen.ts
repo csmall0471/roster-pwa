@@ -204,7 +204,12 @@ export type LookalikeOption = {
 
 export async function findLookalike(
   photoUrl: string,
-  context?: { firstName?: string; position?: string; height?: string }
+  context?: {
+    firstName?: string;
+    position?: string;
+    height?: string;
+    favoritePlayer?: string;
+  }
 ): Promise<{ options?: LookalikeOption[]; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { error: "ANTHROPIC_API_KEY not configured" };
@@ -224,6 +229,10 @@ export async function findLookalike(
     ? `They play ${context.position}${
         context.height ? `, listed around ${context.height}` : ""
       } — favor pros who play a similar role, not just the most famous names. `
+    : "";
+  const fav = context?.favoritePlayer?.trim();
+  const favHint = fav
+    ? `The kid's favorite player is ${fav} — ALWAYS include ${fav} as one of the ten, with its own play-style line. `
     : "";
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -248,7 +257,7 @@ export async function findLookalike(
 
 Each is a real professional basketball player — NBA or WNBA, any era (current stars, all-time greats, international players, or beloved role players), any position — whose VIBE and ENERGY match this kid, judged only from body language, posture, smile, and confidence in the photo. Match on personality and energy — NOT facial features, ethnicity, or skin tone.
 
-Make the ten DIVERSE: mix positions, eras, and leagues; include some less-obvious picks, not just the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant). ${roleHint}For range, draw on styles like: ${seeds}.
+Make the ten DIVERSE: mix positions, eras, and leagues; include some less-obvious picks, not just the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant). ${favHint}${roleHint}For range, draw on styles like: ${seeds}.
 
 Respond with EXACTLY 10 lines and nothing else — no numbering, no preamble. Each line:
 Full Name | one short present-tense sentence (about 8-14 words) on how that player plays. No quotation marks.`,
@@ -289,6 +298,19 @@ Full Name | one short present-tense sentence (about 8-14 words) on how that play
       }
     }
     const top = uniq.slice(0, 10);
+
+    // Guarantee the kid's favorite player is in the list, up front — whether or
+    // not the model remembered to include it.
+    if (fav) {
+      const at = top.findIndex((o) => o.name.toLowerCase() === fav.toLowerCase());
+      if (at >= 0) {
+        top.unshift(top.splice(at, 1)[0]);
+      } else {
+        top.unshift({ name: fav, blurb: "" });
+        if (top.length > 10) top.pop();
+      }
+    }
+
     if (top.length === 0) return { error: "No matches came back — try again." };
 
     // Fetch each player's photo in parallel (Wikipedia; CORS-enabled).
