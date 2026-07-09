@@ -313,47 +313,64 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           </div>
         )}
 
-        {/* Favorites, signature move + fun "questionnaire" answers */}
+        {/* Coaching staff — a prominent accented band so it reads clearly above
+            the fun Q&A grid below. */}
+        {(stats.coach || stats.assistant_coaches) && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                stats.coach && stats.assistant_coaches ? "1fr 1fr" : "1fr",
+              gap: "0.9em",
+              background: "rgba(251,191,36,0.14)",
+              border: "1px solid rgba(251,191,36,0.55)",
+              borderRadius: "10px",
+              padding: "0.7em 0.9em",
+            }}
+          >
+            {stats.coach && <CoachCell label="HEAD COACH" value={stats.coach} />}
+            {stats.assistant_coaches && (
+              <CoachCell label="ASSISTANTS" value={stats.assistant_coaches} />
+            )}
+          </div>
+        )}
+
+        {/* Favorites, signature move + fun answers — a compact two-up grid so the
+            (mostly short) answers use the horizontal space instead of a row each. */}
         {(stats.favorite_team ||
           stats.favorite_player ||
           stats.signature_move ||
           stats.favorite_drill ||
           stats.biggest_fan ||
           stats.loudest_parent ||
-          stats.picks_me_up ||
-          stats.coach ||
-          stats.assistant_coaches) && (
+          stats.picks_me_up) && (
           <div
             style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.55em",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "0.55em 0.9em",
             }}
           >
-            {stats.coach && <FavRow label="COACH" value={stats.coach} />}
-            {stats.assistant_coaches && (
-              <FavRow label="ASSISTANTS" value={stats.assistant_coaches} />
-            )}
             {stats.favorite_team && (
-              <FavRow label="FAV TEAM" value={stats.favorite_team} />
+              <QACell label="FAV TEAM" value={stats.favorite_team} />
             )}
             {stats.favorite_player && (
-              <FavRow label="FAV PLAYER" value={stats.favorite_player} />
+              <QACell label="FAV PLAYER" value={stats.favorite_player} />
             )}
             {stats.signature_move && (
-              <FavRow label="SIG MOVE" value={stats.signature_move} />
+              <QACell label="SIG MOVE" value={stats.signature_move} />
             )}
             {stats.favorite_drill && (
-              <FavRow label="FAV DRILL" value={stats.favorite_drill} />
+              <QACell label="FAV DRILL" value={stats.favorite_drill} />
             )}
             {stats.biggest_fan && (
-              <FavRow label="BIGGEST FAN" value={stats.biggest_fan} />
+              <QACell label="BIGGEST FAN" value={stats.biggest_fan} />
             )}
             {stats.loudest_parent && (
-              <FavRow label="LOUDEST FAN" value={stats.loudest_parent} />
+              <QACell label="LOUDEST FAN" value={stats.loudest_parent} />
             )}
             {stats.picks_me_up && (
-              <FavRow label="PICKS ME UP" value={stats.picks_me_up} />
+              <QACell label="PICKS ME UP" value={stats.picks_me_up} />
             )}
           </div>
         )}
@@ -459,41 +476,64 @@ function abbreviatePosition(pos: string): string {
   return map[key] ?? pos;
 }
 
-function FavRow({ label, value }: { label: string; value: string }) {
+// Coaching staff cell — larger, bolder (Anton) name under an amber label so the
+// staff reads as the marquee info, above the fun Q&A grid.
+function CoachCell({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "baseline",
-        gap: "0.6em",
-        fontSize: "calc(var(--cardw, 22rem) * 3.1 / 100)",
-      }}
-    >
-      <span
+    <div style={{ minWidth: 0 }}>
+      <div
         style={{
-          fontSize: "calc(var(--cardw, 22rem) * 2.1 / 100)",
+          fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
           letterSpacing: "0.16em",
-          color: "rgba(255,255,255,0.55)",
+          color: "#fbbf24",
           fontWeight: 700,
-          minWidth: "6.5em",
-          whiteSpace: "nowrap",
-          flexShrink: 0,
+          marginBottom: "0.2em",
         }}
       >
         {label}
-      </span>
-      <span
+      </div>
+      <div
         style={{
+          fontFamily: "var(--font-anton), Impact, sans-serif",
+          fontSize: "calc(var(--cardw, 22rem) * 3.8 / 100)",
+          lineHeight: 1.05,
+          letterSpacing: "0.02em",
           color: "#fff",
-          fontWeight: 600,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          flex: 1,
         }}
       >
         {value}
-      </span>
+      </div>
+    </div>
+  );
+}
+
+// Q&A cell — compact stacked label + answer, meant to tile two-up so short
+// answers use the horizontal space. Answers wrap rather than truncate.
+function QACell({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div
+        style={{
+          fontSize: "calc(var(--cardw, 22rem) * 1.85 / 100)",
+          letterSpacing: "0.12em",
+          color: "rgba(255,255,255,0.5)",
+          fontWeight: 700,
+          lineHeight: 1.1,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: "calc(var(--cardw, 22rem) * 2.9 / 100)",
+          fontWeight: 600,
+          color: "#fff",
+          lineHeight: 1.2,
+          overflowWrap: "anywhere",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
