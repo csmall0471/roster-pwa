@@ -1161,11 +1161,16 @@ export default function CardEditor({
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
   return (
-    <div className="max-w-md mx-auto overflow-x-hidden">
+    <div className="w-full max-w-md lg:max-w-5xl mx-auto overflow-x-hidden lg:overflow-x-visible">
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
       )}
 
+      {/* On wide screens the preview pins to the left and the controls scroll on
+          the right; it stacks back to a single column on phones. */}
+      <div className="lg:grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:gap-8 lg:items-start">
+        {/* Preview column — sticky on desktop so it stays in view while editing. */}
+        <div className="lg:sticky lg:top-16 lg:self-start">
       {/* Side toggle */}
       <div className="flex gap-1 mb-3 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
         {(["front", "back"] as const).map((s) => (
@@ -1397,7 +1402,11 @@ export default function CardEditor({
         </div>
         </div>
       </div>
+        </div>
+        {/* end preview column */}
 
+        {/* Controls column */}
+        <div className="min-w-0">
       {/* Player picker — first thing below the preview (auto-fills the card). */}
       {playerPicker}
 
@@ -2117,6 +2126,10 @@ export default function CardEditor({
           </button>
         )}
       </div>
+        </div>
+        {/* end controls column */}
+      </div>
+      {/* end preview / controls grid */}
 
       {showSigPad && (
         <SignaturePad onCancel={() => setShowSigPad(false)} onDone={handleSignatureDrawn} />
