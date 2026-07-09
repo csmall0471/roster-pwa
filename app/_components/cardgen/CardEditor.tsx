@@ -95,6 +95,8 @@ const EMPTY_STATS: BackStats = {
   biggest_fan: "",
   loudest_parent: "",
   picks_me_up: "",
+  coach: "",
+  assistant_coaches: "",
 };
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -390,6 +392,23 @@ export default function CardEditor({
   useEffect(() => mirrorToDataUrl(cutoutUrl, setCutoutDataUrl), [cutoutUrl]);
   useEffect(() => mirrorToDataUrl(sigUrl, setSigDataUrl), [sigUrl]);
   useEffect(() => mirrorToDataUrl(headshotUrl, setHeadshotDataUrl), [headshotUrl]);
+
+  // Publish the card's rendered width as a CSS variable (--cardw) so all on-card
+  // text can be sized as a fraction of the CARD (calc(var(--cardw) * n / 100))
+  // rather than the viewport. That keeps the card's proportions identical at any
+  // preview size — so the desktop preview can grow without changing the exported
+  // 750×1050 card. (getComputedStyle resolves the calc to px, which html-to-image
+  // captures reliably; container-query units don't survive its snapshot.) Both the
+  // front stage and CardBack sit inside stageWrapRef and inherit the variable.
+  useEffect(() => {
+    const el = stageWrapRef.current;
+    if (!el) return;
+    const set = () => el.style.setProperty("--cardw", `${el.clientWidth}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [step]);
 
   // Measure the signature's natural aspect ratio so the background-image box
   // matches it (no letterboxing).
@@ -1161,14 +1180,16 @@ export default function CardEditor({
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
   return (
-    <div className="w-full max-w-md lg:max-w-5xl mx-auto overflow-x-hidden lg:overflow-x-visible">
+    <div className="w-full max-w-md lg:max-w-none mx-auto overflow-x-hidden lg:overflow-x-visible">
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
       )}
 
       {/* On wide screens the preview pins to the left and the controls scroll on
-          the right; it stacks back to a single column on phones. */}
-      <div className="lg:grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:gap-8 lg:items-start">
+          the right; it stacks back to a single column on phones. The preview
+          column grows with the viewport (clamp) up to a cap; the controls cap so
+          sliders don't stretch; the pair centers once both maxed out. */}
+      <div className="lg:grid lg:justify-center lg:gap-8 lg:items-start lg:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
         {/* Preview column — sticky on desktop so it stays in view while editing. */}
         <div className="lg:sticky lg:top-16 lg:self-start">
       {/* Side toggle */}
@@ -1293,7 +1314,7 @@ export default function CardEditor({
               alignItems: "center",
               justifyContent: "center",
               fontFamily: "var(--font-anton), Impact, sans-serif",
-              fontSize: "min(7vw, 36px)",
+              fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
               letterSpacing: "0.02em",
               // drop-shadow (not box-shadow): box-shadow on a round element
               // rasterizes to a rectangular shadow through html-to-image.
@@ -1325,7 +1346,7 @@ export default function CardEditor({
               clipPath:
                 "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
               fontFamily: "var(--font-anton), Impact, sans-serif",
-              fontSize: "min(7vw, 38px)",
+              fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
               letterSpacing: "0.04em",
               lineHeight: 1,
               whiteSpace: "nowrap",
@@ -1343,7 +1364,7 @@ export default function CardEditor({
                   "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
                 fontFamily:
                   "var(--font-geist-sans), system-ui, sans-serif",
-                fontSize: "min(2.7vw, 14px)",
+                fontSize: "calc(var(--cardw, 22rem) * 2.7 / 100)",
                 letterSpacing: "0.22em",
                 fontWeight: 700,
                 marginTop: "-1px",
@@ -1371,8 +1392,8 @@ export default function CardEditor({
             letterSpacing: "0.01em",
           }}
         >
-          <div style={{ fontSize: `min(${11 * nameSize}vw, ${64 * nameSize}px)` }}>{nameL1}</div>
-          <div style={{ fontSize: `min(${11 * nameSize}vw, ${64 * nameSize}px)`, marginTop: "2%" }}>
+          <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)` }}>{nameL1}</div>
+          <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)`, marginTop: "2%" }}>
             {nameL2}
           </div>
         </div>
@@ -1611,7 +1632,7 @@ export default function CardEditor({
                     <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                       {cat.label}
                     </h4>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
                 {items.map((t) => {
                   const selected = bg.type === "template" && bg.id === t.id;
                   const lightText = t.textColor === "light";
@@ -1631,7 +1652,9 @@ export default function CardEditor({
                           ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900"
                           : ""
                       }`}
-                      style={t.style}
+                      // container-type lets the mini plate/name below scale with
+                      // the swatch (cqw), so bigger swatches read as true minis.
+                      style={{ ...t.style, containerType: "inline-size" }}
                       aria-label={t.name}
                     >
                       {/* Mini cutout preview */}
@@ -1666,7 +1689,7 @@ export default function CardEditor({
                               "polygon(0 0, 100% 0, calc(100% - 0.4em) 100%, 0 100%)",
                             fontFamily:
                               "var(--font-anton), Impact, sans-serif",
-                            fontSize: "9px",
+                            fontSize: "7cqw",
                             lineHeight: 1,
                             whiteSpace: "nowrap",
                           }}
@@ -1685,7 +1708,7 @@ export default function CardEditor({
                           fontStyle: nameItalic ? "italic" : "normal",
                           color: lightText ? "#fff" : "#111",
                           lineHeight: 0.9,
-                          fontSize: `${11 * nameSize}px`,
+                          fontSize: `${11 * nameSize}cqw`,
                           textShadow: lightText
                             ? "0 1px 3px rgba(0,0,0,0.55)"
                             : "none",
@@ -1910,7 +1933,7 @@ export default function CardEditor({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
               <Field label="Position">
                 <select
                   value={stats.position}
@@ -1990,9 +2013,33 @@ export default function CardEditor({
 
             <div className="pt-1">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1.5">
+                Coaching staff <span className="font-normal normal-case">(optional)</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+                <Field label="Coach">
+                  <input
+                    value={stats.coach}
+                    onChange={(e) => patchStats({ coach: e.target.value })}
+                    placeholder="Coach Dave"
+                    className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                </Field>
+                <Field label="Assistant coaches">
+                  <input
+                    value={stats.assistant_coaches}
+                    onChange={(e) => patchStats({ assistant_coaches: e.target.value })}
+                    placeholder="Mike, Sarah"
+                    className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <div className="pt-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1.5">
                 Fun questions <span className="font-normal normal-case">(optional)</span>
               </p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
                 <Field label="Biggest fan in the stands">
                   <input
                     value={stats.biggest_fan}

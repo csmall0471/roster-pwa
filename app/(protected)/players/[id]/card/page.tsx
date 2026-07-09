@@ -123,7 +123,7 @@ export default async function PlayerCardPage({
   const returnHref = teamId ? `/teams/${teamId}` : `/players/${id}`;
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl lg:max-w-none">
       <Link
         href={returnHref}
         className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
@@ -131,7 +131,7 @@ export default async function PlayerCardPage({
         ← Back
       </Link>
 
-      <div className="mt-3 mb-5">
+      <div className="mt-3 mb-5 lg:max-w-2xl">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           {initialDesign ? "Edit" : "Create"} card for {player.first_name}
         </h1>

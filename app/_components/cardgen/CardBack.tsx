@@ -12,6 +12,8 @@ export type BackStats = {
   biggest_fan: string;
   loudest_parent: string;
   picks_me_up: string;
+  coach: string;
+  assistant_coaches: string;
 };
 
 type Props = {
@@ -90,7 +92,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             padding: "0.38em 1.6em 0.38em 8%",
             clipPath: "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
             fontFamily: "var(--font-anton), Impact, sans-serif",
-            fontSize: "min(7vw, 38px)",
+            fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
             letterSpacing: "0.04em",
             lineHeight: 1,
             whiteSpace: "nowrap",
@@ -106,7 +108,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               padding: "0.45em 1.6em 0.45em 8%",
               clipPath: "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
               fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-              fontSize: "min(2.7vw, 14px)",
+              fontSize: "calc(var(--cardw, 22rem) * 2.7 / 100)",
               letterSpacing: "0.22em",
               fontWeight: 700,
               marginTop: "-1px",
@@ -181,7 +183,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           <span
             style={{
               fontFamily: "var(--font-anton), Impact, sans-serif",
-              fontSize: "min(7vw, 36px)",
+              fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
               letterSpacing: "0.04em",
               lineHeight: 1,
               flex: "1 1 auto",
@@ -197,7 +199,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             <span
               style={{
                 fontFamily: "var(--font-anton), Impact, sans-serif",
-                fontSize: "min(8vw, 44px)",
+                fontSize: "calc(var(--cardw, 22rem) * 8 / 100)",
                 color: "#fbbf24",
                 lineHeight: 1,
               }}
@@ -229,7 +231,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               >
                 <div
                   style={{
-                    fontSize: "min(1.9vw, 10px)",
+                    fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
                     letterSpacing: "0.18em",
                     color: "rgba(255,255,255,0.55)",
                     fontWeight: 700,
@@ -242,7 +244,10 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
                     fontFamily: "var(--font-anton), Impact, sans-serif",
                     // Shrink so longer values (e.g. an un-abbreviated position or
                     // a tall height like 5'11") stay on one line inside the pill.
-                    fontSize: v.length > 4 ? "min(3vw, 15px)" : "min(4.2vw, 22px)",
+                    fontSize:
+                      v.length > 4
+                        ? "calc(var(--cardw, 22rem) * 3 / 100)"
+                        : "calc(var(--cardw, 22rem) * 4.2 / 100)",
                     lineHeight: 1.1,
                     marginTop: "2px",
                     overflow: "hidden",
@@ -267,7 +272,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           >
             <p
               style={{
-                fontSize: "min(3.1vw, 15px)",
+                fontSize: "calc(var(--cardw, 22rem) * 3.1 / 100)",
                 lineHeight: 1.35,
                 fontStyle: "italic",
                 fontWeight: 600,
@@ -285,7 +290,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           <div>
             <div
               style={{
-                fontSize: "min(2vw, 10px)",
+                fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
                 letterSpacing: "0.22em",
                 color: "rgba(255,255,255,0.55)",
                 fontWeight: 700,
@@ -296,7 +301,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             </div>
             <p
               style={{
-                fontSize: "min(2.9vw, 14px)",
+                fontSize: "calc(var(--cardw, 22rem) * 2.9 / 100)",
                 lineHeight: 1.4,
                 fontStyle: "italic",
                 color: "rgba(255,255,255,0.92)",
@@ -315,7 +320,9 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           stats.favorite_drill ||
           stats.biggest_fan ||
           stats.loudest_parent ||
-          stats.picks_me_up) && (
+          stats.picks_me_up ||
+          stats.coach ||
+          stats.assistant_coaches) && (
           <div
             style={{
               display: "flex",
@@ -323,6 +330,10 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               gap: "0.55em",
             }}
           >
+            {stats.coach && <FavRow label="COACH" value={stats.coach} />}
+            {stats.assistant_coaches && (
+              <FavRow label="ASSISTANTS" value={stats.assistant_coaches} />
+            )}
             {stats.favorite_team && (
               <FavRow label="FAV TEAM" value={stats.favorite_team} />
             )}
@@ -383,7 +394,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
                   pro's name beneath it. */}
               <div
                 style={{
-                  fontSize: "min(2vw, 10px)",
+                  fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
                   letterSpacing: "0.22em",
                   fontWeight: 800,
                   color: "rgba(10,10,10,0.6)",
@@ -395,7 +406,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               <div
                 style={{
                   fontFamily: "var(--font-anton), Impact, sans-serif",
-                  fontSize: "min(5.5vw, 28px)",
+                  fontSize: "calc(var(--cardw, 22rem) * 5.5 / 100)",
                   lineHeight: 1,
                   letterSpacing: "0.03em",
                   overflow: "hidden",
@@ -409,7 +420,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
                 <p
                   style={{
                     margin: "0.3em 0 0",
-                    fontSize: "min(2.5vw, 12px)",
+                    fontSize: "calc(var(--cardw, 22rem) * 2.5 / 100)",
                     lineHeight: 1.25,
                     fontWeight: 600,
                     fontStyle: "italic",
@@ -455,12 +466,12 @@ function FavRow({ label, value }: { label: string; value: string }) {
         display: "flex",
         alignItems: "baseline",
         gap: "0.6em",
-        fontSize: "min(3.1vw, 15px)",
+        fontSize: "calc(var(--cardw, 22rem) * 3.1 / 100)",
       }}
     >
       <span
         style={{
-          fontSize: "min(2.1vw, 10.5px)",
+          fontSize: "calc(var(--cardw, 22rem) * 2.1 / 100)",
           letterSpacing: "0.16em",
           color: "rgba(255,255,255,0.55)",
           fontWeight: 700,

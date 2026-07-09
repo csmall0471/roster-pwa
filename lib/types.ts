@@ -123,6 +123,10 @@ export interface CardBackDesign {
     biggest_fan: string;
     loudest_parent: string;
     picks_me_up: string;
+    // Coaching staff — optional. `assistant_coaches` is free text (e.g. a
+    // comma-separated list).
+    coach: string;
+    assistant_coaches: string;
   };
   scouting_report: string;
   // A short quote from the player about their season.
