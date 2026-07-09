@@ -15,6 +15,7 @@ import {
   removeBackground,
   generateScoutingReport,
   findLookalike,
+  type LookalikeOption,
 } from "@/app/actions/cardgen";
 import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
@@ -493,6 +494,10 @@ export default function CardEditor({
   const [lookAlikeBlurb, setLookAlikeBlurb] = useState(
     initBack?.look_alike_blurb ?? ""
   );
+  // AI "plays like" candidates to choose from (null = picker closed).
+  const [lookAlikeOptions, setLookAlikeOptions] = useState<
+    LookalikeOption[] | null
+  >(null);
   const [headshotUrl, setHeadshotUrl] = useState<string | null>(
     initBack?.headshot_url ?? null
   );
@@ -906,6 +911,8 @@ export default function CardEditor({
     }
   }
 
+  // Ask the AI for ~10 "plays like" candidates and open a picker; the coach
+  // chooses one (below) instead of us auto-filling a single guess.
   async function handleFindLookalike() {
     if (!cutoutUrl) return;
     setAiPending("lookalike");
@@ -917,18 +924,24 @@ export default function CardEditor({
         height: stats.height,
       });
       if (res.error) throw new Error(res.error);
-      if (res.name) {
-        setLookAlike(res.name);
-        setLookAlikePhoto(res.photoUrl ?? null);
-        setLookAlikeBlurb(res.blurb ?? "");
-        track("card_lookalike_generated", { name: res.name });
-        logClientActivity("card_lookalike_generated", { name: res.name }).catch(() => {});
+      if (res.options && res.options.length) {
+        setLookAlikeOptions(res.options);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setAiPending(null);
     }
+  }
+
+  // Apply the chosen match to the card and close the picker.
+  function applyLookalike(opt: LookalikeOption) {
+    setLookAlike(opt.name);
+    setLookAlikePhoto(opt.photoUrl ?? null);
+    setLookAlikeBlurb(opt.blurb ?? "");
+    setLookAlikeOptions(null);
+    track("card_lookalike_generated", { name: opt.name });
+    logClientActivity("card_lookalike_generated", { name: opt.name }).catch(() => {});
   }
 
   // ── Save ────────────────────────────────────────────────────
@@ -2367,8 +2380,8 @@ export default function CardEditor({
                 className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
               >
                 {aiPending === "lookalike"
-                  ? "Matching…"
-                  : "✨ Find a match"}
+                  ? "Finding…"
+                  : "✨ Find matches (pick from 10)"}
               </button>
             </Field>
           </div>
@@ -2434,6 +2447,70 @@ export default function CardEditor({
 
       {showSigPad && (
         <SignaturePad onCancel={() => setShowSigPad(false)} onDone={handleSignatureDrawn} />
+      )}
+
+      {/* Player-match picker — choose one of the AI's ~10 suggestions. */}
+      {lookAlikeOptions && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                  Pick a player match
+                </h3>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Tap one to add it to the card.
+                </p>
+              </div>
+              <button
+                onClick={() => setLookAlikeOptions(null)}
+                className="text-xs font-medium text-gray-400 hover:text-gray-600"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-2 overflow-y-auto p-4">
+              {lookAlikeOptions.map((o) => (
+                <button
+                  key={o.name}
+                  onClick={() => applyLookalike(o)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-700 p-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                >
+                  <div
+                    className="h-12 w-12 shrink-0 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 bg-cover"
+                    style={
+                      o.photoUrl
+                        ? {
+                            backgroundImage: `url(${o.photoUrl})`,
+                            backgroundPosition: "center 22%",
+                          }
+                        : undefined
+                    }
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                      {o.name}
+                    </div>
+                    {o.blurb && (
+                      <div className="line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
+                        {o.blurb}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="border-t border-gray-200 dark:border-gray-700 p-3">
+              <button
+                onClick={handleFindLookalike}
+                disabled={aiPending !== null}
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                {aiPending === "lookalike" ? "Finding…" : "🔄 Show 10 different players"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Covers the flicker while every background is rendered for the sheet. */}

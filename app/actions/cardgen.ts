@@ -196,10 +196,16 @@ const LOOKALIKE_LENSES = [
   "a flashy showman",
 ];
 
+export type LookalikeOption = {
+  name: string;
+  blurb?: string;
+  photoUrl?: string | null;
+};
+
 export async function findLookalike(
   photoUrl: string,
   context?: { firstName?: string; position?: string; height?: string }
-): Promise<{ name?: string; blurb?: string; photoUrl?: string; error?: string }> {
+): Promise<{ options?: LookalikeOption[]; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { error: "ANTHROPIC_API_KEY not configured" };
   }
@@ -208,12 +214,16 @@ export async function findLookalike(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  const lens =
-    LOOKALIKE_LENSES[Math.floor(Math.random() * LOOKALIKE_LENSES.length)];
+  // Seed a few random "lenses" so repeat runs surface a different mix rather
+  // than the same ten household names.
+  const seeds = [...LOOKALIKE_LENSES]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 6)
+    .join("; ");
   const roleHint = context?.position
     ? `They play ${context.position}${
         context.height ? `, listed around ${context.height}` : ""
-      } — prefer a pro who plays a similar role, not just the most famous name. `
+      } — favor pros who play a similar role, not just the most famous names. `
     : "";
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -222,9 +232,9 @@ export async function findLookalike(
       // Opus reads vibe/energy from a photo far better than Haiku, which kept
       // defaulting to the same few household names. (Sampling params like
       // temperature aren't accepted on this model — diversity comes from the
-      // prompt + the random lens above.)
+      // prompt + the random seeds above.)
       model: "claude-opus-4-8",
-      max_tokens: 100,
+      max_tokens: 600,
       messages: [
         {
           role: "user",
@@ -232,32 +242,64 @@ export async function findLookalike(
             { type: "image", source: { type: "url", url: photoUrl } },
             {
               type: "text",
-              text: `Pick a fun "plays like" comparison for a youth basketball trading card${
+              text: `Suggest TEN fun "plays like" comparisons for a youth basketball trading card${
                 context?.firstName ? ` for a player named ${context.firstName}` : ""
-              }.
+              }, so the coach can choose one.
 
-Choose ONE real professional basketball player — NBA or WNBA, any era (current stars, all-time greats, international players, or beloved role players), any position — whose VIBE and ENERGY match this kid, judged only from body language, posture, smile, and confidence in the photo. Match on personality and energy — NOT facial features, ethnicity, or skin tone.
+Each is a real professional basketball player — NBA or WNBA, any era (current stars, all-time greats, international players, or beloved role players), any position — whose VIBE and ENERGY match this kid, judged only from body language, posture, smile, and confidence in the photo. Match on personality and energy — NOT facial features, ethnicity, or skin tone.
 
-Make it feel personal and specific. Cast a wide net across the whole history of the sport. Avoid defaulting to the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant) unless the fit is genuinely the strongest — a less obvious but well-fitting pick is better. ${roleHint}For variety, lean toward the vibe of ${lens} if the photo supports it.
+Make the ten DIVERSE: mix positions, eras, and leagues; include some less-obvious picks, not just the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant). ${roleHint}For range, draw on styles like: ${seeds}.
 
-Respond with exactly two lines and nothing else:
-Line 1 — the player's name only (no punctuation).
-Line 2 — one short, punchy sentence (about 8-14 words) on how that player plays: their signature style and skills. Present tense, no name, no quotation marks.`,
+Respond with EXACTLY 10 lines and nothing else — no numbering, no preamble. Each line:
+Full Name | one short present-tense sentence (about 8-14 words) on how that player plays. No quotation marks.`,
             },
           ],
         },
       ],
     });
     const raw = res.content[0]?.type === "text" ? res.content[0].text.trim() : "";
-    // Line 1 is the name, line 2 the play-style blurb. Trim wrapping quotes /
-    // trailing period on the name but keep internal apostrophes & hyphens
-    // (De'Aaron Fox, Karl-Anthony Towns, A'ja Wilson); keep the blurb's period.
-    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    const name = (lines[0] ?? raw).replace(/^["'\s]+|["'.\s]+$/g, "").trim();
-    if (!name) return { name: raw };
-    const blurb = (lines[1] ?? "").replace(/^["'\s]+|["'\s]+$/g, "").trim();
-    const photo = await wikipediaPhoto(name);
-    return { name, blurb: blurb || undefined, photoUrl: photo ?? undefined };
+    const parsed = raw
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const idx = line.indexOf("|");
+        // Strip any leading "1." / "1)" numbering and wrapping quotes; keep
+        // internal apostrophes & hyphens (De'Aaron Fox, Karl-Anthony Towns).
+        const name = (idx >= 0 ? line.slice(0, idx) : line)
+          .replace(/^\s*\d+[.)]\s*/, "")
+          .replace(/^["'\s]+|["'.\s]+$/g, "")
+          .trim();
+        const blurb =
+          idx >= 0
+            ? line.slice(idx + 1).replace(/^["'\s]+|["'\s]+$/g, "").trim()
+            : "";
+        return { name, blurb };
+      })
+      .filter((o) => o.name.length > 1);
+
+    // De-dupe by name, cap at 10.
+    const seen = new Set<string>();
+    const uniq: { name: string; blurb: string }[] = [];
+    for (const o of parsed) {
+      const k = o.name.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        uniq.push(o);
+      }
+    }
+    const top = uniq.slice(0, 10);
+    if (top.length === 0) return { error: "No matches came back — try again." };
+
+    // Fetch each player's photo in parallel (Wikipedia; CORS-enabled).
+    const options: LookalikeOption[] = await Promise.all(
+      top.map(async (o) => ({
+        name: o.name,
+        blurb: o.blurb || undefined,
+        photoUrl: await wikipediaPhoto(o.name),
+      }))
+    );
+    return { options };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Look-alike failed" };
   }

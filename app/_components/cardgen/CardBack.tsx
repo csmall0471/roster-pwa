@@ -313,28 +313,6 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           </div>
         )}
 
-        {/* Coaching staff — a prominent accented band so it reads clearly above
-            the fun Q&A grid below. */}
-        {(stats.coach || stats.assistant_coaches) && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                stats.coach && stats.assistant_coaches ? "1fr 1fr" : "1fr",
-              gap: "0.9em",
-              background: "rgba(251,191,36,0.14)",
-              border: "1px solid rgba(251,191,36,0.55)",
-              borderRadius: "10px",
-              padding: "0.7em 0.9em",
-            }}
-          >
-            {stats.coach && <CoachCell label="HEAD COACH" value={stats.coach} />}
-            {stats.assistant_coaches && (
-              <CoachCell label="ASSISTANTS" value={stats.assistant_coaches} />
-            )}
-          </div>
-        )}
-
         {/* Favorites, signature move + fun answers — a compact two-up grid so the
             (mostly short) answers use the horizontal space instead of a row each. */}
         {(stats.favorite_team ||
@@ -448,6 +426,27 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
                 </p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Coaching staff — a footer under the Player Match, set off by a thin
+            rule. Amber labels + bold names keep it prominent without a second
+            amber block fighting the Player Match banner above it. */}
+        {(stats.coach || stats.assistant_coaches) && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                stats.coach && stats.assistant_coaches ? "1fr 1fr" : "1fr",
+              gap: "0.9em",
+              borderTop: "1px solid rgba(255,255,255,0.2)",
+              paddingTop: "0.7em",
+            }}
+          >
+            {stats.coach && <CoachCell label="HEAD COACH" value={stats.coach} />}
+            {stats.assistant_coaches && (
+              <CoachCell label="ASSISTANTS" value={stats.assistant_coaches} />
+            )}
           </div>
         )}
       </div>
