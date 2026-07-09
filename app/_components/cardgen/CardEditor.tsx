@@ -471,6 +471,11 @@ export default function CardEditor({
   const [nameItalic, setNameItalic] = useState(
     initialDesign?.text.name_italic ?? false
   );
+  // Number of copies "in circulation" — a limited-edition stamp on the front.
+  // Kept as a string for the input; parsed to a number when saved.
+  const [circulation, setCirculation] = useState(
+    initialDesign?.circulation != null ? String(initialDesign.circulation) : ""
+  );
 
   const [tab, setTab] = useState<"photo" | "bg" | "text">("photo");
   const [side, setSide] = useState<"front" | "back">("front");
@@ -985,6 +990,10 @@ export default function CardEditor({
         name_size: nameSize,
         name_italic: nameItalic,
       },
+      circulation:
+        circulation.trim() && Number.isFinite(Number(circulation))
+          ? Number(circulation)
+          : null,
       back: {
         stats,
         scouting_report: scoutingReport,
@@ -1625,6 +1634,44 @@ export default function CardEditor({
             {nameL2}
           </div>
         </div>
+
+        {/* Circulation / limited-edition stamp — the classic serialized spot,
+            tucked top-right under the jersey number (or at the top when there's
+            no jersey). Part of the overlay layer, so it exports automatically. */}
+        {circulation.trim() && (
+          <div
+            style={{
+              position: "absolute",
+              top: stats.jersey ? "18.5%" : "6.5%",
+              right: "7%",
+              textAlign: "right",
+              pointerEvents: "none",
+              color: isLight ? "#fde047" : "#92400e",
+              filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.55))",
+              lineHeight: 1.05,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+                fontSize: "calc(var(--cardw, 22rem) * 1.7 / 100)",
+                letterSpacing: "0.18em",
+                fontWeight: 700,
+              }}
+            >
+              IN CIRCULATION
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--font-anton), Impact, sans-serif",
+                fontSize: "calc(var(--cardw, 22rem) * 4 / 100)",
+                letterSpacing: "0.02em",
+              }}
+            >
+              {circulation}
+            </div>
+          </div>
+        )}
         </div>
 
         {/* Signature overlay — gestures handled at the stage level (pointerEvents
@@ -2135,6 +2182,22 @@ export default function CardEditor({
                   {nameItalic ? "On" : "Off"}
                 </button>
               </div>
+
+              {/* Circulation — limited-edition run size, stamped on the front. */}
+              <Field label="Cards in circulation (optional)">
+                <input
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={circulation}
+                  onChange={(e) => setCirculation(e.target.value)}
+                  placeholder="e.g. 100"
+                  className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                />
+                <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+                  Adds an &ldquo;In circulation&rdquo; stamp near the jersey number — like a limited-edition print run.
+                </p>
+              </Field>
             </div>
           )}
         </div>

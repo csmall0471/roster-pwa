@@ -92,6 +92,9 @@ export interface CardDesign {
     name_italic?: boolean;
   };
   back?: CardBackDesign;
+  // Number of copies "in circulation" — shown as a limited-edition stamp on the
+  // front. Null/absent = no stamp.
+  circulation?: number | null;
   // Hand-drawn signature placed on the front. Position is stored as fractions of
   // the stage so it scales across screen sizes (same convention as `transform`).
   signature?: {
