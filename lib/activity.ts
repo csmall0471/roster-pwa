@@ -28,6 +28,7 @@ export type ActivityEvent =
   | "card_signature_added"
   | "card_headshot_added"
   | "card_draft_saved"
+  | "card_bg_options_exported"
   | "card_flipped"
   | "card_deleted"
   // Events / signup pages

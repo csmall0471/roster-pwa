@@ -6,6 +6,7 @@ import {
   useEffect,
   type CSSProperties,
 } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { track } from "@vercel/analytics";
 import { logClientActivity } from "@/app/actions/log-activity";
@@ -18,6 +19,7 @@ import {
 import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
+import { compositeFrontCanvas } from "./card-raster";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
 import SignaturePad, { type SignatureResult } from "./SignaturePad";
@@ -205,6 +207,141 @@ async function exportCardImages(front: Blob, back: Blob) {
   }
 }
 
+// Hand a single rendered image to the device — share sheet on phones (so it
+// lands in Messages/Photos), download on desktop.
+async function shareFile(blob: Blob, name: string) {
+  const file = new File([blob], name, { type: blob.type || "image/png" });
+  if (navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ files: [file] });
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// One tile of the background contact sheet.
+type SheetTile = {
+  canvas: HTMLCanvasElement;
+  num: number;
+  name: string;
+  category: string;
+  categoryLabel: string;
+};
+
+// Lay every rendered front onto a single tall PNG, grouped by category with a
+// big number on each so a parent can just text back "4, 23, 34".
+async function buildBackgroundSheet(
+  tiles: SheetTile[],
+  subtitle: string
+): Promise<Blob> {
+  const COLS = 4;
+  const CW = 300;
+  const CARD_H = Math.round((CW * 7) / 5);
+  const LABEL_H = 30;
+  const GAP = 18;
+  const MARGIN = 44;
+  const TITLE_H = 150;
+  const CAT_H = 56;
+  const cellH = CARD_H + LABEL_H;
+  const sans = "-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif";
+
+  // Group tiles by category, preserving order.
+  const groups: { label: string; items: SheetTile[] }[] = [];
+  for (const t of tiles) {
+    let g = groups.find((x) => x.label === t.categoryLabel);
+    if (!g) {
+      g = { label: t.categoryLabel, items: [] };
+      groups.push(g);
+    }
+    g.items.push(t);
+  }
+
+  let height = TITLE_H;
+  for (const g of groups) {
+    const rows = Math.ceil(g.items.length / COLS);
+    height += CAT_H + rows * cellH + (rows - 1) * GAP + GAP * 2;
+  }
+  height += MARGIN;
+  const width = MARGIN * 2 + COLS * CW + (COLS - 1) * GAP;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = Math.round(height);
+  const ctx = canvas.getContext("2d")!;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "#0a0a0a";
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.font = `bold 40px ${sans}`;
+  ctx.fillText("Pick your card background", MARGIN, 66);
+  ctx.fillStyle = "#555555";
+  ctx.font = `500 24px ${sans}`;
+  ctx.fillText(subtitle, MARGIN, 104);
+
+  let y = TITLE_H;
+  for (const g of groups) {
+    ctx.fillStyle = "#0a0a0a";
+    ctx.font = `bold 26px ${sans}`;
+    ctx.fillText(g.label.toUpperCase(), MARGIN, y + 34);
+    y += CAT_H;
+
+    g.items.forEach((t, i) => {
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const x = MARGIN + col * (CW + GAP);
+      const cy = y + row * (cellH + GAP);
+
+      ctx.drawImage(t.canvas, x, cy, CW, CARD_H);
+      ctx.strokeStyle = "rgba(0,0,0,0.12)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, cy + 0.5, CW - 1, CARD_H - 1);
+
+      // Number badge, top-left.
+      const r = 21;
+      const bx = x + 12 + r;
+      const by = cy + 12 + r;
+      ctx.beginPath();
+      ctx.arc(bx, by, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(10,10,10,0.85)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold 24px ${sans}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(t.num), bx, by + 1);
+
+      // Name under the card.
+      ctx.fillStyle = "#0a0a0a";
+      ctx.font = `600 20px ${sans}`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(`${t.num}. ${t.name}`, x + 2, cy + CARD_H + 22);
+    });
+
+    const rows = Math.ceil(g.items.length / COLS);
+    y += rows * cellH + (rows - 1) * GAP + GAP * 2;
+  }
+
+  return await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("Could not build the sheet"))),
+      "image/png"
+    )
+  );
+}
+
 // Quick ink swatches for restyling a signature (black, white, blue, red, gold);
 // a custom color picker sits alongside them.
 const SIG_PRESET_COLORS = ["#0a0a0a", "#ffffff", "#1d4ed8", "#dc2626", "#f59e0b"];
@@ -265,6 +402,9 @@ export default function CardEditor({
   const [originalPhoto, setOriginalPhoto] = useState<File | null>(null);
   const [savingOriginal, setSavingOriginal] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // "Share all backgrounds" contact sheet: rendering flag + progress counter.
+  const [exportingAll, setExportingAll] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
 
   // Layer state
   const [cutoutUrl, setCutoutUrl] = useState<string | null>(
@@ -881,6 +1021,81 @@ export default function CardEditor({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // Render the front on EVERY background template and tile them into one
+  // numbered PNG to share with parents ("text me the numbers you like"). Each
+  // tile is the real card front — nothing cut off like the picker thumbnails.
+  // We reuse the live front layers by switching the background one at a time
+  // (flushSync so the DOM is committed before we snapshot); a covering overlay
+  // hides the flicker while it runs.
+  async function exportAllBackgrounds() {
+    if (!stageRef.current || !cutoutUrl || exportingAll) return;
+    const originalBg = bg;
+    setExportingAll(true);
+    setExportProgress(0);
+    setError(null);
+    setNotice(null);
+    try {
+      if ("fonts" in document) await (document as Document).fonts.ready;
+      await Promise.all([
+        preloadImage(cutoutDataUrl),
+        preloadImage(sigDataUrl ?? sigUrl),
+      ]);
+
+      const labelFor = (cat: string) =>
+        TEMPLATE_CATEGORIES.find((c) => c.key === cat)?.label ?? cat;
+
+      const tiles: SheetTile[] = [];
+      for (let i = 0; i < TEMPLATES.length; i++) {
+        const t = TEMPLATES[i];
+        flushSync(() => setBg({ type: "template", id: t.id }));
+        // Wait for the browser to commit the new background before snapshotting.
+        await new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r))
+        );
+        const canvas = await compositeFrontCanvas(
+          {
+            bgEl: bgLayerRef.current!,
+            overlayEl: overlayLayerRef.current!,
+            cutoutSrc: cutoutDataUrl,
+            cutout: { tx, ty, scale, rotation },
+            sigSrc: sigDataUrl ?? sigUrl,
+            sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
+          },
+          300
+        );
+        tiles.push({
+          canvas,
+          num: i + 1,
+          name: t.name,
+          category: t.category,
+          categoryLabel: labelFor(t.category),
+        });
+        setExportProgress(i + 1);
+      }
+
+      const who = [nameL1, nameL2].filter(Boolean).join(" ").trim();
+      const subtitle = who
+        ? `${who} — text me the number(s) you like, e.g. "4, 23, 34".`
+        : `Text me the number(s) you like, e.g. "4, 23, 34".`;
+      const sheet = await buildBackgroundSheet(tiles, subtitle);
+      await shareFile(
+        sheet,
+        `${(who || "card").toLowerCase().replace(/\s+/g, "-")}-background-options.png`
+      );
+      track("card_bg_options_exported", { count: TEMPLATES.length });
+      logClientActivity("card_bg_options_exported", {
+        count: TEMPLATES.length,
+      }).catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      // Restore the background the user had selected.
+      flushSync(() => setBg(originalBg));
+      setExportingAll(false);
+      setExportProgress(0);
     }
   }
 
@@ -1636,6 +1851,9 @@ export default function CardEditor({
                 {items.map((t) => {
                   const selected = bg.type === "template" && bg.id === t.id;
                   const lightText = t.textColor === "light";
+                  // Global option number — matches the shared "pick a background"
+                  // sheet, so a parent's "#12" maps straight back to this swatch.
+                  const number = TEMPLATES.indexOf(t) + 1;
                   return (
                     <button
                       key={t.id}
@@ -1717,6 +1935,25 @@ export default function CardEditor({
                         {nameL1 && <div>{nameL1.slice(0, 8)}</div>}
                         {nameL2 && <div>{nameL2.slice(0, 8)}</div>}
                       </div>
+                      {/* Option number (UI aid — not part of the card). */}
+                      <span
+                        style={{
+                          position: "absolute",
+                          right: "4%",
+                          bottom: "4%",
+                          pointerEvents: "none",
+                          background: "rgba(10,10,10,0.6)",
+                          color: "#fff",
+                          fontSize: "7.5cqw",
+                          fontWeight: 700,
+                          lineHeight: 1,
+                          padding: "0.28em 0.42em",
+                          borderRadius: "0.5em",
+                          fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+                        }}
+                      >
+                        {number}
+                      </span>
                     </button>
                   );
                 })}
@@ -1740,6 +1977,23 @@ export default function CardEditor({
                   if (f) handleBgImageSelected(f);
                 }}
               />
+              {cutoutUrl && (
+                <div className="space-y-1">
+                  <button
+                    onClick={exportAllBackgrounds}
+                    disabled={exportingAll}
+                    className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
+                  >
+                    {exportingAll
+                      ? `Rendering ${exportProgress}/${TEMPLATES.length}…`
+                      : "📤 Share all backgrounds to pick from"}
+                  </button>
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                    Builds one numbered image of every background with this photo —
+                    send it to a parent and they can tell you which numbers they like.
+                  </p>
+                </div>
+              )}
               {bg.type === "image" && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -2180,6 +2434,21 @@ export default function CardEditor({
 
       {showSigPad && (
         <SignaturePad onCancel={() => setShowSigPad(false)} onDone={handleSignatureDrawn} />
+      )}
+
+      {/* Covers the flicker while every background is rendered for the sheet. */}
+      {exportingAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+            <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Building background options…
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {exportProgress} of {TEMPLATES.length}
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

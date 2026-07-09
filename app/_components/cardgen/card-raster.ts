@@ -25,10 +25,13 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   return img;
 }
 
-// Rasterize a DOM layer (vector/text/gradient) to a W-wide canvas.
-async function layerCanvas(el: HTMLElement): Promise<HTMLCanvasElement> {
+// Rasterize a DOM layer (vector/text/gradient) to an outW-wide canvas.
+async function layerCanvas(
+  el: HTMLElement,
+  outW: number
+): Promise<HTMLCanvasElement> {
   const rect = el.getBoundingClientRect();
-  return toCanvas(el, { pixelRatio: W / (rect.width || W) });
+  return toCanvas(el, { pixelRatio: outW / (rect.width || outW) });
 }
 
 export type FrontLayers = {
@@ -40,25 +43,33 @@ export type FrontLayers = {
   sig: { x: number; y: number; rotation: number; widthFrac: number };
 };
 
-export async function compositeFront(L: FrontLayers): Promise<Blob> {
+// Composite the front onto a canvas at an arbitrary output width (height keeps
+// the 5:7 ratio). Shared by the full-size export (outW = 750) and the smaller
+// tiles in the "all backgrounds" contact sheet. All positions are fractional so
+// the same math scales to any size.
+export async function compositeFrontCanvas(
+  L: FrontLayers,
+  outW: number = W
+): Promise<HTMLCanvasElement> {
+  const outH = Math.round(outW * (H / W));
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d")!;
 
   // 1. Background (gradient/image).
-  ctx.drawImage(await layerCanvas(L.bgEl), 0, 0, W, H);
+  ctx.drawImage(await layerCanvas(L.bgEl, outW), 0, 0, outW, outH);
 
   // 2. Cutout photo — object-fit: contain, then the CSS transform about center.
   if (L.cutoutSrc) {
     const img = await loadImage(L.cutoutSrc);
     if (img.naturalWidth) {
-      const r = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+      const r = Math.min(outW / img.naturalWidth, outH / img.naturalHeight);
       const dw = img.naturalWidth * r;
       const dh = img.naturalHeight * r;
       ctx.save();
-      ctx.translate(W / 2, H / 2);
-      ctx.translate(L.cutout.tx * W, L.cutout.ty * H);
+      ctx.translate(outW / 2, outH / 2);
+      ctx.translate(L.cutout.tx * outW, L.cutout.ty * outH);
       ctx.rotate((L.cutout.rotation * Math.PI) / 180);
       ctx.scale(L.cutout.scale, L.cutout.scale);
       ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
@@ -67,25 +78,30 @@ export async function compositeFront(L: FrontLayers): Promise<Blob> {
   }
 
   // 3. Overlays (jersey badge, team plate, player name) — on top of the photo.
-  ctx.drawImage(await layerCanvas(L.overlayEl), 0, 0, W, H);
+  ctx.drawImage(await layerCanvas(L.overlayEl, outW), 0, 0, outW, outH);
 
   // 4. Signature — centered at (x,y) fractions, contained in its box, rotated.
   if (L.sigSrc) {
     const img = await loadImage(L.sigSrc);
     if (img.naturalWidth) {
-      const boxW = L.sig.widthFrac * W;
+      const boxW = L.sig.widthFrac * outW;
       const boxH = boxW * (img.naturalHeight / img.naturalWidth);
       const r = Math.min(boxW / img.naturalWidth, boxH / img.naturalHeight);
       const dw = img.naturalWidth * r;
       const dh = img.naturalHeight * r;
       ctx.save();
-      ctx.translate(L.sig.x * W, L.sig.y * H);
+      ctx.translate(L.sig.x * outW, L.sig.y * outH);
       ctx.rotate((L.sig.rotation * Math.PI) / 180);
       ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
       ctx.restore();
     }
   }
 
+  return canvas;
+}
+
+export async function compositeFront(L: FrontLayers): Promise<Blob> {
+  const canvas = await compositeFrontCanvas(L, W);
   return pngBlobWithDpi(canvas.toDataURL("image/png"), 300);
 }
 
@@ -140,7 +156,7 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
   const ctx = canvas.getContext("2d")!;
 
   // 1. Everything except the (raster) headshot — gradient + text/panel survive.
-  ctx.drawImage(await layerCanvas(L.backEl), 0, 0, W, H);
+  ctx.drawImage(await layerCanvas(L.backEl, W), 0, 0, W, H);
 
   // 2. Headshot circle, upper-right (matches CardBack's CSS box) with its pan.
   if (L.headshotSrc) {
