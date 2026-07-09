@@ -130,8 +130,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           onPointerCancel={onHeadshotPointerUp}
           style={{
             position: "absolute",
-            top: "6%",
-            right: "7%",
+            top: "3.5%",
+            right: "9.5%",
             width: "22%",
             aspectRatio: "1 / 1",
             // background-image (not <img>) so iOS Safari includes it in the snapshot.
