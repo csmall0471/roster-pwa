@@ -209,6 +209,7 @@ export async function findLookalike(
     position?: string;
     height?: string;
     favoritePlayer?: string;
+    scoutingReport?: string;
   }
 ): Promise<{ options?: LookalikeOption[]; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -234,6 +235,10 @@ export async function findLookalike(
   const favHint = fav
     ? `The kid's favorite player is ${fav} — ALWAYS include ${fav} as one of the ten, with its own play-style line. `
     : "";
+  const scout = context?.scoutingReport?.trim();
+  const scoutHint = scout
+    ? `The coach's scouting note on this player: "${scout.slice(0, 400)}" — weigh that style/energy alongside the photo, but let the photo lead. `
+    : "";
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   try {
@@ -257,7 +262,7 @@ export async function findLookalike(
 
 Each is a real professional basketball player — NBA or WNBA, any era (current stars, all-time greats, international players, or beloved role players), any position — whose VIBE and ENERGY match this kid, judged only from body language, posture, smile, and confidence in the photo. Match on personality and energy — NOT facial features, ethnicity, or skin tone.
 
-Make the ten DIVERSE: mix positions, eras, and leagues; include some less-obvious picks, not just the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant). ${favHint}${roleHint}For range, draw on styles like: ${seeds}.
+Make the ten DIVERSE: mix positions, eras, and leagues; include some less-obvious picks, not just the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant). ${favHint}${roleHint}${scoutHint}For range, draw on styles like: ${seeds}.
 
 Respond with EXACTLY 10 lines and nothing else — no numbering, no preamble. Each line:
 Full Name | one short present-tense sentence (about 8-14 words) on how that player plays. No quotation marks.`,

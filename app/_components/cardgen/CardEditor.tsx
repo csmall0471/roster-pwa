@@ -938,6 +938,7 @@ export default function CardEditor({
         position: stats.position,
         height: stats.height,
         favoritePlayer: stats.favorite_player,
+        scoutingReport,
       });
       if (res.error) throw new Error(res.error);
       if (res.options && res.options.length) {
