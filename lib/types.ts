@@ -125,7 +125,7 @@ export interface CardBackDesign {
     // Fun "questionnaire" fields — the player's answers, all optional.
     biggest_fan: string;
     loudest_parent: string;
-    picks_me_up: string;
+    hype_song: string;
     // Coaching staff — optional. `assistant_coaches` is free text (e.g. a
     // comma-separated list).
     coach: string;

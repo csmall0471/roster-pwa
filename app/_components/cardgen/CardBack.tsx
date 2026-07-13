@@ -11,7 +11,7 @@ export type BackStats = {
   favorite_drill: string;
   biggest_fan: string;
   loudest_parent: string;
-  picks_me_up: string;
+  hype_song: string;
   coach: string;
   assistant_coaches: string;
 };
@@ -321,7 +321,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           stats.favorite_drill ||
           stats.biggest_fan ||
           stats.loudest_parent ||
-          stats.picks_me_up) && (
+          stats.hype_song) && (
           <div
             style={{
               display: "grid",
@@ -347,8 +347,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             {stats.loudest_parent && (
               <QACell label="LOUDEST FAN" value={stats.loudest_parent} />
             )}
-            {stats.picks_me_up && (
-              <QACell label="PICKS ME UP" value={stats.picks_me_up} />
+            {stats.hype_song && (
+              <QACell label="HYPE SONG" value={stats.hype_song} />
             )}
           </div>
         )}

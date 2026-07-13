@@ -98,10 +98,19 @@ const EMPTY_STATS: BackStats = {
   favorite_drill: "",
   biggest_fan: "",
   loudest_parent: "",
-  picks_me_up: "",
+  hype_song: "",
   coach: "",
   assistant_coaches: "",
 };
+
+// Format a height as feet'inches" from whatever the user types. The first
+// digit is feet, the next one or two are inches, so "42" → 4'2" and the ' / "
+// marks appear on their own as they type.
+function formatHeight(raw: string): string {
+  const d = raw.replace(/[^\d]/g, "").slice(0, 3);
+  if (!d) return "";
+  return d.length === 1 ? `${d}'` : `${d[0]}'${d.slice(1)}"`;
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -2394,7 +2403,20 @@ export default function CardEditor({
               <Field label="Height">
                 <input
                   value={stats.height}
-                  onChange={(e) => patchStats({ height: e.target.value })}
+                  inputMode="numeric"
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    let digits = next.replace(/[^\d]/g, "");
+                    // If a delete only stripped a ' or " separator, formatHeight
+                    // would just re-add it — drop a digit so backspace advances.
+                    if (
+                      next.length < stats.height.length &&
+                      formatHeight(digits) === stats.height
+                    ) {
+                      digits = digits.slice(0, -1);
+                    }
+                    patchStats({ height: formatHeight(digits) });
+                  }}
                   placeholder={"4'2\""}
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
@@ -2500,11 +2522,11 @@ export default function CardEditor({
                     className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                   />
                 </Field>
-                <Field label="Teammate who picks me up">
+                <Field label="Pre-game hype song">
                   <input
-                    value={stats.picks_me_up}
-                    onChange={(e) => patchStats({ picks_me_up: e.target.value })}
-                    placeholder="Jordan"
+                    value={stats.hype_song}
+                    onChange={(e) => patchStats({ hype_song: e.target.value })}
+                    placeholder="Eye of the Tiger"
                     className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                   />
                 </Field>
