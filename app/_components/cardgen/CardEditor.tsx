@@ -29,7 +29,12 @@ import {
   DEFAULT_SIG_THICKNESS,
   type SigStroke,
 } from "./signature-render";
-import { compositeFront, compositeBack } from "./card-raster";
+import {
+  compositeFront,
+  compositeBack,
+  compositeFoilMaskCanvas,
+  coverIntoCanvas,
+} from "./card-raster";
 import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign } from "@/lib/types";
 
@@ -234,6 +239,15 @@ async function shareFile(blob: Blob, name: string) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function canvasToPngBlob(c: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) =>
+    c.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("canvas toBlob failed"))),
+      "image/png"
+    )
+  );
 }
 
 // One tile of the background contact sheet.
@@ -495,6 +509,18 @@ export default function CardEditor({
   const [serialOverride, setSerialOverride] = useState<number | null>(null);
   const [exportingSerials, setExportingSerials] = useState(false);
   const [serialProgress, setSerialProgress] = useState(0);
+
+  // Raised Foil export — which front elements get the RUVgold spot channel.
+  // Empty set = nothing foiled (the export button stays disabled).
+  const [foilOn, setFoilOn] = useState<Set<string>>(() => new Set());
+  const [foilPending, setFoilPending] = useState(false);
+  const toggleFoil = (key: string) =>
+    setFoilOn((s) => {
+      const next = new Set(s);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const [tab, setTab] = useState<"photo" | "bg" | "text">("photo");
   const [side, setSide] = useState<"front" | "back">("front");
@@ -1064,6 +1090,79 @@ export default function CardEditor({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // Export a print-ready Raised Foil PDF: the card art in CMYK plus a RUVgold
+  // spot channel masking the toggled front elements. The server assembles it
+  // (sharp + pdf-lib); here we just render the base art and the foil mask in
+  // register, add bleed, and POST them. Separate from the normal PNG download.
+  async function handleFoilPdf() {
+    if (!stageRef.current || !cutoutUrl || foilPending || foilOn.size === 0)
+      return;
+    setFoilPending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if ("fonts" in document) await (document as Document).fonts.ready;
+      await Promise.all([
+        preloadImage(cutoutDataUrl),
+        preloadImage(sigDataUrl ?? sigUrl),
+      ]);
+      const sig = {
+        x: sigX,
+        y: sigY,
+        rotation: sigRotation,
+        widthFrac: 0.38 * sigScale,
+      };
+      // Trim-size (2.5×3.5) base art + foil mask, rendered from the same layers
+      // so they line up pixel-for-pixel.
+      const baseCanvas = await compositeFrontCanvas({
+        bgEl: bgLayerRef.current!,
+        overlayEl: overlayLayerRef.current!,
+        cutoutSrc: cutoutDataUrl,
+        cutout: { tx, ty, scale, rotation },
+        sigSrc: sigDataUrl ?? sigUrl,
+        sig,
+      });
+      const maskCanvas = await compositeFoilMaskCanvas({
+        overlayEl: overlayLayerRef.current!,
+        selected: foilOn,
+        sigSrc: sigDataUrl ?? sigUrl,
+        sig,
+      });
+      // Add 0.05" bleed on each edge → 2.6×3.6" (780×1080 @ 300 DPI).
+      const base = coverIntoCanvas(baseCanvas, 780, 1080, "#fff");
+      const mask = coverIntoCanvas(maskCanvas, 780, 1080, "#000");
+      const [baseBlob, maskBlob] = await Promise.all([
+        canvasToPngBlob(base),
+        canvasToPngBlob(mask),
+      ]);
+      const nameBase =
+        (firstName || nameL1 || "card").toLowerCase().replace(/\s+/g, "-") ||
+        "card";
+      const form = new FormData();
+      form.append("base", baseBlob, "base.png");
+      form.append("mask", maskBlob, "mask.png");
+      form.append("widthIn", "2.6");
+      form.append("heightIn", "3.6");
+      form.append("spot", "RUVgold");
+      form.append("filename", nameBase);
+      const res = await fetch("/tools/card-creator/foil-pdf", {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok)
+        throw new Error((await res.text()) || `Export failed (${res.status})`);
+      await shareFile(await res.blob(), `${nameBase}-RUVgold.pdf`);
+      const elements = [...foilOn].sort().join(",");
+      track("card_foil_exported", { elements });
+      logClientActivity("card_foil_exported", { elements }).catch(() => {});
+      setNotice("Raised Foil PDF exported (RUVgold spot channel).");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFoilPending(false);
     }
   }
 
@@ -1646,6 +1745,7 @@ export default function CardEditor({
         {/* Jersey number badge — top right. */}
         {stats.jersey && (
           <div
+            data-foil="jersey"
             style={{
               position: "absolute",
               top: "6%",
@@ -1675,6 +1775,7 @@ export default function CardEditor({
             left edge (full-bleed), but the text is inset so print trim can't
             clip it. */}
         <div
+          data-foil="team"
           style={{
             position: "absolute",
             top: "6.5%",
@@ -1723,6 +1824,7 @@ export default function CardEditor({
 
         {/* Player name */}
         <div
+          data-foil="name"
           style={{
             position: "absolute",
             left: "8%",
@@ -1748,6 +1850,7 @@ export default function CardEditor({
             no jersey). Part of the overlay layer, so it exports automatically. */}
         {circulation.trim() && (
           <div
+            data-foil="stamp"
             style={{
               position: "absolute",
               top: stats.jersey ? "18.5%" : "6.5%",
@@ -2624,6 +2727,69 @@ export default function CardEditor({
         >
           {downloading ? "Preparing…" : "⬇︎ Download front & back"}
         </button>
+
+        {/* Raised Foil export — a print-ready CMYK PDF with a RUVgold spot
+            channel over the toggled front elements. Separate from the PNG path. */}
+        <div className="w-full space-y-2 rounded-lg border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+              Raised Foil PDF{" "}
+              <span className="font-normal normal-case text-amber-700/80 dark:text-amber-400/80">
+                — print-ready RUVgold spot channel
+              </span>
+            </p>
+            <p className="mt-0.5 text-[11px] text-amber-700/80 dark:text-amber-400/70">
+              Pick which front elements get raised foil.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { key: "name", label: "Name", show: Boolean(nameL1 || nameL2) },
+              { key: "team", label: "Team plate", show: true },
+              { key: "jersey", label: "Jersey #", show: Boolean(stats.jersey) },
+              {
+                key: "stamp",
+                label: "Limited edition",
+                show: Boolean(circulation.trim()),
+              },
+              {
+                key: "signature",
+                label: "Signature",
+                show: Boolean(sigDataUrl ?? sigUrl),
+              },
+            ]
+              .filter((f) => f.show)
+              .map((f) => {
+                const on = foilOn.has(f.key);
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => toggleFoil(f.key)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                      on
+                        ? "border-amber-500 bg-amber-500 text-white"
+                        : "border-amber-300 bg-white text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-gray-900 dark:text-amber-300 dark:hover:bg-amber-950/50"
+                    }`}
+                  >
+                    {on ? "✓ " : ""}
+                    {f.label}
+                  </button>
+                );
+              })}
+          </div>
+          <button
+            onClick={handleFoilPdf}
+            disabled={!cutoutUrl || foilPending || foilOn.size === 0}
+            className="w-full rounded-lg border border-amber-400 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-950/70"
+          >
+            {foilPending
+              ? "Building PDF…"
+              : foilOn.size === 0
+                ? "Select foil elements above"
+                : "✨ Export Raised Foil PDF (RUVgold)"}
+          </button>
+        </div>
 
         {allowDrafts && (
           <button

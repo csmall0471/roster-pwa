@@ -25,6 +25,7 @@ export type ActivityEvent =
   | "card_saved"
   | "card_save_failed"
   | "card_downloaded"
+  | "card_foil_exported"
   | "card_signature_added"
   | "card_headshot_added"
   | "card_draft_saved"
