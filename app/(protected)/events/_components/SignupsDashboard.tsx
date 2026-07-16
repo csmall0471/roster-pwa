@@ -1,10 +1,109 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { togglePaid, updateSignupNotes } from "../actions";
-import type { EventField, EventSignup } from "@/lib/types";
+import type {
+  EventField,
+  EventPriceTier,
+  EventSignup,
+  SignupAttendee,
+} from "@/lib/types";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+// ── Attendance roll-up ─────────────────────────────────────────────────────
+// A "participant type" is a price tier. Players/Siblings/Parents get canonical
+// labels via their tier flags; any other tier keeps its coach-given label.
+type Cat = { key: string; plural: string; singular: string; order: number };
+type Person = { key: string; name: string; badge: string; family: string; order: number };
+type TypeCount = { key: string; label: string; attending: number; declined: number; order: number };
+
+function tierCat(t: EventPriceTier): Cat {
+  if (t.is_player) return { key: "player", plural: "Players", singular: "Player", order: 0 };
+  if (t.is_sibling) return { key: "sibling", plural: "Siblings", singular: "Sibling", order: 1 };
+  if (t.is_parent) return { key: "parent", plural: "Parents", singular: "Parent", order: 2 };
+  return { key: `t:${t.id}`, plural: t.label, singular: t.label, order: 3 + t.position };
+}
+
+// Roll signups up into per-type counts and flat coming / not-coming lists.
+// The SignupAttendee only carries is_player, so siblings/parents are resolved
+// by joining tier_id back to the event's tiers.
+function computeAttendance(signups: EventSignup[], tiers: EventPriceTier[]) {
+  const byTierId = new Map(tiers.map((t) => [t.id, tierCat(t)]));
+  const classify = (a: SignupAttendee): Cat =>
+    byTierId.get(a.tier_id) ??
+    (a.is_player
+      ? { key: "player", plural: "Players", singular: "Player", order: 0 }
+      : {
+          key: a.tier_label || "other",
+          plural: a.tier_label || "Other",
+          singular: a.tier_label || "Other",
+          order: 99,
+        });
+
+  const counts = new Map<string, TypeCount>();
+  const coming: Person[] = [];
+  const notComing: Person[] = [];
+  let wholeFamilyOut = 0;
+
+  const bump = (cat: Cat, declined: boolean) => {
+    const c =
+      counts.get(cat.key) ??
+      { key: cat.key, label: cat.plural, attending: 0, declined: 0, order: cat.order };
+    if (declined) c.declined++;
+    else c.attending++;
+    counts.set(cat.key, c);
+  };
+
+  for (const s of signups) {
+    const family = s.name;
+    const list = s.attendees ?? [];
+    if (list.length === 0) {
+      // No attendee rows: a "can't make it" decline for the whole family.
+      if (s.declined) {
+        notComing.push({ key: s.id, name: family, badge: "Whole family", family: "", order: -1 });
+        wholeFamilyOut++;
+      }
+      continue;
+    }
+    // Count-only tiers have no names — group those into one "× N" line per tier.
+    const unnamedComing = new Map<string, { cat: Cat; n: number }>();
+    const unnamedOut = new Map<string, { cat: Cat; n: number }>();
+    list.forEach((a, i) => {
+      const cat = classify(a);
+      const declined = a.status === "declined";
+      bump(cat, declined);
+      const nm = (a.name ?? "").trim();
+      if (nm) {
+        (declined ? notComing : coming).push({
+          key: `${s.id}:${i}`,
+          name: nm,
+          badge: cat.singular,
+          family,
+          order: cat.order,
+        });
+      } else {
+        const m = declined ? unnamedOut : unnamedComing;
+        const e = m.get(cat.key) ?? { cat, n: 0 };
+        e.n++;
+        m.set(cat.key, e);
+      }
+    });
+    for (const { cat, n } of unnamedComing.values())
+      coming.push({ key: `${s.id}:${cat.key}:c`, name: `${cat.plural} × ${n}`, badge: cat.singular, family, order: cat.order });
+    for (const { cat, n } of unnamedOut.values())
+      notComing.push({ key: `${s.id}:${cat.key}:d`, name: `${cat.plural} × ${n}`, badge: cat.singular, family, order: cat.order });
+  }
+
+  const byOrderThenName = (a: Person, b: Person) =>
+    a.order - b.order || a.name.localeCompare(b.name);
+  coming.sort(byOrderThenName);
+  notComing.sort(byOrderThenName);
+  const types = [...counts.values()].sort((a, b) => a.order - b.order);
+  const totalAttending = types.reduce((n, t) => n + t.attending, 0);
+  const totalOut = types.reduce((n, t) => n + t.declined, 0) + wholeFamilyOut;
+  return { types, coming, notComing, totalAttending, totalOut };
+}
 
 type Metrics = {
   opensTotal: number;
@@ -14,15 +113,18 @@ type Metrics = {
 
 export default function SignupsDashboard({
   fields,
+  tiers,
   signups: initial,
   metrics,
 }: {
   fields: EventField[];
+  tiers: EventPriceTier[];
   signups: EventSignup[];
   metrics: Metrics;
 }) {
   const [signups, setSignups] = useState(initial);
   const [openMetrics, setOpenMetrics] = useState(false);
+  const att = useMemo(() => computeAttendance(signups, tiers), [signups, tiers]);
 
   const grandTotal = signups.reduce((s, x) => s + x.total_cents, 0);
   const collected = signups.filter((s) => s.paid).reduce((s, x) => s + x.total_cents, 0);
@@ -42,6 +144,45 @@ export default function SignupsDashboard({
         <Stat label="Total owed" value={money(grandTotal)} />
         <Stat label="Collected" value={money(collected)} sub={`${money(grandTotal - collected)} outstanding`} />
       </div>
+
+      {/* Attendance roll-up: counts per participant type + coming/not-coming */}
+      {att.totalAttending + att.totalOut > 0 && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {att.types.map((t) => (
+              <div
+                key={t.key}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 dark:border-gray-800 dark:bg-gray-900"
+              >
+                <span className="text-xl font-bold text-gray-900 dark:text-white">{t.attending}</span>{" "}
+                <span className="text-sm text-gray-600 dark:text-gray-300">{t.label}</span>
+                {t.declined > 0 && (
+                  <span className="ml-1 text-xs text-gray-400">(+{t.declined} out)</span>
+                )}
+              </div>
+            ))}
+            <div className="rounded-xl bg-gray-900 px-3 py-2 text-white dark:bg-white dark:text-gray-900">
+              <span className="text-xl font-bold">{att.totalAttending}</span>{" "}
+              <span className="text-sm opacity-80">coming</span>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <PeopleList
+              title={`Coming (${att.totalAttending})`}
+              people={att.coming}
+              tone="green"
+              empty="Nobody's confirmed yet."
+            />
+            <PeopleList
+              title={`Not coming (${att.totalOut})`}
+              people={att.notComing}
+              tone="red"
+              empty="Nobody's declined."
+            />
+          </div>
+        </div>
+      )}
 
       {/* Who opened */}
       {metrics.recentOpens.length > 0 && (
@@ -85,6 +226,45 @@ export default function SignupsDashboard({
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+function PeopleList({
+  title,
+  people,
+  tone,
+  empty,
+}: {
+  title: string;
+  people: Person[];
+  tone: "green" | "red";
+  empty: string;
+}) {
+  const head =
+    tone === "green"
+      ? "bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+      : "bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-300";
+  return (
+    <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+      <div className={`px-4 py-2 text-sm font-semibold ${head}`}>{title}</div>
+      {people.length === 0 ? (
+        <p className="bg-white px-4 py-3 text-sm text-gray-400 dark:bg-gray-900">{empty}</p>
+      ) : (
+        <ul className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-gray-900">
+          {people.map((p) => (
+            <li key={p.key} className="flex items-center justify-between gap-2 px-4 py-2 text-sm">
+              <span className="min-w-0 truncate text-gray-800 dark:text-gray-200">
+                {p.name}
+                {p.family && <span className="text-gray-400"> · {p.family}</span>}
+              </span>
+              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                {p.badge}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

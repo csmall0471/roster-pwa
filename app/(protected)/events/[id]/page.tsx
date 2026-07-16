@@ -307,7 +307,12 @@ export default async function EventManagePage({
         </p>
       )}
 
-      <SignupsDashboard fields={ev.event_fields} signups={signups} metrics={metrics} />
+      <SignupsDashboard
+        fields={ev.event_fields}
+        tiers={ev.event_price_tiers}
+        signups={signups}
+        metrics={metrics}
+      />
     </div>
   );
 }
