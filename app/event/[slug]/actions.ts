@@ -11,6 +11,7 @@ import {
 } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay";
+import { buildPricedAttendees, type PricingTier } from "@/lib/events/signup-pricing";
 import type {
   AttendeeStatus,
   SavedSibling,
@@ -309,72 +310,12 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   }
 
   // Build the priced attendee snapshot from the server's authoritative tier
-  // amounts/labels (never trust the client). Each input attendee = one paid unit.
-  // Attribute keys are remapped from field id → label so stored data is
-  // self-describing for the coach dashboard.
-  type TierFieldRow = {
-    id: string;
-    label: string;
-    field_type: string;
-    price_adjust_cents: number;
-    options: string[];
-    option_prices: number[];
-  };
-  type TierRow = {
-    id: string;
-    label: string;
-    amount_cents: number;
-    is_player: boolean;
-    is_sibling: boolean;
-    event_tier_fields: TierFieldRow[];
-  };
-  const tiers = (event.event_price_tiers ?? []) as TierRow[];
-  const tierById = new Map(tiers.map((t) => [t.id, t]));
-  const attendees: SignupAttendee[] = [];
-  const siblingDrafts: SavedSibling[] = [];
-  let total_cents = 0;
-  let attendingUnits = 0;
-  // A decline carries no attendees; otherwise build the priced snapshot.
-  for (const a of (isDecline ? [] : input.attendees).slice(0, 200)) {
-    const t = tierById.get(a.tier_id);
-    if (!t) continue;
-    const fieldLabel = new Map((t.event_tier_fields ?? []).map((f) => [f.id, f.label]));
-    const labeled: Record<string, string | number | boolean> = {};
-    for (const [fid, v] of Object.entries(a.attributes ?? {})) {
-      if (v === "" || v === null || v === undefined) continue;
-      labeled[fieldLabel.get(fid) ?? fid] = v;
-    }
-    const trimmedName = a.name?.trim() || null;
-    const status: AttendeeStatus = a.status === "declined" ? "declined" : "attending";
-    // Per-attendee price = tier base + adjustments for any Yes/No or checkbox
-    // field answered yes/checked (clamped at $0). Authoritative server-side.
-    let adjust = 0;
-    for (const f of t.event_tier_fields ?? []) {
-      if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes?.[f.id] === true) {
-        adjust += f.price_adjust_cents ?? 0;
-      } else if (f.field_type === "select" && (f.option_prices?.length ?? 0) > 0) {
-        const idx = (f.options ?? []).indexOf(a.attributes?.[f.id] as string);
-        if (idx >= 0) adjust += f.option_prices[idx] ?? 0;
-      }
-    }
-    const unitAmount = Math.max(0, t.amount_cents + adjust);
-    attendees.push({
-      tier_id: t.id,
-      tier_label: t.label,
-      amount_cents: unitAmount,
-      is_player: t.is_player,
-      name: trimmedName,
-      attributes: labeled,
-      status,
-    });
-    // Declined attendees are recorded (so the coach sees who's out) but never
-    // charged.
-    if (status === "attending") {
-      total_cents += unitAmount;
-      attendingUnits++;
-    }
-    if (t.is_sibling && trimmedName) siblingDrafts.push({ name: trimmedName, attributes: labeled });
-  }
+  // amounts/labels (never trust the client). Shared with the coach-side editor.
+  const { attendees, total_cents, attendingUnits, siblingDrafts } = buildPricedAttendees(
+    (event.event_price_tiers ?? []) as unknown as PricingTier[],
+    input.attendees,
+    isDecline,
+  );
 
   // The whole RSVP is a decline if they tapped "can't make it" or nobody from
   // the family is attending (every attendee marked not-attending).

@@ -5,7 +5,13 @@ import { headers } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { buildEmailHtml, btn, esc, infoRow, infoTable } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
-import type { EventFieldType, EventStatus } from "@/lib/types";
+import { buildPricedAttendees, type PricingTier } from "@/lib/events/signup-pricing";
+import type {
+  AttendeeStatus,
+  EventFieldType,
+  EventSignup,
+  EventStatus,
+} from "@/lib/types";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -287,6 +293,91 @@ export async function updateSignupNotes(
     .update({ coach_notes: notes.trim() || null })
     .eq("id", signupId);
   if (error) return { error: error.message };
+  return {};
+}
+
+// ── Coach-side signup management ────────────────────────────────────────────
+// The coach can create, edit, re-link (guest → invited parent), or delete any
+// signup — including for people who never responded. Auth is the coach-trusted
+// RLS model (any non-parent user has full access to event_signups), same as
+// togglePaid. Totals are recomputed from the event's authoritative tiers.
+
+export type CoachAttendeeInput = {
+  tier_id: string;
+  name: string | null;
+  attributes: Record<string, string | number | boolean>; // keyed by field id
+  status?: AttendeeStatus;
+};
+
+export type SaveSignupInput = {
+  signup_id?: string | null; // update this row, or insert when absent
+  event_id: string;
+  parent_id: string | null; // set to link to an invited parent; null = guest
+  name: string;
+  email: string;
+  phone: string;
+  responses: Record<string, string | number | boolean>;
+  attendees: CoachAttendeeInput[];
+  decline?: boolean;
+};
+
+export type SaveSignupResult = { error: string } | { ok: true; signup: EventSignup };
+
+export async function saveSignupAsCoach(
+  input: SaveSignupInput
+): Promise<SaveSignupResult> {
+  const supabase = await createClient();
+  if (!(await requireCoach(supabase))) return { error: "Not authorized" };
+
+  const name = input.name.trim();
+  if (!name) return { error: "Enter a name for this signup." };
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("id, event_price_tiers(*, event_tier_fields(*))")
+    .eq("id", input.event_id)
+    .single();
+  if (!event) return { error: "Event not found." };
+
+  const isDecline = input.decline === true;
+  const { attendees, total_cents, attendingUnits } = buildPricedAttendees(
+    (event.event_price_tiers ?? []) as unknown as PricingTier[],
+    input.attendees,
+    isDecline
+  );
+  const declined = isDecline || attendingUnits === 0;
+
+  const row = {
+    event_id: input.event_id,
+    parent_id: input.parent_id || null,
+    name,
+    email: input.email.trim() || null,
+    phone: input.phone.trim() || null,
+    responses: isDecline ? {} : input.responses,
+    attendees,
+    total_cents,
+    declined,
+  };
+
+  const q = input.signup_id
+    ? supabase.from("event_signups").update(row).eq("id", input.signup_id)
+    : supabase.from("event_signups").insert(row);
+  const { data, error } = await q.select("*").single();
+  if (error) return { error: error.message };
+
+  revalidatePath(`/events/${input.event_id}`);
+  return { ok: true, signup: data as EventSignup };
+}
+
+export async function deleteSignup(
+  signupId: string,
+  eventId: string
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  if (!(await requireCoach(supabase))) return { error: "Not authorized" };
+  const { error } = await supabase.from("event_signups").delete().eq("id", signupId);
+  if (error) return { error: error.message };
+  revalidatePath(`/events/${eventId}`);
   return {};
 }
 

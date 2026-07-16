@@ -107,6 +107,12 @@ export default async function EventManagePage({
   const recipients: Recipient[] = [];
   type RPlayer = { id: string; name: string; teams: Set<string>; parents: { id: string; name: string; email: string | null }[] };
   const rosterPlayerMap = new Map<string, RPlayer>();
+  // Parents keyed by id, with the names of their kids — feeds the coach's
+  // "link a signup to an invited player" picker + non-responder seeding.
+  const rosterParentMap = new Map<
+    string,
+    { id: string; name: string; email: string | null; phone: string | null; playerNames: Set<string> }
+  >();
   const seenRecipient = new Set<string>();
   let teamName: string | null = null;
   const multiTeam = teamIds.length > 1;
@@ -129,20 +135,31 @@ export default async function EventManagePage({
           rosterPlayerMap.set(pl.id, rp);
         }
         rp.teams.add(team.name);
+        const playerName = `${pl.first_name} ${pl.last_name}`.trim();
         for (const pp of pl.player_parents ?? []) {
           const p = pp.parents;
           if (!p) continue;
+          const pname = `${p.first_name} ${p.last_name}`.trim();
           if (!rp.parents.some((x) => x.id === p.id))
-            rp.parents.push({ id: p.id, name: `${p.first_name} ${p.last_name}`.trim(), email: p.email });
+            rp.parents.push({ id: p.id, name: pname, email: p.email });
+          let rpar = rosterParentMap.get(p.id);
+          if (!rpar) {
+            rpar = { id: p.id, name: pname, email: p.email, phone: p.phone, playerNames: new Set() };
+            rosterParentMap.set(p.id, rpar);
+          }
+          rpar.playerNames.add(playerName);
           if (!seenRecipient.has(p.id)) {
             seenRecipient.add(p.id);
-            recipients.push({ name: `${p.first_name} ${p.last_name}`, email: p.email, phone: p.phone });
+            recipients.push({ name: pname, email: p.email, phone: p.phone });
           }
         }
       }
     }
   }
   const rosterPlayers = [...rosterPlayerMap.values()];
+  const rosterParents = [...rosterParentMap.values()]
+    .map((p) => ({ id: p.id, name: p.name, email: p.email, phone: p.phone, playerNames: [...p.playerNames] }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   // Build the absolute share link server-side so client components don't need
   // to read window (avoids hydration mismatch + effect-driven state).
@@ -308,8 +325,10 @@ export default async function EventManagePage({
       )}
 
       <SignupsDashboard
+        eventId={ev.id}
         fields={ev.event_fields}
         tiers={ev.event_price_tiers}
+        rosterParents={rosterParents}
         signups={signups}
         metrics={metrics}
       />

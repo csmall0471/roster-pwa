@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { togglePaid, updateSignupNotes } from "../actions";
+import { deleteSignup, togglePaid, updateSignupNotes } from "../actions";
+import SignupEditor, { type RosterParentOption } from "./SignupEditor";
 import type {
   EventField,
   EventPriceTier,
+  EventPriceTierWithFields,
   EventSignup,
   SignupAttendee,
 } from "@/lib/types";
@@ -112,19 +114,39 @@ type Metrics = {
 };
 
 export default function SignupsDashboard({
+  eventId,
   fields,
   tiers,
+  rosterParents,
   signups: initial,
   metrics,
 }: {
+  eventId: string;
   fields: EventField[];
-  tiers: EventPriceTier[];
+  tiers: EventPriceTierWithFields[];
+  rosterParents: RosterParentOption[];
   signups: EventSignup[];
   metrics: Metrics;
 }) {
   const [signups, setSignups] = useState(initial);
   const [openMetrics, setOpenMetrics] = useState(false);
+  // Editor state: `undefined` = closed, `null` = adding new, a signup = editing.
+  const [editing, setEditing] = useState<EventSignup | null | undefined>(undefined);
   const att = useMemo(() => computeAttendance(signups, tiers), [signups, tiers]);
+
+  // Splice a saved (created or edited) signup into the local list.
+  function applySaved(s: EventSignup) {
+    setSignups((list) => {
+      const i = list.findIndex((x) => x.id === s.id);
+      if (i === -1) return [s, ...list];
+      const copy = [...list];
+      copy[i] = s;
+      return copy;
+    });
+  }
+  function applyDeleted(id: string) {
+    setSignups((list) => list.filter((s) => s.id !== id));
+  }
 
   const grandTotal = signups.reduce((s, x) => s + x.total_cents, 0);
   const collected = signups.filter((s) => s.paid).reduce((s, x) => s + x.total_cents, 0);
@@ -211,21 +233,49 @@ export default function SignupsDashboard({
 
       {/* Signups */}
       <div>
-        <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
-          Signups ({signups.length})
-        </h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Signups ({signups.length})
+          </h2>
+          <button
+            onClick={() => setEditing(null)}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            + Add a signup
+          </button>
+        </div>
         {signups.length === 0 ? (
           <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-6 text-center text-sm text-gray-400">
-            No signups yet.
+            No signups yet. Use “Add a signup” to record one for someone who hasn’t responded.
           </p>
         ) : (
           <ul className="space-y-3">
             {signups.map((s) => (
-              <SignupRow key={s.id} signup={s} fields={fields} onPaid={applyPaid} />
+              <SignupRow
+                key={s.id}
+                signup={s}
+                fields={fields}
+                eventId={eventId}
+                onPaid={applyPaid}
+                onEdit={() => setEditing(s)}
+                onDeleted={applyDeleted}
+              />
             ))}
           </ul>
         )}
       </div>
+
+      {editing !== undefined && (
+        <SignupEditor
+          eventId={eventId}
+          tiers={tiers}
+          fields={fields}
+          rosterParents={rosterParents}
+          signup={editing}
+          onClose={() => setEditing(undefined)}
+          onSaved={applySaved}
+        />
+      )}
     </div>
   );
 }
@@ -282,16 +332,30 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 function SignupRow({
   signup,
   fields,
+  eventId,
   onPaid,
+  onEdit,
+  onDeleted,
 }: {
   signup: EventSignup;
   fields: EventField[];
+  eventId: string;
   onPaid: (id: string, paid: boolean) => void;
+  onEdit: () => void;
+  onDeleted: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [notes, setNotes] = useState(signup.coach_notes ?? "");
   const [savedNotes, setSavedNotes] = useState(signup.coach_notes ?? "");
   const [pending, start] = useTransition();
+
+  function remove() {
+    if (!window.confirm(`Remove ${signup.name}'s signup? This can't be undone.`)) return;
+    start(async () => {
+      const res = await deleteSignup(signup.id, eventId);
+      if (!res.error) onDeleted(signup.id);
+    });
+  }
 
   function flipPaid() {
     const next = !signup.paid;
@@ -357,14 +421,19 @@ function SignupRow({
         </button>
       </div>
 
-      {hasDetails && (
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-2 text-xs font-medium text-blue-600 hover:text-blue-800"
-        >
-          {expanded ? "Hide details" : "Details"}
+      <div className="mt-2 flex items-center gap-3 text-xs font-medium">
+        {hasDetails && (
+          <button onClick={() => setExpanded((v) => !v)} className="text-blue-600 hover:text-blue-800">
+            {expanded ? "Hide details" : "Details"}
+          </button>
+        )}
+        <button onClick={onEdit} className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white">
+          Edit
         </button>
-      )}
+        <button onClick={remove} disabled={pending} className="text-red-600 hover:text-red-800 disabled:opacity-50">
+          Remove
+        </button>
+      </div>
 
       {expanded && (
         <div className="mt-3 space-y-3 border-t border-gray-100 dark:border-gray-800 pt-3 text-sm">
