@@ -197,48 +197,51 @@ async function preloadImage(src: string | null | undefined) {
   }
 }
 
-// Standalone export: hand the rendered card sides to the photo library via Web
-// Share on mobile, falling back to browser downloads on desktop. Both blobs are
-// already sized 2.5"×3.5" at 300 DPI (see card-raster).
-async function exportCardImages(front: Blob, back: Blob) {
-  const files = [
-    new File([front], "card-front.png", { type: "image/png" }),
-    new File([back], "card-back.png", { type: "image/png" }),
-  ];
-
-  if (navigator.canShare?.({ files })) {
-    await navigator.share({ files });
-    return;
-  }
-  for (const file of files) {
-    const url = URL.createObjectURL(file);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
-// Hand a single rendered image to the device — share sheet on phones (so it
-// lands in Messages/Photos), download on desktop.
-async function shareFile(blob: Blob, name: string) {
-  const file = new File([blob], name, { type: blob.type || "image/png" });
-  if (navigator.canShare?.({ files: [file] })) {
-    await navigator.share({ files: [file] });
-    return;
-  }
+function downloadFile(file: File) {
   const url = URL.createObjectURL(file);
   const a = document.createElement("a");
   a.href = url;
-  a.download = name;
+  a.download = file.name;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Hand files to the device: native share sheet on phones (so they land in
+// Messages/Photos), download on desktop.
+//
+// IMPORTANT: navigator.share() only works while the click that triggered it
+// still holds "transient activation" (~5s). Exports that render first — the
+// all-backgrounds sheet, serialized sets, the foil PDF — blow past that window,
+// so share() rejects with NotAllowedError ("not allowed by the user agent…").
+// We must not surface that: fall back to a download instead. A genuine user
+// cancel (AbortError) is respected — no download, no error.
+async function deliverFiles(files: File[]) {
+  if (files.length && navigator.canShare?.({ files })) {
+    try {
+      await navigator.share({ files });
+      return;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      // Activation expired / unsupported / share failed — download instead.
+    }
+  }
+  for (const file of files) {
+    downloadFile(file);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+async function exportCardImages(front: Blob, back: Blob) {
+  await deliverFiles([
+    new File([front], "card-front.png", { type: "image/png" }),
+    new File([back], "card-back.png", { type: "image/png" }),
+  ]);
+}
+
+async function shareFile(blob: Blob, name: string) {
+  await deliverFiles([new File([blob], name, { type: blob.type || "image/png" })]);
 }
 
 function canvasToPngBlob(c: HTMLCanvasElement): Promise<Blob> {
