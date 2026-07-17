@@ -62,7 +62,7 @@ export default async function TeamDetailPage({
     supabase
       .from("roster")
       .select(
-        `id, jersey_number, status,
+        `id, jersey_number, status, tags,
          players(
            id, first_name, last_name, date_of_birth,
            player_parents(parents(id, first_name, last_name, phone, email))
@@ -70,6 +70,13 @@ export default async function TeamDetailPage({
       )
       .eq("team_id", id),
   ]);
+
+  // Reusable per-coach roster tag categories (values live per roster entry).
+  const { data: tagTypesRaw } = await supabase
+    .from("roster_tag_types")
+    .select("id, name, options, position")
+    .order("position", { ascending: true });
+  const tagTypes = (tagTypesRaw ?? []) as import("@/lib/types").RosterTagType[];
 
   if (!team) notFound();
 
@@ -211,7 +218,7 @@ export default async function TeamDetailPage({
             </div>
           ) : (
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            <RosterTable roster={sorted as any} teamId={id} primaryPhotos={primaryPhotos} team={{ name: t.name, organization: t.organization, season: t.season, sport: t.sport }} />
+            <RosterTable roster={sorted as any} teamId={id} primaryPhotos={primaryPhotos} tagTypes={tagTypes} team={{ name: t.name, organization: t.organization, season: t.season, sport: t.sport }} />
           )}
 
           {/* Past seasons of this team */}

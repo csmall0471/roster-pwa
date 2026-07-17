@@ -167,6 +167,15 @@ export type EventFieldType =
   | "yesno"
   | "date";
 
+// A reusable roster tag category (per coach). Values are stored per roster entry
+// (team + player) in roster.tags, keyed by this id.
+export interface RosterTagType {
+  id: string;
+  name: string;
+  options: string[];
+  position: number;
+}
+
 export interface EventRecord {
   id: string;
   team_id: string | null;

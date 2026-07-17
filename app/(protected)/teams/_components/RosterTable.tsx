@@ -4,7 +4,14 @@ import { useState, useTransition, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { removeFromRoster, updateRosterEntry } from "../roster-actions";
+import {
+  setRosterTag,
+  createRosterTagType,
+  updateRosterTagType,
+  deleteRosterTagType,
+} from "../roster-tag-actions";
 import MessageComposer from "../../players/_components/MessageComposer";
+import type { RosterTagType } from "@/lib/types";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -51,6 +58,7 @@ type RosterEntry = {
   id: string;
   jersey_number: number | null;
   status: string;
+  tags?: Record<string, string> | null;
   players: RosterPlayer;
 };
 
@@ -60,14 +68,18 @@ export default function RosterTable({
   roster,
   teamId,
   primaryPhotos = {},
+  tagTypes: initialTagTypes = [],
   team,
 }: {
   roster: RosterEntry[];
   teamId: string;
   primaryPhotos?: Record<string, string>;
+  tagTypes?: RosterTagType[];
   team?: { name: string; organization?: string | null; season?: string | null; sport?: string | null };
 }) {
   const [messageChannel, setMessageChannel] = useState<"email" | "text" | null>(null);
+  const [tagTypes, setTagTypes] = useState<RosterTagType[]>(initialTagTypes);
+  const [managingTags, setManagingTags] = useState(false);
 
   const isCcvFootball =
     team?.organization === "CCV" &&
@@ -105,6 +117,12 @@ export default function RosterTable({
         </p>
         <div className="flex gap-2">
           <button
+            onClick={() => setManagingTags(true)}
+            className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            🏷️ Tags
+          </button>
+          <button
             onClick={() => setMessageChannel("email")}
             className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
           >
@@ -128,6 +146,7 @@ export default function RosterTable({
             teamId={teamId}
             photoUrl={primaryPhotos[entry.players.id]}
             showEligibility={isCcvFootball}
+            tagTypes={tagTypes}
           />
         ))}
       </div>
@@ -161,6 +180,14 @@ export default function RosterTable({
           teamContext={team}
         />
       )}
+
+      {managingTags && (
+        <TagTypesManager
+          tagTypes={tagTypes}
+          onChange={setTagTypes}
+          onClose={() => setManagingTags(false)}
+        />
+      )}
     </div>
   );
 }
@@ -172,11 +199,13 @@ function RosterRow({
   teamId,
   photoUrl,
   showEligibility = false,
+  tagTypes = [],
 }: {
   entry: RosterEntry;
   teamId: string;
   photoUrl?: string;
   showEligibility?: boolean;
+  tagTypes?: RosterTagType[];
 }) {
   const [jersey, setJersey] = useState(entry.jersey_number?.toString() ?? "");
   const [status, setStatus] = useState<"active" | "inactive">(
@@ -313,6 +342,20 @@ function RosterRow({
               ))}
             </div>
           )}
+
+          {tagTypes.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {tagTypes.map((tt) => (
+                <TagControl
+                  key={tt.id}
+                  rosterId={entry.id}
+                  teamId={teamId}
+                  tagType={tt}
+                  value={entry.tags?.[tt.id] ?? ""}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -336,6 +379,215 @@ function RosterRow({
 
           <button onClick={handleRemove} className="text-red-500 hover:underline">
             Remove
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Roster tags ───────────────────────────────────────────────
+const mgrInput =
+  "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 focus:border-blue-500 focus:outline-none";
+
+const parseOptions = (s: string) => s.split(",").map((o) => o.trim()).filter(Boolean);
+
+// One tag chip on a roster row: a compact select that saves per (team, player).
+function TagControl({
+  rosterId,
+  teamId,
+  tagType,
+  value,
+}: {
+  rosterId: string;
+  teamId: string;
+  tagType: RosterTagType;
+  value: string;
+}) {
+  // Sync from the prop during render (not an effect) so a fresh server value
+  // after revalidation is reflected without cascading renders.
+  const [val, setVal] = useState(value);
+  const [seen, setSeen] = useState(value);
+  if (value !== seen) {
+    setSeen(value);
+    setVal(value);
+  }
+  const [pending, start] = useTransition();
+
+  function change(next: string) {
+    setVal(next);
+    start(async () => {
+      await setRosterTag(rosterId, teamId, tagType.id, next);
+    });
+  }
+
+  const set = Boolean(val);
+  return (
+    <label
+      title={tagType.name}
+      className={`inline-flex items-center gap-1 rounded-full border pl-2 pr-1 py-0.5 ${
+        set
+          ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300"
+          : "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-500"
+      } ${pending ? "opacity-50" : ""}`}
+    >
+      <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70">{tagType.name}</span>
+      <select
+        value={val}
+        onChange={(e) => change(e.target.value)}
+        aria-label={tagType.name}
+        className="cursor-pointer bg-transparent text-xs font-medium focus:outline-none"
+      >
+        <option value="">—</option>
+        {tagType.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+        {val && !tagType.options.includes(val) && <option value={val}>{val}</option>}
+      </select>
+    </label>
+  );
+}
+
+function TagTypeEditor({
+  tagType,
+  disabled,
+  onSave,
+  onDelete,
+}: {
+  tagType: RosterTagType;
+  disabled: boolean;
+  onSave: (id: string, name: string, optionsStr: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [name, setName] = useState(tagType.name);
+  const [opts, setOpts] = useState(tagType.options.join(", "));
+  const dirty = name.trim() !== tagType.name || opts !== tagType.options.join(", ");
+  return (
+    <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+      <input className={mgrInput} value={name} onChange={(e) => setName(e.target.value)} />
+      <input
+        className={mgrInput}
+        value={opts}
+        onChange={(e) => setOpts(e.target.value)}
+        placeholder="Options, comma-separated"
+      />
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => onSave(tagType.id, name, opts)}
+          disabled={disabled || !dirty || !name.trim()}
+          className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+        >
+          Save
+        </button>
+        <button
+          onClick={() => onDelete(tagType.id)}
+          disabled={disabled}
+          className="text-xs font-medium text-red-600 hover:underline disabled:opacity-40"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TagTypesManager({
+  tagTypes,
+  onChange,
+  onClose,
+}: {
+  tagTypes: RosterTagType[];
+  onChange: (next: RosterTagType[]) => void;
+  onClose: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newOptions, setNewOptions] = useState("");
+
+  function add() {
+    const name = newName.trim();
+    if (!name) return;
+    setError(null);
+    start(async () => {
+      const res = await createRosterTagType(name, parseOptions(newOptions));
+      if (res.error) setError(res.error);
+      else if (res.tagType) {
+        onChange([...tagTypes, res.tagType]);
+        setNewName("");
+        setNewOptions("");
+      }
+    });
+  }
+
+  function saveEdit(id: string, name: string, optionsStr: string) {
+    setError(null);
+    const options = parseOptions(optionsStr);
+    start(async () => {
+      const res = await updateRosterTagType(id, name, options);
+      if (res.error) setError(res.error);
+      else onChange(tagTypes.map((t) => (t.id === id ? { ...t, name: name.trim(), options } : t)));
+    });
+  }
+
+  function remove(id: string) {
+    if (!window.confirm("Delete this tag category? Players' values for it will no longer show.")) return;
+    setError(null);
+    start(async () => {
+      const res = await deleteRosterTagType(id);
+      if (res.error) setError(res.error);
+      else onChange(tagTypes.filter((t) => t.id !== id));
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4">
+      <div className="my-8 w-full max-w-lg rounded-2xl bg-white shadow-xl dark:bg-gray-900">
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-gray-800">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-white">Roster tag categories</h3>
+          <button onClick={onClose} className="text-sm text-gray-400 hover:text-gray-600">
+            ✕
+          </button>
+        </div>
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto px-5 py-4">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Categories are shared across all your teams; each player&apos;s value is saved per team.
+          </p>
+          {tagTypes.map((t) => (
+            <TagTypeEditor key={t.id} tagType={t} disabled={pending} onSave={saveEdit} onDelete={remove} />
+          ))}
+          <div className="space-y-2 rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">New category</p>
+            <input
+              className={mgrInput}
+              placeholder="Name (e.g. Registration status)"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <input
+              className={mgrInput}
+              placeholder="Options, comma-separated (e.g. Registered, Waitlisted)"
+              value={newOptions}
+              onChange={(e) => setNewOptions(e.target.value)}
+            />
+            <button
+              onClick={add}
+              disabled={pending || !newName.trim()}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Add category
+            </button>
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+        <div className="flex justify-end border-t border-gray-200 px-5 py-3 dark:border-gray-800">
+          <button
+            onClick={onClose}
+            className="rounded-lg bg-gray-900 px-4 py-1.5 text-sm font-semibold text-white dark:bg-white dark:text-gray-900"
+          >
+            Done
           </button>
         </div>
       </div>
