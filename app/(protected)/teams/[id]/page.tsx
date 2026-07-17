@@ -74,7 +74,7 @@ export default async function TeamDetailPage({
   // Reusable per-coach roster tag categories (values live per roster entry).
   const { data: tagTypesRaw } = await supabase
     .from("roster_tag_types")
-    .select("id, name, options, position")
+    .select("id, name, options, option_colors, position")
     .order("position", { ascending: true });
   const tagTypes = (tagTypesRaw ?? []) as import("@/lib/types").RosterTagType[];
 

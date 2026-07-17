@@ -44,9 +44,12 @@ export async function setRosterTag(
 
 // ── Tag categories (reusable across the coach's teams) ──────────────────────
 
+// One option = its label + a color-palette key ("" = auto color by position).
+export type TagOptionInput = { label: string; color: string };
+
 export async function createRosterTagType(
   name: string,
-  options: string[]
+  options: TagOptionInput[]
 ): Promise<{ error?: string; tagType?: RosterTagType }> {
   const supabase = await createClient();
   const {
@@ -56,7 +59,7 @@ export async function createRosterTagType(
 
   const clean = name.trim();
   if (!clean) return { error: "Name is required" };
-  const opts = dedupeOptions(options);
+  const { labels, colors } = splitOptions(options);
 
   const { data: last } = await supabase
     .from("roster_tag_types")
@@ -69,8 +72,8 @@ export async function createRosterTagType(
 
   const { data, error } = await supabase
     .from("roster_tag_types")
-    .insert({ user_id: user.id, name: clean, options: opts, position })
-    .select("id, name, options, position")
+    .insert({ user_id: user.id, name: clean, options: labels, option_colors: colors, position })
+    .select("id, name, options, option_colors, position")
     .single();
   if (error) return { error: error.message };
 
@@ -81,8 +84,8 @@ export async function createRosterTagType(
 export async function updateRosterTagType(
   id: string,
   name: string,
-  options: string[]
-): Promise<{ error?: string }> {
+  options: TagOptionInput[]
+): Promise<{ error?: string; tagType?: RosterTagType }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -91,16 +94,19 @@ export async function updateRosterTagType(
 
   const clean = name.trim();
   if (!clean) return { error: "Name is required" };
+  const { labels, colors } = splitOptions(options);
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("roster_tag_types")
-    .update({ name: clean, options: dedupeOptions(options) })
+    .update({ name: clean, options: labels, option_colors: colors })
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select("id, name, options, option_colors, position")
+    .single();
   if (error) return { error: error.message };
 
   revalidatePath("/teams");
-  return {};
+  return { tagType: data as RosterTagType };
 }
 
 // Removing a category leaves its values as orphaned keys in roster.tags; they're
@@ -123,15 +129,18 @@ export async function deleteRosterTagType(id: string): Promise<{ error?: string 
   return {};
 }
 
-function dedupeOptions(options: string[]): string[] {
+// Split option {label,color} pairs into index-aligned arrays, dropping blanks
+// and duplicate labels (case-insensitive) while keeping colors aligned.
+function splitOptions(options: TagOptionInput[]): { labels: string[]; colors: string[] } {
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const o of options) {
-    const v = o.trim();
-    if (v && !seen.has(v.toLowerCase())) {
-      seen.add(v.toLowerCase());
-      out.push(v);
-    }
+  const labels: string[] = [];
+  const colors: string[] = [];
+  for (const o of options ?? []) {
+    const label = (o.label ?? "").trim();
+    if (!label || seen.has(label.toLowerCase())) continue;
+    seen.add(label.toLowerCase());
+    labels.push(label);
+    colors.push((o.color ?? "").trim());
   }
-  return out;
+  return { labels, colors };
 }

@@ -173,6 +173,9 @@ export interface RosterTagType {
   id: string;
   name: string;
   options: string[];
+  // Per-option color key (palette name), index-aligned with `options`. May be
+  // shorter than options / contain "" — those fall back to an auto color.
+  option_colors: string[];
   position: number;
 }
 

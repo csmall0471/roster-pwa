@@ -390,7 +390,86 @@ function RosterRow({
 const mgrInput =
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 focus:border-blue-500 focus:outline-none";
 
-const parseOptions = (s: string) => s.split(",").map((o) => o.trim()).filter(Boolean);
+// Color palette for tag options — full static class strings so Tailwind keeps
+// them. `chip` styles the roster chip; `swatch` is the picker dot.
+const TAG_PALETTE: { key: string; chip: string; swatch: string }[] = [
+  { key: "gray",   chip: "border-gray-200 bg-gray-100 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300", swatch: "bg-gray-400" },
+  { key: "red",    chip: "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300", swatch: "bg-red-500" },
+  { key: "orange", chip: "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900 dark:bg-orange-950 dark:text-orange-300", swatch: "bg-orange-500" },
+  { key: "amber",  chip: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300", swatch: "bg-amber-500" },
+  { key: "green",  chip: "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300", swatch: "bg-green-500" },
+  { key: "teal",   chip: "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950 dark:text-teal-300", swatch: "bg-teal-500" },
+  { key: "blue",   chip: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300", swatch: "bg-blue-500" },
+  { key: "purple", chip: "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900 dark:bg-purple-950 dark:text-purple-300", swatch: "bg-purple-500" },
+  { key: "pink",   chip: "border-pink-200 bg-pink-50 text-pink-700 dark:border-pink-900 dark:bg-pink-950 dark:text-pink-300", swatch: "bg-pink-500" },
+];
+const PALETTE_BY_KEY = new Map(TAG_PALETTE.map((c) => [c.key, c]));
+// Distinct auto color for an option with no explicit pick (skips gray).
+const autoColorKey = (index: number) => TAG_PALETTE[1 + (index % (TAG_PALETTE.length - 1))].key;
+// Chip classes for the value currently selected on a tag.
+function chipClassesFor(tagType: RosterTagType, value: string): string {
+  const idx = tagType.options.indexOf(value);
+  if (idx < 0) return TAG_PALETTE[0].chip; // legacy/unknown value → neutral
+  const key = tagType.option_colors?.[idx] || autoColorKey(idx);
+  return (PALETTE_BY_KEY.get(key) ?? TAG_PALETTE[0]).chip;
+}
+
+type OptDraft = { label: string; color: string };
+
+function ColorSwatches({ value, onChange }: { value: string; onChange: (key: string) => void }) {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-1">
+      {TAG_PALETTE.map((c) => (
+        <button
+          key={c.key}
+          type="button"
+          onClick={() => onChange(c.key)}
+          aria-label={c.key}
+          className={`h-4 w-4 rounded-full ${c.swatch} ${
+            value === c.key
+              ? "ring-2 ring-gray-500 ring-offset-1 dark:ring-offset-gray-900"
+              : "opacity-50 hover:opacity-100"
+          }`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function OptionsEditor({ options, onChange }: { options: OptDraft[]; onChange: (next: OptDraft[]) => void }) {
+  const update = (i: number, patch: Partial<OptDraft>) =>
+    onChange(options.map((o, j) => (j === i ? { ...o, ...patch } : o)));
+  return (
+    <div className="space-y-1.5">
+      {options.map((o, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input
+            className={`${mgrInput} flex-1`}
+            placeholder="Option label"
+            value={o.label}
+            onChange={(e) => update(i, { label: e.target.value })}
+          />
+          <ColorSwatches value={o.color || autoColorKey(i)} onChange={(color) => update(i, { color })} />
+          <button
+            type="button"
+            onClick={() => onChange(options.filter((_, j) => j !== i))}
+            className="shrink-0 text-sm text-gray-400 hover:text-red-500"
+            aria-label="Remove option"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...options, { label: "", color: autoColorKey(options.length) }])}
+        className="text-xs font-medium text-blue-600 hover:underline"
+      >
+        + Add option
+      </button>
+    </div>
+  );
+}
 
 // One tag chip on a roster row: a compact select that saves per (team, player).
 function TagControl({
@@ -421,15 +500,15 @@ function TagControl({
     });
   }
 
-  const set = Boolean(val);
+  const chipCls = val
+    ? chipClassesFor(tagType, val)
+    : "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-500";
   return (
     <label
       title={tagType.name}
-      className={`inline-flex items-center gap-1 rounded-full border pl-2 pr-1 py-0.5 ${
-        set
-          ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300"
-          : "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-500"
-      } ${pending ? "opacity-50" : ""}`}
+      className={`inline-flex items-center gap-1 rounded-full border pl-2 pr-1 py-0.5 ${chipCls} ${
+        pending ? "opacity-50" : ""
+      }`}
     >
       <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70">{tagType.name}</span>
       <select
@@ -458,25 +537,21 @@ function TagTypeEditor({
 }: {
   tagType: RosterTagType;
   disabled: boolean;
-  onSave: (id: string, name: string, optionsStr: string) => void;
+  onSave: (id: string, name: string, options: OptDraft[]) => void;
   onDelete: (id: string) => void;
 }) {
   const [name, setName] = useState(tagType.name);
-  const [opts, setOpts] = useState(tagType.options.join(", "));
-  const dirty = name.trim() !== tagType.name || opts !== tagType.options.join(", ");
+  const [options, setOptions] = useState<OptDraft[]>(
+    tagType.options.map((label, i) => ({ label, color: tagType.option_colors?.[i] || autoColorKey(i) }))
+  );
   return (
     <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
       <input className={mgrInput} value={name} onChange={(e) => setName(e.target.value)} />
-      <input
-        className={mgrInput}
-        value={opts}
-        onChange={(e) => setOpts(e.target.value)}
-        placeholder="Options, comma-separated"
-      />
-      <div className="flex items-center gap-3">
+      <OptionsEditor options={options} onChange={setOptions} />
+      <div className="flex items-center gap-3 pt-1">
         <button
-          onClick={() => onSave(tagType.id, name, opts)}
-          disabled={disabled || !dirty || !name.trim()}
+          onClick={() => onSave(tagType.id, name, options)}
+          disabled={disabled || !name.trim()}
           className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
         >
           Save
@@ -502,33 +577,36 @@ function TagTypesManager({
   onChange: (next: RosterTagType[]) => void;
   onClose: () => void;
 }) {
+  const freshOptions = (): OptDraft[] => [
+    { label: "", color: autoColorKey(0) },
+    { label: "", color: autoColorKey(1) },
+  ];
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
-  const [newOptions, setNewOptions] = useState("");
+  const [newOptions, setNewOptions] = useState<OptDraft[]>(freshOptions);
 
   function add() {
     const name = newName.trim();
     if (!name) return;
     setError(null);
     start(async () => {
-      const res = await createRosterTagType(name, parseOptions(newOptions));
+      const res = await createRosterTagType(name, newOptions);
       if (res.error) setError(res.error);
       else if (res.tagType) {
         onChange([...tagTypes, res.tagType]);
         setNewName("");
-        setNewOptions("");
+        setNewOptions(freshOptions());
       }
     });
   }
 
-  function saveEdit(id: string, name: string, optionsStr: string) {
+  function saveEdit(id: string, name: string, options: OptDraft[]) {
     setError(null);
-    const options = parseOptions(optionsStr);
     start(async () => {
       const res = await updateRosterTagType(id, name, options);
       if (res.error) setError(res.error);
-      else onChange(tagTypes.map((t) => (t.id === id ? { ...t, name: name.trim(), options } : t)));
+      else if (res.tagType) onChange(tagTypes.map((t) => (t.id === id ? res.tagType! : t)));
     });
   }
 
@@ -566,12 +644,7 @@ function TagTypesManager({
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
-            <input
-              className={mgrInput}
-              placeholder="Options, comma-separated (e.g. Registered, Waitlisted)"
-              value={newOptions}
-              onChange={(e) => setNewOptions(e.target.value)}
-            />
+            <OptionsEditor options={newOptions} onChange={setNewOptions} />
             <button
               onClick={add}
               disabled={pending || !newName.trim()}

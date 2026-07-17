@@ -6,13 +6,18 @@
 -- keyed by tag_type id); definitions live in roster_tag_types.
 
 CREATE TABLE IF NOT EXISTS roster_tag_types (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name       text NOT NULL,
-  options    text[] NOT NULL DEFAULT '{}',
-  position   int  NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name          text NOT NULL,
+  options       text[] NOT NULL DEFAULT '{}',
+  -- Per-option color key (palette name), index-aligned with `options`. "" = auto.
+  option_colors text[] NOT NULL DEFAULT '{}',
+  position      int  NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- Idempotent add for DBs where the table predates option_colors.
+ALTER TABLE roster_tag_types ADD COLUMN IF NOT EXISTS option_colors text[] NOT NULL DEFAULT '{}';
 
 CREATE INDEX IF NOT EXISTS roster_tag_types_user ON roster_tag_types (user_id);
 
