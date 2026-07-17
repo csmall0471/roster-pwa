@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { track } from "@vercel/analytics";
 import { assignPhotoToTeam } from "@/app/(protected)/players/photo-actions";
+import { fetchCardForPrint } from "@/lib/cardgen/print-normalize";
 
 type TeamPhoto = {
   id: string;
@@ -26,12 +27,6 @@ function cardFileName(photo: TeamPhoto, side: "front" | "back") {
     ? `${photo.players.first_name}-${photo.players.last_name}`
     : [photo.team_name, photo.season].filter(Boolean).join("-") || "card";
   return `${who.replace(/\s+/g, "-")}-${side}.jpg`;
-}
-
-async function fetchAsFile(url: string, name: string): Promise<File> {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  return new File([blob], name, { type: blob.type || "image/jpeg" });
 }
 
 function PhotoCard({
@@ -114,15 +109,22 @@ export default function TeamCards({
     try {
       const files: File[] = [];
       for (const p of photos) {
-        files.push(await fetchAsFile(p.public_url, cardFileName(p, "front")));
+        files.push(await fetchCardForPrint(p.public_url, cardFileName(p, "front")));
         if (p.back_public_url) {
-          files.push(await fetchAsFile(p.back_public_url, cardFileName(p, "back")));
+          files.push(await fetchCardForPrint(p.back_public_url, cardFileName(p, "back")));
         }
       }
       track("team_cards_download_all", { team: teamId, files: files.length });
+      // Share sheet on phones — but only while the click still holds activation.
+      // Fetching/normalizing every card can outlast that window, so fall back to
+      // downloads if share() fails for anything but a deliberate cancel.
       if (navigator.canShare?.({ files })) {
-        await navigator.share({ files });
-        return;
+        try {
+          await navigator.share({ files });
+          return;
+        } catch (e) {
+          if (e instanceof DOMException && e.name === "AbortError") return;
+        }
       }
       for (const file of files) {
         const url = URL.createObjectURL(file);

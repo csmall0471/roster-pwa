@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { track } from "@vercel/analytics";
 import { logClientActivity } from "@/app/actions/log-activity";
 import { deletePlayerPhoto } from "@/app/(protected)/players/photo-actions";
+import { fetchCardForPrint } from "@/lib/cardgen/print-normalize";
 
 type PhotoCard = {
   id: string;
@@ -23,20 +24,14 @@ function photoFileName(photo: PhotoCard, side?: "front" | "back") {
   return `${label.replace(/\s+/g, "-")}${suffix}.jpg`;
 }
 
-async function fetchAsFile(url: string, name: string): Promise<File> {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  return new File([blob], name, { type: blob.type || "image/jpeg" });
-}
-
 // Saves all card sides to the photo library. On mobile, navigator.share
 // surfaces "Save to Photos / Save to Files"; on desktop, falls back to
 // sequential browser downloads.
 async function exportPhotoToLibrary(photo: PhotoCard) {
   const files: File[] = [];
-  files.push(await fetchAsFile(photo.public_url, photoFileName(photo, photo.back_public_url ? "front" : undefined)));
+  files.push(await fetchCardForPrint(photo.public_url, photoFileName(photo, photo.back_public_url ? "front" : undefined)));
   if (photo.back_public_url) {
-    files.push(await fetchAsFile(photo.back_public_url, photoFileName(photo, "back")));
+    files.push(await fetchCardForPrint(photo.back_public_url, photoFileName(photo, "back")));
   }
 
   track("player_card_download", {
@@ -51,8 +46,14 @@ async function exportPhotoToLibrary(photo: PhotoCard) {
   }).catch(() => {});
 
   if (navigator.canShare?.({ files })) {
-    await navigator.share({ files });
-    return;
+    try {
+      await navigator.share({ files });
+      return;
+    } catch (e) {
+      // Activation may have lapsed while normalizing — fall back to download
+      // unless the user deliberately cancelled the share sheet.
+      if (e instanceof DOMException && e.name === "AbortError") return;
+    }
   }
   // Desktop fallback: download each file individually.
   for (const file of files) {
@@ -125,10 +126,10 @@ export default function PhotoCardGallery({
       const files: File[] = [];
       for (const p of photos) {
         files.push(
-          await fetchAsFile(p.public_url, photoFileName(p, p.back_public_url ? "front" : undefined))
+          await fetchCardForPrint(p.public_url, photoFileName(p, p.back_public_url ? "front" : undefined))
         );
         if (p.back_public_url) {
-          files.push(await fetchAsFile(p.back_public_url, photoFileName(p, "back")));
+          files.push(await fetchCardForPrint(p.back_public_url, photoFileName(p, "back")));
         }
       }
       if (navigator.canShare?.({ files })) {

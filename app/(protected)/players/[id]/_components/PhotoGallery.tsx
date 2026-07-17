@@ -6,6 +6,7 @@ import { track } from "@vercel/analytics";
 import { logClientActivity } from "@/app/actions/log-activity";
 import type { PlayerPhoto } from "@/lib/types";
 import { setPrimaryPhoto, deletePlayerPhoto, assignPhotoToTeam } from "../../photo-actions";
+import { fetchCardForPrint } from "@/lib/cardgen/print-normalize";
 
 type PlayerTeam = { id: string; name: string; season: string | null };
 
@@ -15,21 +16,15 @@ async function exportCardToLibrary(photo: PlayerPhoto) {
   const label =
     [photo.team_name, photo.season].filter(Boolean).join("-").replace(/\s+/g, "-") ||
     "card";
-  const fetchAsFile = async (url: string, name: string) => {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    return new File([blob], name, { type: blob.type || "image/jpeg" });
-  };
-
   const files: File[] = [];
   files.push(
-    await fetchAsFile(
+    await fetchCardForPrint(
       photo.public_url,
       `${label}${photo.back_public_url ? "-front" : ""}.jpg`
     )
   );
   if (photo.back_public_url) {
-    files.push(await fetchAsFile(photo.back_public_url, `${label}-back.jpg`));
+    files.push(await fetchCardForPrint(photo.back_public_url, `${label}-back.jpg`));
   }
 
   track("player_card_download", {
@@ -44,8 +39,14 @@ async function exportCardToLibrary(photo: PlayerPhoto) {
   }).catch(() => {});
 
   if (navigator.canShare?.({ files })) {
-    await navigator.share({ files });
-    return;
+    try {
+      await navigator.share({ files });
+      return;
+    } catch (e) {
+      // Activation may have lapsed while normalizing — fall back to download
+      // unless the user deliberately cancelled the share sheet.
+      if (e instanceof DOMException && e.name === "AbortError") return;
+    }
   }
   for (const file of files) {
     const url = URL.createObjectURL(file);

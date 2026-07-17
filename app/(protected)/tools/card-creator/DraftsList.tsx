@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { track } from "@vercel/analytics";
 import { deleteCardDraft } from "./draft-actions";
+import { fetchCardForPrint } from "@/lib/cardgen/print-normalize";
 
 export type DraftRow = {
   id: string;
@@ -22,12 +23,6 @@ function draftFileName(d: DraftRow, side: "front" | "back") {
   const who =
     d.player_name || d.label || [d.team_name, d.season].filter(Boolean).join("-") || "card";
   return `${who.replace(/\s+/g, "-")}-${side}.png`;
-}
-
-async function fetchAsFile(url: string, name: string): Promise<File> {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  return new File([blob], name, { type: blob.type || "image/png" });
 }
 
 export default function DraftsList({
@@ -76,8 +71,8 @@ export default function DraftsList({
       const chosen = drafts.filter((d) => selected.has(d.id));
       const files: File[] = [];
       for (const d of chosen) {
-        if (d.front_url) files.push(await fetchAsFile(d.front_url, draftFileName(d, "front")));
-        if (d.back_url) files.push(await fetchAsFile(d.back_url, draftFileName(d, "back")));
+        if (d.front_url) files.push(await fetchCardForPrint(d.front_url, draftFileName(d, "front")));
+        if (d.back_url) files.push(await fetchCardForPrint(d.back_url, draftFileName(d, "back")));
       }
       if (files.length === 0) return;
       track("card_drafts_download", { drafts: chosen.length, files: files.length });
