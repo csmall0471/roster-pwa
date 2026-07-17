@@ -5,6 +5,7 @@ import type { CardDesign } from "@/lib/types";
 import CardEditor, { type AssignTarget } from "@/app/_components/cardgen/CardEditor";
 import { toAssignTargets } from "@/app/_components/cardgen/assign-targets";
 import DraftsList, { type DraftRow } from "./DraftsList";
+import SeasonCardsSaver, { type SeasonGroup } from "./SeasonCardsSaver";
 
 // Standalone card creator (Tools → Card Creator). Build a card from any photo
 // without first picking a player; the finished card exports to the photo
@@ -54,6 +55,54 @@ export default async function CardCreatorPage({
   const nameById = new Map(
     (players ?? []).map((p) => [p.id as string, `${p.first_name} ${p.last_name}`.trim()])
   );
+
+  // Every card from the coach's in-progress seasons, so they can be saved in one
+  // shot. "In progress" = the season is currently active (started, not ended) —
+  // same rule as the Teams page. Cards live on player_photos, scoped by team.
+  let inProgressSeasons: SeasonGroup[] = [];
+  if (isOwner) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: teamRows } = await supabase
+      .from("teams")
+      .select("id, name, season, season_start, season_end")
+      .eq("user_id", user.id);
+    const current = (teamRows ?? []).filter((t) => {
+      const start = t.season_start as string | null;
+      const end = t.season_end as string | null;
+      if (end && end < today) return false; // already finished
+      if (start && start > today) return false; // not started yet
+      return true; // in progress
+    });
+    const currentIds = current.map((t) => t.id as string);
+    if (currentIds.length > 0) {
+      const { data: cardRows } = await supabase
+        .from("player_photos")
+        .select("public_url, back_public_url, team_id, players(first_name, last_name)")
+        .in("team_id", currentIds)
+        .order("created_at", { ascending: false });
+      const byTeam = new Map<string, SeasonGroup>();
+      for (const t of current) {
+        byTeam.set(t.id as string, {
+          teamId: t.id as string,
+          teamName: (t.name as string) || "Team",
+          season: (t.season as string | null) ?? null,
+          cards: [],
+        });
+      }
+      for (const row of cardRows ?? []) {
+        const group = byTeam.get(row.team_id as string);
+        if (!group) continue;
+        const p = row.players as unknown as { first_name: string; last_name: string } | null;
+        const who = p ? `${p.first_name} ${p.last_name}`.trim() : "";
+        group.cards.push({
+          front: row.public_url as string,
+          back: (row.back_public_url as string | null) ?? null,
+          name: who || "card",
+        });
+      }
+      inProgressSeasons = [...byTeam.values()].filter((g) => g.cards.length > 0);
+    }
+  }
 
   // Reopen a draft (owner only). RLS scopes to this user. Try the assignment
   // columns first; fall back if the player_id/team_id migration isn't applied.
@@ -109,6 +158,8 @@ export default async function CardCreatorPage({
           {isOwner ? ", or save it as a draft for a player that isn't assigned yet" : ""}.
         </p>
       </div>
+
+      {isOwner && <SeasonCardsSaver seasons={inProgressSeasons} />}
 
       <CardEditor
         key={draftId ?? "new"}
