@@ -6,10 +6,20 @@ import { pngBlobWithDpi } from "./png-dpi";
 // and text survive. So we composite the card on a real canvas: vector layers
 // (gradient background, text/plates) are captured with html-to-image, and the
 // raster layers (photo, signature, headshot) are drawn with drawImage, which
-// iOS handles reliably. Output is a true 2.5"×3.5" card: 750×1050 @ 300 DPI.
+// iOS handles reliably. Internally the card renders at its 2.5"×3.5" trim
+// proportions (W×H); on export it's scaled to fill a 2.6"×3.6" bleed canvas so
+// the background runs off every edge, at 350 DPI (see compositeFront/Back).
 
 const W = 750;
 const H = 1050;
+
+// Print export target: 2.6×3.6" (2.5×3.5 trim + 0.05" bleed all around) at
+// 350 DPI — the printer requires bleed + 300–350 DPI. The trim is rendered
+// high-res, then cover-scaled up to add the bleed (background to the edge).
+const EXPORT_DPI = 350;
+const EXPORT_TRIM_W = Math.round(2.5 * EXPORT_DPI); // 875
+const EXPORT_BLEED_W = Math.round(2.6 * EXPORT_DPI); // 910
+const EXPORT_BLEED_H = Math.round(3.6 * EXPORT_DPI); // 1260
 
 async function loadImage(src: string): Promise<HTMLImageElement> {
   const img = new Image();
@@ -101,8 +111,11 @@ export async function compositeFrontCanvas(
 }
 
 export async function compositeFront(L: FrontLayers): Promise<Blob> {
-  const canvas = await compositeFrontCanvas(L, W);
-  return pngBlobWithDpi(canvas.toDataURL("image/png"), 300);
+  // High-res trim render, then cover-scale to the 2.6×3.6" bleed size so the
+  // background bleeds off all four edges. Stamped at 350 DPI.
+  const trim = await compositeFrontCanvas(L, EXPORT_TRIM_W);
+  const bled = coverIntoCanvas(trim, EXPORT_BLEED_W, EXPORT_BLEED_H, "#ffffff");
+  return pngBlobWithDpi(bled.toDataURL("image/png"), EXPORT_DPI);
 }
 
 // ── Raised Foil export (separate from the normal PNG path) ─────────────────
@@ -257,22 +270,28 @@ async function drawCircle(
   ctx.stroke();
 }
 
-export async function compositeBack(L: BackLayers): Promise<Blob> {
+// Composite the back at an arbitrary output width (height keeps the 5:7 ratio).
+// All positions are fractions of outW/outH, so it scales to any resolution.
+async function compositeBackCanvas(
+  L: BackLayers,
+  outW: number
+): Promise<HTMLCanvasElement> {
+  const outH = Math.round(outW * (H / W));
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d")!;
 
   // 1. Everything except the (raster) headshot — gradient + text/panel survive.
-  ctx.drawImage(await layerCanvas(L.backEl, W), 0, 0, W, H);
+  ctx.drawImage(await layerCanvas(L.backEl, outW), 0, 0, outW, outH);
 
   // 2. Headshot circle, upper-right (matches CardBack's CSS box) with its pan.
   if (L.headshotSrc) {
     const img = await loadImage(L.headshotSrc);
     if (img.naturalWidth) {
-      const size = 0.22 * W;
-      const left = 0.905 * W - size; // right: 9.5% (matches CardBack's inset)
-      const top = 0.035 * H; // top: 3.5%
+      const size = 0.22 * outW;
+      const left = 0.905 * outW - size; // right: 9.5% (matches CardBack's inset)
+      const top = 0.035 * outH; // top: 3.5%
       const r = Math.max(size / img.naturalWidth, size / img.naturalHeight); // cover
       const dw = img.naturalWidth * r;
       const dh = img.naturalHeight * r;
@@ -288,8 +307,8 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
       ctx.drawImage(img, left + ox, top + oy, dw, dh);
       ctx.restore();
       ctx.beginPath();
-      ctx.arc(cx, cy, rad - 0.007 * W, 0, Math.PI * 2);
-      ctx.lineWidth = 0.014 * W;
+      ctx.arc(cx, cy, rad - 0.007 * outW, 0, Math.PI * 2);
+      ctx.lineWidth = 0.014 * outW;
       ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.stroke();
     }
@@ -302,7 +321,7 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
     if (el) {
       const br = L.backEl.getBoundingClientRect();
       const er = el.getBoundingClientRect();
-      const s = W / (br.width || W);
+      const s = outW / (br.width || outW);
       await drawCircle(
         ctx,
         L.lookalikeSrc,
@@ -310,11 +329,18 @@ export async function compositeBack(L: BackLayers): Promise<Blob> {
         (er.top - br.top) * s,
         er.width * s,
         er.height * s,
-        { width: 0.006 * W, color: "rgba(10,10,10,0.55)" },
+        { width: 0.006 * outW, color: "rgba(10,10,10,0.55)" },
         0.3 // bias toward the face
       );
     }
   }
 
-  return pngBlobWithDpi(canvas.toDataURL("image/png"), 300);
+  return canvas;
+}
+
+export async function compositeBack(L: BackLayers): Promise<Blob> {
+  // High-res trim render, then cover-scale to the 2.6×3.6" bleed size.
+  const trim = await compositeBackCanvas(L, EXPORT_TRIM_W);
+  const bled = coverIntoCanvas(trim, EXPORT_BLEED_W, EXPORT_BLEED_H, "#ffffff");
+  return pngBlobWithDpi(bled.toDataURL("image/png"), EXPORT_DPI);
 }

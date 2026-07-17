@@ -1118,25 +1118,31 @@ export default function CardEditor({
         rotation: sigRotation,
         widthFrac: 0.38 * sigScale,
       };
-      // Trim-size (2.5×3.5) base art + foil mask, rendered from the same layers
-      // so they line up pixel-for-pixel.
-      const baseCanvas = await compositeFrontCanvas({
-        bgEl: bgLayerRef.current!,
-        overlayEl: overlayLayerRef.current!,
-        cutoutSrc: cutoutDataUrl,
-        cutout: { tx, ty, scale, rotation },
-        sigSrc: sigDataUrl ?? sigUrl,
-        sig,
-      });
-      const maskCanvas = await compositeFoilMaskCanvas({
-        overlayEl: overlayLayerRef.current!,
-        selected: foilOn,
-        sigSrc: sigDataUrl ?? sigUrl,
-        sig,
-      });
-      // Add 0.05" bleed on each edge → 2.6×3.6" (780×1080 @ 300 DPI).
-      const base = coverIntoCanvas(baseCanvas, 780, 1080, "#fff");
-      const mask = coverIntoCanvas(maskCanvas, 780, 1080, "#000");
+      // High-res trim (2.5×3.5) base art + foil mask, rendered from the same
+      // layers so they line up pixel-for-pixel.
+      const baseCanvas = await compositeFrontCanvas(
+        {
+          bgEl: bgLayerRef.current!,
+          overlayEl: overlayLayerRef.current!,
+          cutoutSrc: cutoutDataUrl,
+          cutout: { tx, ty, scale, rotation },
+          sigSrc: sigDataUrl ?? sigUrl,
+          sig,
+        },
+        875
+      );
+      const maskCanvas = await compositeFoilMaskCanvas(
+        {
+          overlayEl: overlayLayerRef.current!,
+          selected: foilOn,
+          sigSrc: sigDataUrl ?? sigUrl,
+          sig,
+        },
+        875
+      );
+      // Add 0.05" bleed on each edge → 2.6×3.6" (910×1260 @ 350 DPI).
+      const base = coverIntoCanvas(baseCanvas, 910, 1260, "#fff");
+      const mask = coverIntoCanvas(maskCanvas, 910, 1260, "#000");
       const [baseBlob, maskBlob] = await Promise.all([
         canvasToPngBlob(base),
         canvasToPngBlob(mask),
