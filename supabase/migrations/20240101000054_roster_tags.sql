@@ -23,6 +23,9 @@ CREATE INDEX IF NOT EXISTS roster_tag_types_user ON roster_tag_types (user_id);
 
 ALTER TABLE roster_tag_types ENABLE ROW LEVEL SECURITY;
 
+-- DROP first so the whole migration stays re-runnable (Postgres has no
+-- CREATE POLICY IF NOT EXISTS).
+DROP POLICY IF EXISTS "roster_tag_types: owner full access" ON roster_tag_types;
 CREATE POLICY "roster_tag_types: owner full access"
   ON roster_tag_types FOR ALL
   USING      (auth.uid() = user_id)
