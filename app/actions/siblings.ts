@@ -57,6 +57,13 @@ function revalidate(playerId: string) {
 
 const eq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+// Split "First Last" — everything before the last token is the first name.
+function splitName(full: string): { firstName: string; lastName: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { firstName: full.trim(), lastName: "" };
+  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
+}
+
 export async function addSibling(
   playerId: string,
   name: string,
@@ -176,6 +183,92 @@ export async function linkPlayerSibling(
   revalidate(playerId);
   revalidate(siblingPlayerId);
   return {};
+}
+
+// Create a real roster player from a free-text sibling: mirror createPlayer
+// (player row + parent links), map the remembered attributes onto the player,
+// then convert the sibling into a symmetric linked-player sibling (via
+// linkPlayerSibling) so it stops showing as free text. Coach-only — parents
+// can't own player records. Returns the new player's id.
+export async function promoteSiblingToPlayer(
+  playerId: string,
+  siblingName: string
+): Promise<{ error?: string; newPlayerId?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authorized" };
+
+  // Auth via RLS: only the coach who owns this player can read it (and thus
+  // create players under their account).
+  const { data: player } = await supabase
+    .from("players")
+    .select("last_name")
+    .eq("id", playerId)
+    .maybeSingle();
+  if (!player) return { error: "Only the team's coach can promote a sibling." };
+
+  const { data: pp } = await supabase
+    .from("player_parents")
+    .select("parent_id")
+    .eq("player_id", playerId);
+  const parentIds = [...new Set((pp ?? []).map((r) => r.parent_id as string))];
+  if (!parentIds.length) return { error: "This player has no linked parents." };
+
+  // Find the free-text sibling (player_id null) by name; grab its attributes.
+  const service = createServiceClient();
+  const { data: sibRows } = await service
+    .from("siblings")
+    .select("id, name, attributes, player_id")
+    .in("parent_id", parentIds);
+  const matches = (sibRows ?? []).filter((r) => !r.player_id && eq(r.name as string, siblingName));
+  if (!matches.length) return { error: "Sibling not found." };
+
+  const attrs = (matches[0].attributes ?? {}) as Record<string, string | number | boolean>;
+  const str = (v: unknown) => (v !== undefined && v !== null && v !== "" ? String(v) : null);
+  const dobRaw = str(attrs["Birthdate"]);
+  const dob = dobRaw && /^\d{4}-\d{2}-\d{2}$/.test(dobRaw) ? dobRaw : null;
+  const { firstName, lastName } = splitName(matches[0].name as string);
+
+  const { data: newPlayer, error: insErr } = await supabase
+    .from("players")
+    .insert({
+      user_id: user.id,
+      first_name: firstName,
+      last_name: lastName || (player.last_name as string) || "",
+      date_of_birth: dob,
+      grade: str(attrs["Grade"]),
+      shirt_size: str(attrs["Shirt size"]),
+    })
+    .select("id")
+    .single();
+  if (insErr || !newPlayer) return { error: insErr?.message ?? "Couldn't create the player." };
+  const newId = newPlayer.id as string;
+
+  // Link the new player to the same family (both guardians).
+  const { error: ppErr } = await supabase.from("player_parents").insert(
+    parentIds.map((pid) => ({
+      player_id: newId,
+      parent_id: pid,
+      user_id: user.id,
+      relationship: "parent",
+    }))
+  );
+  if (ppErr) return { error: ppErr.message };
+
+  // Drop the old free-text sibling rows, then create the symmetric player link
+  // so the two kids show as siblings of each other.
+  await service.from("siblings").delete().in(
+    "id",
+    matches.map((r) => r.id)
+  );
+  await linkPlayerSibling(playerId, newId);
+
+  revalidatePath("/players");
+  revalidate(playerId);
+  revalidate(newId);
+  return { newPlayerId: newId };
 }
 
 export async function deleteSibling(

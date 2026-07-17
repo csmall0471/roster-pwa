@@ -7,6 +7,7 @@ import {
   updateSibling,
   deleteSibling,
   linkPlayerSibling,
+  promoteSiblingToPlayer,
   type SiblingItem,
 } from "@/app/actions/siblings";
 import { GRADE_OPTIONS, SHIRT_SIZE_OPTIONS } from "@/lib/types";
@@ -184,6 +185,43 @@ function SiblingForm({
   );
 }
 
+// Create a real player from a free-text sibling (coach only). On success we
+// land on the new player's page so the coach can add them to a team.
+function PromoteButton({ playerId, sibling }: { playerId: string; sibling: SiblingItem }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function promote() {
+    if (
+      !window.confirm(
+        `Create a new player from ${sibling.name}? They'll be added to your players and linked to this family — you can then put them on a team.`
+      )
+    )
+      return;
+    setError(null);
+    start(async () => {
+      const res = await promoteSiblingToPlayer(playerId, sibling.name);
+      if (res.error) setError(res.error);
+      else if (res.newPlayerId) router.push(`/players/${res.newPlayerId}`);
+    });
+  }
+
+  return (
+    <>
+      <button
+        onClick={promote}
+        disabled={pending}
+        title="Create a roster player from this sibling"
+        className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+      >
+        {pending ? "Promoting…" : "Promote to player"}
+      </button>
+      {error && <span className="text-xs text-red-600">{error}</span>}
+    </>
+  );
+}
+
 // A sibling that is itself a roster player: shown read-only with a badge and an
 // unlink button (their details live on their own player record).
 function LinkedRow({
@@ -298,11 +336,13 @@ export default function SiblingsSection({
   playerLastName = "",
   initialSiblings,
   linkablePlayers = [],
+  canPromote = false,
 }: {
   playerId: string;
   playerLastName?: string; // pre-fills a new sibling's last name (same family)
   initialSiblings: SiblingItem[];
   linkablePlayers?: LinkablePlayer[];
+  canPromote?: boolean; // coach view: allow promoting a sibling to a player
 }) {
   const [openName, setOpenName] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -345,21 +385,24 @@ export default function SiblingsSection({
           if (s.player_id) return <LinkedRow key={s.name} playerId={playerId} sibling={s} />;
           const isOpen = openName === s.name;
           const sub = summary(s);
+          const toggle = () => {
+            setOpenName(isOpen ? null : s.name);
+            setAdding(false);
+          };
           return (
             <div key={s.name}>
-              <button
-                onClick={() => {
-                  setOpenName(isOpen ? null : s.name);
-                  setAdding(false);
-                }}
-                className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-              >
-                <div className="min-w-0">
+              <div className="flex items-center gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                <button onClick={toggle} className="flex-1 min-w-0 text-left">
                   <span className="font-medium text-gray-900 dark:text-white text-sm">{s.name}</span>
                   {sub && <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">{sub}</span>}
+                </button>
+                <div className="flex items-center gap-3 shrink-0">
+                  {canPromote && <PromoteButton playerId={playerId} sibling={s} />}
+                  <button onClick={toggle} className="text-gray-400 text-xs hover:text-gray-600 dark:hover:text-gray-300">
+                    {isOpen ? "Close" : "Edit"}
+                  </button>
                 </div>
-                <span className="text-gray-400 text-xs">{isOpen ? "Close" : "Edit"}</span>
-              </button>
+              </div>
               {isOpen && (
                 <SiblingForm playerId={playerId} sibling={s} defaultLastName={playerLastName} onDone={() => setOpenName(null)} />
               )}
