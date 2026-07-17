@@ -89,7 +89,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           style={{
             background: "#fff",
             color: "#0a0a0a",
-            padding: "0.38em 1.6em 0.38em 8%",
+            padding: "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
             clipPath: "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
             fontFamily: "var(--font-anton), Impact, sans-serif",
             fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
@@ -105,7 +105,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             style={{
               background: "#0a0a0a",
               color: "#fff",
-              padding: "0.45em 1.6em 0.45em 8%",
+              padding: "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
               clipPath: "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
               fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
               fontSize: "calc(var(--cardw, 22rem) * 2.7 / 100)",

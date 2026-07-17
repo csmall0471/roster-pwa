@@ -1,5 +1,6 @@
 import { toCanvas } from "html-to-image";
 import { pngBlobWithDpi } from "./png-dpi";
+import { addPrintBleed, EXPORT_DPI, EXPORT_TRIM_W } from "@/lib/cardgen/print-bleed";
 
 // iOS Safari drops raster images (both <img> and CSS background images) inside
 // the SVG <foreignObject> that html-to-image renders through — only gradients
@@ -7,19 +8,11 @@ import { pngBlobWithDpi } from "./png-dpi";
 // (gradient background, text/plates) are captured with html-to-image, and the
 // raster layers (photo, signature, headshot) are drawn with drawImage, which
 // iOS handles reliably. Internally the card renders at its 2.5"×3.5" trim
-// proportions (W×H); on export it's scaled to fill a 2.6"×3.6" bleed canvas so
-// the background runs off every edge, at 350 DPI (see compositeFront/Back).
+// proportions (W×H); on export it's centered in a 2.6"×3.6" bleed canvas with
+// the background extended to every edge, at 350 DPI (see compositeFront/Back).
 
 const W = 750;
 const H = 1050;
-
-// Print export target: 2.6×3.6" (2.5×3.5 trim + 0.05" bleed all around) at
-// 350 DPI — the printer requires bleed + 300–350 DPI. The trim is rendered
-// high-res, then cover-scaled up to add the bleed (background to the edge).
-const EXPORT_DPI = 350;
-const EXPORT_TRIM_W = Math.round(2.5 * EXPORT_DPI); // 875
-const EXPORT_BLEED_W = Math.round(2.6 * EXPORT_DPI); // 910
-const EXPORT_BLEED_H = Math.round(3.6 * EXPORT_DPI); // 1260
 
 async function loadImage(src: string): Promise<HTMLImageElement> {
   const img = new Image();
@@ -35,13 +28,19 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   return img;
 }
 
-// Rasterize a DOM layer (vector/text/gradient) to an outW-wide canvas.
+// Rasterize a DOM layer (vector/text/gradient) to an outW-wide canvas. `style`
+// overrides are applied to the cloned node — used to drop the back card's
+// rounded corners on export so its background fills the rectangle (bleed).
 async function layerCanvas(
   el: HTMLElement,
-  outW: number
+  outW: number,
+  style?: Partial<CSSStyleDeclaration>
 ): Promise<HTMLCanvasElement> {
   const rect = el.getBoundingClientRect();
-  return toCanvas(el, { pixelRatio: outW / (rect.width || outW) });
+  return toCanvas(el, {
+    pixelRatio: outW / (rect.width || outW),
+    ...(style ? { style } : {}),
+  });
 }
 
 export type FrontLayers = {
@@ -111,11 +110,10 @@ export async function compositeFrontCanvas(
 }
 
 export async function compositeFront(L: FrontLayers): Promise<Blob> {
-  // High-res trim render, then cover-scale to the 2.6×3.6" bleed size so the
-  // background bleeds off all four edges. Stamped at 350 DPI.
+  // High-res trim render, centered in the 2.6×3.6" bleed canvas with the edges
+  // extended into the bleed (content keeps its safe margin). Stamped at 350 DPI.
   const trim = await compositeFrontCanvas(L, EXPORT_TRIM_W);
-  const bled = coverIntoCanvas(trim, EXPORT_BLEED_W, EXPORT_BLEED_H, "#ffffff");
-  return pngBlobWithDpi(bled.toDataURL("image/png"), EXPORT_DPI);
+  return pngBlobWithDpi(addPrintBleed(trim).toDataURL("image/png"), EXPORT_DPI);
 }
 
 // ── Raised Foil export (separate from the normal PNG path) ─────────────────
@@ -204,28 +202,6 @@ export async function compositeFoilMaskCanvas(
   return mask;
 }
 
-// Scale a trim-size (2.5×3.5) canvas to cover a bleed-size target, centered, so
-// the full-bleed art extends past the trim on all sides. `bg` fills the margin
-// before drawing — white for the base, black (no ink) for the mask.
-export function coverIntoCanvas(
-  src: HTMLCanvasElement,
-  targetW: number,
-  targetH: number,
-  bg: string
-): HTMLCanvasElement {
-  const out = document.createElement("canvas");
-  out.width = targetW;
-  out.height = targetH;
-  const ctx = out.getContext("2d")!;
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, targetW, targetH);
-  const s = Math.max(targetW / src.width, targetH / src.height);
-  const dw = src.width * s;
-  const dh = src.height * s;
-  ctx.drawImage(src, (targetW - dw) / 2, (targetH - dh) / 2, dw, dh);
-  return out;
-}
-
 export type BackLayers = {
   backEl: HTMLElement; // CardBack root (captured whole; raster layers redrawn on top)
   headshotSrc: string | null;
@@ -283,7 +259,15 @@ async function compositeBackCanvas(
   const ctx = canvas.getContext("2d")!;
 
   // 1. Everything except the (raster) headshot — gradient + text/panel survive.
-  ctx.drawImage(await layerCanvas(L.backEl, outW), 0, 0, outW, outH);
+  // Drop the rounded corners + shadow on export so the background fills the
+  // whole rectangle (the printer needs bleed into the corners).
+  ctx.drawImage(
+    await layerCanvas(L.backEl, outW, { borderRadius: "0px", boxShadow: "none" }),
+    0,
+    0,
+    outW,
+    outH
+  );
 
   // 2. Headshot circle, upper-right (matches CardBack's CSS box) with its pan.
   if (L.headshotSrc) {
@@ -339,8 +323,7 @@ async function compositeBackCanvas(
 }
 
 export async function compositeBack(L: BackLayers): Promise<Blob> {
-  // High-res trim render, then cover-scale to the 2.6×3.6" bleed size.
+  // High-res trim render, centered in the bleed canvas with edges extended.
   const trim = await compositeBackCanvas(L, EXPORT_TRIM_W);
-  const bled = coverIntoCanvas(trim, EXPORT_BLEED_W, EXPORT_BLEED_H, "#ffffff");
-  return pngBlobWithDpi(bled.toDataURL("image/png"), EXPORT_DPI);
+  return pngBlobWithDpi(addPrintBleed(trim).toDataURL("image/png"), EXPORT_DPI);
 }

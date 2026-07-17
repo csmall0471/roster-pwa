@@ -33,8 +33,8 @@ import {
   compositeFront,
   compositeBack,
   compositeFoilMaskCanvas,
-  coverIntoCanvas,
 } from "./card-raster";
+import { addPrintBleed, EXPORT_TRIM_W } from "@/lib/cardgen/print-bleed";
 import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign } from "@/lib/types";
 
@@ -1129,7 +1129,7 @@ export default function CardEditor({
           sigSrc: sigDataUrl ?? sigUrl,
           sig,
         },
-        875
+        EXPORT_TRIM_W
       );
       const maskCanvas = await compositeFoilMaskCanvas(
         {
@@ -1138,11 +1138,12 @@ export default function CardEditor({
           sigSrc: sigDataUrl ?? sigUrl,
           sig,
         },
-        875
+        EXPORT_TRIM_W
       );
-      // Add 0.05" bleed on each edge → 2.6×3.6" (910×1260 @ 350 DPI).
-      const base = coverIntoCanvas(baseCanvas, 910, 1260, "#fff");
-      const mask = coverIntoCanvas(maskCanvas, 910, 1260, "#000");
+      // Center each in the 2.6×3.6" (910×1260 @ 350 DPI) bleed canvas, edges
+      // extended into the bleed so the two stay in register.
+      const base = addPrintBleed(baseCanvas);
+      const mask = addPrintBleed(maskCanvas);
       const [baseBlob, maskBlob] = await Promise.all([
         canvasToPngBlob(base),
         canvasToPngBlob(mask),
@@ -1797,7 +1798,7 @@ export default function CardEditor({
             style={{
               background: "#fff",
               color: "#0a0a0a",
-              padding: "0.38em 1.6em 0.38em 8%",
+              padding: "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
               clipPath:
                 "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
               fontFamily: "var(--font-anton), Impact, sans-serif",
@@ -1814,7 +1815,7 @@ export default function CardEditor({
               style={{
                 background: "#0a0a0a",
                 color: "#fff",
-                padding: "0.45em 1.6em 0.45em 8%",
+                padding: "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
                 clipPath:
                   "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
                 fontFamily:
