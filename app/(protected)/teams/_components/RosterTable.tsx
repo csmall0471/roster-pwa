@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { track } from "@vercel/analytics";
 import { removeFromRoster, updateRosterEntry } from "../roster-actions";
 import {
   setRosterTag,
@@ -62,6 +63,53 @@ type RosterEntry = {
   players: RosterPlayer;
 };
 
+// ── CSV export ────────────────────────────────────────────────
+
+// Quote a cell only when it contains a comma, quote, or newline; escape any
+// embedded quotes by doubling them (RFC 4180).
+function csvCell(v: string | number | null | undefined): string {
+  const s = v == null ? "" : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// One row per player: identity, status, each tag category as its own column,
+// then all parents' names/phones/emails collapsed into three columns.
+function buildRosterCsv(roster: RosterEntry[], tagTypes: RosterTagType[]): string {
+  const header = [
+    "Jersey",
+    "First Name",
+    "Last Name",
+    "Age",
+    "Date of Birth",
+    "Status",
+    ...tagTypes.map((t) => t.name),
+    "Parents",
+    "Parent Phones",
+    "Parent Emails",
+  ];
+  const rows = roster.map((entry) => {
+    const p = entry.players;
+    const parents = p.player_parents.map((pp) => pp.parents);
+    return [
+      entry.jersey_number ?? "",
+      p.first_name,
+      p.last_name,
+      p.date_of_birth ? calcAge(p.date_of_birth) : "",
+      p.date_of_birth ?? "",
+      entry.status,
+      ...tagTypes.map((t) => entry.tags?.[t.id] ?? ""),
+      parents.map((par) => `${par.first_name} ${par.last_name}`.trim()).join("; "),
+      parents.map((par) => par.phone ?? "").filter(Boolean).join("; "),
+      parents.map((par) => par.email ?? "").filter(Boolean).join("; "),
+    ];
+  });
+  return [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
+
+function slugForFile(s: string): string {
+  return s.trim().replace(/[^\w-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "roster";
+}
+
 // ── RosterTable ───────────────────────────────────────────────
 
 export default function RosterTable({
@@ -108,6 +156,24 @@ export default function RosterTable({
     return result;
   }, [roster]);
 
+  // Export the whole roster (active + inactive, as displayed) to a CSV the coach
+  // can open in Excel/Sheets. Built client-side from the data already loaded.
+  function exportCsv() {
+    const csv = buildRosterCsv(roster, tagTypes);
+    const base = slugForFile([team?.name, team?.season].filter(Boolean).join("-"));
+    // Prepend a UTF-8 BOM so Excel reads accented names correctly.
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${base}-roster.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    track("roster_export_csv", { team: teamId, players: roster.length });
+  }
+
   return (
     <div className="space-y-4">
       {/* Header row: counts + message buttons */}
@@ -116,6 +182,12 @@ export default function RosterTable({
           {active.length} active{inactive.length > 0 ? ` · ${inactive.length} inactive` : ""}
         </p>
         <div className="flex gap-2">
+          <button
+            onClick={exportCsv}
+            className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            ↓ Export CSV
+          </button>
           <button
             onClick={() => setManagingTags(true)}
             className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
