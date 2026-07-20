@@ -17,8 +17,8 @@ const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 // A "participant type" is a price tier. Players/Siblings/Parents get canonical
 // labels via their tier flags; any other tier keeps its coach-given label.
 type Cat = { key: string; plural: string; singular: string; order: number };
-type Person = { key: string; name: string; badge: string; family: string; order: number };
-type TypeCount = { key: string; label: string; attending: number; declined: number; order: number };
+type Person = { key: string; name: string; badge: string; family: string; order: number; participating: boolean };
+type TypeCount = { key: string; label: string; attending: number; participating: number; declined: number; order: number };
 
 function tierCat(t: EventPriceTier): Cat {
   if (t.is_player) return { key: "player", plural: "Players", singular: "Player", order: 0 };
@@ -48,12 +48,15 @@ function computeAttendance(signups: EventSignup[], tiers: EventPriceTier[]) {
   const notComing: Person[] = [];
   let wholeFamilyOut = 0;
 
-  const bump = (cat: Cat, declined: boolean) => {
+  const bump = (cat: Cat, declined: boolean, participating: boolean) => {
     const c =
       counts.get(cat.key) ??
-      { key: cat.key, label: cat.plural, attending: 0, declined: 0, order: cat.order };
+      { key: cat.key, label: cat.plural, attending: 0, participating: 0, declined: 0, order: cat.order };
     if (declined) c.declined++;
-    else c.attending++;
+    else {
+      c.attending++;
+      if (participating) c.participating++;
+    }
     counts.set(cat.key, c);
   };
 
@@ -63,18 +66,22 @@ function computeAttendance(signups: EventSignup[], tiers: EventPriceTier[]) {
     if (list.length === 0) {
       // No attendee rows: a "can't make it" decline for the whole family.
       if (s.declined) {
-        notComing.push({ key: s.id, name: family, badge: "Whole family", family: "", order: -1 });
+        notComing.push({ key: s.id, name: family, badge: "Whole family", family: "", order: -1, participating: false });
         wholeFamilyOut++;
       }
       continue;
     }
     // Count-only tiers have no names — group those into one "× N" line per tier.
-    const unnamedComing = new Map<string, { cat: Cat; n: number }>();
-    const unnamedOut = new Map<string, { cat: Cat; n: number }>();
+    // Keyed by cat + participating so watchers and participants stay separate.
+    const unnamedComing = new Map<string, { cat: Cat; n: number; participating: boolean }>();
+    const unnamedOut = new Map<string, { cat: Cat; n: number; participating: boolean }>();
     list.forEach((a, i) => {
       const cat = classify(a);
       const declined = a.status === "declined";
-      bump(cat, declined);
+      // "Participating" = attending and actually being charged the per-person
+      // fee. Watchers (e.g. adults who opted out of the water) attend at $0.
+      const participating = !declined && (a.amount_cents ?? 0) > 0;
+      bump(cat, declined, participating);
       const nm = (a.name ?? "").trim();
       if (nm) {
         (declined ? notComing : coming).push({
@@ -83,18 +90,20 @@ function computeAttendance(signups: EventSignup[], tiers: EventPriceTier[]) {
           badge: cat.singular,
           family,
           order: cat.order,
+          participating,
         });
       } else {
         const m = declined ? unnamedOut : unnamedComing;
-        const e = m.get(cat.key) ?? { cat, n: 0 };
+        const gk = `${cat.key}:${participating ? "p" : "w"}`;
+        const e = m.get(gk) ?? { cat, n: 0, participating };
         e.n++;
-        m.set(cat.key, e);
+        m.set(gk, e);
       }
     });
-    for (const { cat, n } of unnamedComing.values())
-      coming.push({ key: `${s.id}:${cat.key}:c`, name: `${cat.plural} × ${n}`, badge: cat.singular, family, order: cat.order });
+    for (const { cat, n, participating } of unnamedComing.values())
+      coming.push({ key: `${s.id}:${cat.key}:${participating ? "p" : "w"}:c`, name: `${cat.plural} × ${n}`, badge: cat.singular, family, order: cat.order, participating });
     for (const { cat, n } of unnamedOut.values())
-      notComing.push({ key: `${s.id}:${cat.key}:d`, name: `${cat.plural} × ${n}`, badge: cat.singular, family, order: cat.order });
+      notComing.push({ key: `${s.id}:${cat.key}:d`, name: `${cat.plural} × ${n}`, badge: cat.singular, family, order: cat.order, participating: false });
   }
 
   const byOrderThenName = (a: Person, b: Person) =>
@@ -103,8 +112,9 @@ function computeAttendance(signups: EventSignup[], tiers: EventPriceTier[]) {
   notComing.sort(byOrderThenName);
   const types = [...counts.values()].sort((a, b) => a.order - b.order);
   const totalAttending = types.reduce((n, t) => n + t.attending, 0);
+  const totalParticipating = types.reduce((n, t) => n + t.participating, 0);
   const totalOut = types.reduce((n, t) => n + t.declined, 0) + wholeFamilyOut;
-  return { types, coming, notComing, totalAttending, totalOut };
+  return { types, coming, notComing, totalAttending, totalParticipating, totalOut };
 }
 
 type Metrics = {
@@ -178,6 +188,9 @@ export default function SignupsDashboard({
               >
                 <span className="text-xl font-bold text-gray-900 dark:text-white">{t.attending}</span>{" "}
                 <span className="text-sm text-gray-600 dark:text-gray-300">{t.label}</span>
+                {t.participating > 0 && t.participating < t.attending && (
+                  <span className="ml-1 text-xs text-blue-600 dark:text-blue-400">· {t.participating} participating</span>
+                )}
                 {t.declined > 0 && (
                   <span className="ml-1 text-xs text-gray-400">(+{t.declined} out)</span>
                 )}
@@ -187,6 +200,19 @@ export default function SignupsDashboard({
               <span className="text-xl font-bold">{att.totalAttending}</span>{" "}
               <span className="text-sm opacity-80">coming</span>
             </div>
+            {/* Participation headcount — the paying-per-person total (e.g. how many
+                are actually in the water), shown only when the event charges. */}
+            {att.totalParticipating > 0 && (
+              <div className="rounded-xl bg-blue-600 px-3 py-2 text-white">
+                <span className="text-xl font-bold">{att.totalParticipating}</span>{" "}
+                <span className="text-sm opacity-80">participating</span>
+                {att.totalAttending > att.totalParticipating && (
+                  <span className="ml-1 text-xs opacity-80">
+                    · {att.totalAttending - att.totalParticipating} watching
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -195,6 +221,7 @@ export default function SignupsDashboard({
               people={att.coming}
               tone="green"
               empty="Nobody's confirmed yet."
+              showWatching={att.totalParticipating > 0}
             />
             <PeopleList
               title={`Not coming (${att.totalOut})`}
@@ -285,11 +312,13 @@ function PeopleList({
   people,
   tone,
   empty,
+  showWatching = false,
 }: {
   title: string;
   people: Person[];
   tone: "green" | "red";
   empty: string;
+  showWatching?: boolean;
 }) {
   const head =
     tone === "green"
@@ -308,8 +337,15 @@ function PeopleList({
                 {p.name}
                 {p.family && <span className="text-gray-400"> · {p.family}</span>}
               </span>
-              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                {p.badge}
+              <span className="flex shrink-0 items-center gap-1">
+                {showWatching && !p.participating && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    watching
+                  </span>
+                )}
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                  {p.badge}
+                </span>
               </span>
             </li>
           ))}
