@@ -1,3 +1,5 @@
+import { normalize } from "./resolve/similarity";
+
 // Parse a league "practice times" spreadsheet (Google Sheet or uploaded file)
 // and match each cell to a team in this season. Pure — no DB, no React, usable
 // on client or server.
@@ -114,6 +116,49 @@ function scoreMatch(team: TeamLite, slot: PracticeSlot): number {
   const sG = genderToken(slot.label);
   if (tG && sG) score += tG === sG ? 1 : -1;
   return score;
+}
+
+// ── Sheet → season structure ─────────────────────────────────────────────────
+// The same grid that carries practice times also names a coach + age group +
+// gender per cell, so it can seed divisions / coaches / teams (with their day &
+// time) before the analyzer runs — used alongside (or instead of) a coach file.
+
+// The coach name with the age/gender/league words stripped, original case kept.
+function cleanCoachName(label: string): string {
+  return label
+    .replace(/\b\d{1,2}\s*u\b/gi, " ")
+    .replace(/\bu\s*\d{1,2}\b/gi, " ")
+    .replace(/\b(boys?|girls?|flag|rec|advanced|pixies|coed|[bg]\s*flag|[bg]flag)\b/gi, " ")
+    .replace(/[-–—/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Division label from a cell: "8U Boys", "12U Girls", "6U", or "Unsorted".
+function divisionLabel(label: string): string {
+  const parts = [ageToken(label), genderToken(label)].filter(Boolean);
+  return parts.length ? parts.join(" ") : "Unsorted";
+}
+
+export type SheetTeam = { coachName: string; day: string | null; time: string | null };
+export type SheetDivision = { name: string; teams: SheetTeam[] };
+
+// Group the grid's cells into divisions → one team per coach (with their first
+// day/time). A coach appearing in two age groups becomes two teams.
+export function slotsToStructure(slots: PracticeSlot[]): SheetDivision[] {
+  const byDiv = new Map<string, Map<string, SheetTeam>>();
+  for (const s of slots) {
+    const coachName = cleanCoachName(s.label);
+    if (!coachName) continue;
+    const dn = divisionLabel(s.label);
+    if (!byDiv.has(dn)) byDiv.set(dn, new Map());
+    const teams = byDiv.get(dn)!;
+    const key = normalize(coachName);
+    if (!teams.has(key)) teams.set(key, { coachName, day: s.day, time: s.time });
+  }
+  return [...byDiv.entries()]
+    .map(([name, teams]) => ({ name, teams: [...teams.values()] }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export type SlotMatch = { slot: PracticeSlot; score: number };

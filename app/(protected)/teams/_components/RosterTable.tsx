@@ -249,7 +249,6 @@ export default function RosterTable({
           recipients={allRecipients}
           channel={messageChannel}
           onClose={() => setMessageChannel(null)}
-          teamContext={team}
         />
       )}
 

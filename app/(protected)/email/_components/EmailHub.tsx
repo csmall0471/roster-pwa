@@ -311,7 +311,6 @@ export default function EmailHub({
           recipients={composer.recipients}
           channel="email"
           onClose={() => setComposer(null)}
-          teamContext={{ name: composer.context }}
         />
       )}
     </>

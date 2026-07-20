@@ -52,7 +52,6 @@ export default function EventInviteButton({
           recipients={recipients}
           channel={channel}
           onClose={() => setChannel(null)}
-          teamContext={teamName ? { name: teamName } : undefined}
           initialSubject={subject}
           initialBody={body}
         />

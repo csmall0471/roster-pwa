@@ -2,23 +2,19 @@
 
 import { useState, useTransition, useRef, useEffect } from "react";
 import { draftMessage } from "../message-actions";
-import { createGmailDraft } from "../gmail-actions";
 
 type Recipient = { name: string; email: string | null; phone: string | null };
-type TeamContext = { name: string; organization?: string | null; season?: string | null };
 
 export default function MessageComposer({
   recipients,
   channel,
   onClose,
-  teamContext,
   initialSubject = "",
   initialBody = "",
 }: {
   recipients: Recipient[];
   channel: "email" | "text";
   onClose: () => void;
-  teamContext?: TeamContext;
   initialSubject?: string;
   initialBody?: string;
 }) {
@@ -26,9 +22,7 @@ export default function MessageComposer({
   const [body, setBody] = useState(initialBody);
   const [aiPrompt, setAiPrompt] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
-  const [gmailError, setGmailError] = useState<string | null>(null);
   const [drafting, startDraft] = useTransition();
-  const [sending, startSend] = useTransition();
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const emails = recipients.flatMap((r) => (r.email ? [r.email] : []));
@@ -64,24 +58,15 @@ export default function MessageComposer({
     });
   }
 
-  function handleGmailDraft() {
-    setGmailError(null);
-    startSend(async () => {
-      const result = await createGmailDraft({
-        bcc: emails,
-        subject,
-        body,
-        teamName: teamContext?.name,
-        organization: teamContext?.organization,
-        season: teamContext?.season,
-      });
-      if ("error" in result) {
-        setGmailError(result.error);
-      } else {
-        window.open(result.draftUrl, "_blank", "noopener,noreferrer");
-        onClose();
-      }
-    });
+  // Open a pre-filled draft in the coach's own mail client (BCC to all parents),
+  // so the message goes out from their address and they review before sending —
+  // no Google/Gmail permissions required. RFC 6068: percent-encode each field.
+  function openEmailDraft() {
+    const parts: string[] = [];
+    if (emails.length) parts.push(`bcc=${emails.map(encodeURIComponent).join(",")}`);
+    if (subject) parts.push(`subject=${encodeURIComponent(subject)}`);
+    if (body) parts.push(`body=${encodeURIComponent(body)}`);
+    window.location.href = `mailto:?${parts.join("&")}`;
   }
 
   return (
@@ -224,11 +209,6 @@ export default function MessageComposer({
 
         {/* Footer actions */}
         <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-800 space-y-3">
-          {gmailError && (
-            <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-lg px-3 py-2">
-              {gmailError}
-            </p>
-          )}
           <div className="flex items-center justify-between gap-3">
             <button
               onClick={onClose}
@@ -248,13 +228,21 @@ export default function MessageComposer({
                 </button>
               )}
               {channel === "email" && emails.length > 0 && (
-                <button
-                  onClick={handleGmailDraft}
-                  disabled={sending || !subject || !body}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                >
-                  {sending ? "Creating draft…" : "Create Gmail draft →"}
-                </button>
+                <>
+                  <button
+                    onClick={() => copy(emails.join(", "), "emails")}
+                    className="rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    {copied === "emails" ? "Copied!" : "Copy addresses"}
+                  </button>
+                  <button
+                    onClick={openEmailDraft}
+                    disabled={!subject || !body}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    Open email draft →
+                  </button>
+                </>
               )}
             </div>
           </div>

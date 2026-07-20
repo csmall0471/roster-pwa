@@ -14,11 +14,10 @@ export default function AdminLoginPage() {
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
+        // Plain sign-in: only the default openid/email/profile scopes, which are
+        // non-sensitive, so Google shows no "unverified app" warning once the
+        // consent screen is published to production.
         redirectTo: `${window.location.origin}/auth/callback`,
-        scopes: "https://www.googleapis.com/auth/gmail.compose",
-        // offline + consent → Google returns a refresh token we can store, so
-        // Gmail keeps working after the 1h access token expires (no re-login).
-        queryParams: { access_type: "offline", prompt: "consent" },
       },
     });
     if (authError) {
@@ -32,7 +31,7 @@ export default function AdminLoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-5xl mb-3 select-none">🏀🏀🏀</div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Coach Connor's<br />Player Manager</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Coach Connor&apos;s<br />Player Manager</h1>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Coach sign-in</p>
         </div>
 
@@ -49,10 +48,6 @@ export default function AdminLoginPage() {
             <GoogleIcon />
             {loading ? "Redirecting…" : "Sign in with Google"}
           </button>
-
-          <p className="text-center text-xs text-gray-400 dark:text-gray-500">
-            Includes Gmail draft access for messaging parents
-          </p>
         </div>
       </div>
     </div>
