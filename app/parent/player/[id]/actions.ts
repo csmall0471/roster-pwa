@@ -1,8 +1,54 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { logActivity } from "@/lib/activity";
+
+// Set (or replace) a kid's profile photo. The image is uploaded client-side to
+// the parent's own storage prefix (allowed by the bucket policy); here we just
+// record it as the player's primary photo. The row is written under the coach's
+// user_id (via the service client) so both the coach and the parent can see it —
+// a parent's auth.uid() would fail the owner-keyed RLS WITH CHECK. Mirrors how
+// savePlayerPhoto attaches a card on a parent's behalf.
+export async function setPlayerPhoto(
+  playerId: string,
+  storagePath: string,
+  publicUrl: string
+): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const [{ data: rows }, { data: parentLink }] = await Promise.all([
+    supabase.rpc("get_my_player_ids"),
+    supabase.from("parent_auth").select("parent_id").eq("auth_user_id", user.id).maybeSingle(),
+  ]);
+  const myIds = new Set((rows ?? []).map((r: { player_id: string }) => r.player_id));
+
+  const service = createServiceClient();
+  const { data: player } = await service.from("players").select("user_id").eq("id", playerId).single();
+  if (!player) return { error: "Player not found" };
+  const ownerId = player.user_id as string;
+  // Authorized: the coach who owns the player, or a guardian of this kid.
+  if (user.id !== ownerId && !myIds.has(playerId)) return { error: "Not your player" };
+
+  // Make this the primary photo (scoped to the owner's rows), then insert it.
+  await service.from("player_photos").update({ is_primary: false }).eq("player_id", playerId).eq("user_id", ownerId);
+  const { error } = await service.from("player_photos").insert({
+    user_id: ownerId,
+    player_id: playerId,
+    storage_path: storagePath,
+    public_url: publicUrl,
+    is_primary: true,
+  });
+  if (error) return { error: error.message };
+
+  if (parentLink?.parent_id) logActivity(parentLink.parent_id, "player_photo_updated", { player_id: playerId }).catch(() => {});
+  revalidatePath(`/parent/player/${playerId}`);
+  revalidatePath("/parent");
+  revalidatePath(`/players/${playerId}`);
+  return { error: null };
+}
 
 export async function updatePlayerInfo(
   playerId: string,

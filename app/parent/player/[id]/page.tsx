@@ -1,11 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
 import SeasonHistory from "../_components/SeasonHistory";
 import PhotoCardGallery from "../_components/PhotoCardGallery";
 import PlayerInfoForm from "./_components/PlayerInfoForm";
+import PlayerPhotoUploader from "./_components/PlayerPhotoUploader";
 import GuardiansSection from "./_components/GuardiansSection";
 import SiblingsSection from "@/app/_components/SiblingsSection";
 import { dedupeSiblings } from "@/app/_components/dedupe-siblings";
@@ -113,21 +113,11 @@ export default async function ParentPlayerPage({
 
       {/* Header */}
       <div className="flex items-start gap-5">
-        <div className="shrink-0">
-          {primary ? (
-            <Image
-              src={primary.public_url}
-              alt={`${player.first_name} ${player.last_name}`}
-              width={96}
-              height={128}
-              className="w-24 h-32 object-cover rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm"
-            />
-          ) : (
-            <div className="w-24 h-32 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-300 dark:text-gray-600 text-3xl">
-              👤
-            </div>
-          )}
-        </div>
+        <PlayerPhotoUploader
+          playerId={player.id}
+          photoUrl={primary?.public_url ?? null}
+          name={`${player.first_name} ${player.last_name}`}
+        />
         <div className="flex-1 min-w-0 pt-1">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             {player.first_name} {player.last_name}
