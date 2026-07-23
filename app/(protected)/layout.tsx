@@ -119,6 +119,9 @@ export default async function ProtectedLayout({
                   <Link href="/events" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
                     Events
                   </Link>
+                  <Link href="/questions" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
+                    Questions
+                  </Link>
                   <Link href="/preview" className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 whitespace-nowrap">
                     Preview
                   </Link>

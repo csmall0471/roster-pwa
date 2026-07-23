@@ -327,3 +327,37 @@ export interface EventWithDetails extends EventRecord {
   event_fields: EventField[];
   event_price_tiers: EventPriceTierWithFields[];
 }
+
+// ── Roster questions (coach info collection) ──────────────────────────────────
+export type QuestionAnswerType = "text" | "number" | "select" | "bool";
+export type QuestionSetStatus = "open" | "closed";
+
+export interface QuestionSet {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  status: QuestionSetStatus;
+  created_at: string;
+}
+
+export interface Question {
+  id: string;
+  set_id: string;
+  user_id: string;
+  prompt: string;
+  help_text: string | null;
+  answer_type: QuestionAnswerType;
+  options: string[];
+  position: number;
+  created_at: string;
+}
+
+export interface QuestionAnswer {
+  id: string;
+  question_id: string;
+  player_id: string;
+  user_id: string;
+  value: string | null;
+  updated_at: string;
+}
