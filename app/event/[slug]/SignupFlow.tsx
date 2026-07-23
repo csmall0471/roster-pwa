@@ -20,6 +20,13 @@ import {
 
 type Step = "identify" | "otp" | "form" | "done";
 
+// Sanitized "who's coming" summary built server-side — names grouped by tier,
+// no contact info / amounts. `unnamed` counts attendees on count-only tiers.
+export type AttendanceSummary = {
+  total: number;
+  groups: { label: string; names: string[]; unnamed: number }[];
+};
+
 // Shape shared by event fields and tier attendee fields.
 type GenericField = {
   id: string;
@@ -64,7 +71,13 @@ const inputCls =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none";
 const labelCls = "block text-sm font-medium text-gray-700 mb-1";
 
-export default function SignupFlow({ event }: { event: EventWithDetails }) {
+export default function SignupFlow({
+  event,
+  attendance,
+}: {
+  event: EventWithDetails;
+  attendance: AttendanceSummary;
+}) {
   const [step, setStep] = useState<Step>("identify");
   // True until we've checked for an existing session (avoids flashing the phone
   // prompt at an already-logged-in parent).
@@ -507,6 +520,9 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
           </div>
         )}
 
+        {/* Who's coming */}
+        <WhoIsComing attendance={attendance} />
+
         {/* Step card */}
         <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           {checking && (
@@ -814,6 +830,59 @@ export default function SignupFlow({ event }: { event: EventWithDetails }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// A collapsible headcount so a parent can see the total who've RSVP'd and, on
+// tap, the names grouped by tier (players/siblings/adults). Names only.
+function WhoIsComing({ attendance }: { attendance: AttendanceSummary }) {
+  const [open, setOpen] = useState(false);
+  const { total, groups } = attendance;
+
+  if (total === 0) {
+    return (
+      <div className="mt-5 rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-center">
+        <p className="text-sm font-semibold text-gray-900">Who&rsquo;s coming</p>
+        <p className="mt-0.5 text-sm text-gray-500">No RSVPs yet — be the first! 🎉</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+          👀 See who&rsquo;s coming
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">
+            {total}
+          </span>
+        </span>
+        <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-gray-100 px-4 py-3">
+          {groups.map((g) => {
+            const count = g.names.length + g.unnamed;
+            const display = g.names.length
+              ? g.names.join(", ") + (g.unnamed > 0 ? `, +${g.unnamed} more` : "")
+              : `${g.unnamed} ${g.unnamed === 1 ? "guest" : "guests"}`;
+            return (
+              <div key={g.label}>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  {g.label} · {count}
+                </p>
+                <p className="mt-0.5 text-sm text-gray-700">{display}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
