@@ -2931,8 +2931,11 @@ export default function CardEditor({
                     style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible" }}
                   >
                     <defs>
+                      {/* Top text reads left→right over the top (sweep 1); bottom
+                          text must run left→right UNDER the bottom (sweep 0) so its
+                          letters sit upright — sweep 1 there flips them upside-down. */}
                       <path id="stk-arc-top" d="M 13,50 A 37,37 0 0 1 87,50" fill="none" />
-                      <path id="stk-arc-bottom" d="M 87,50 A 37,37 0 0 1 13,50" fill="none" />
+                      <path id="stk-arc-bottom" d="M 13,50 A 37,37 0 0 0 87,50" fill="none" />
                     </defs>
                     {teamText && (
                       <text
