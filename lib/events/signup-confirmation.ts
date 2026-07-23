@@ -7,32 +7,10 @@
 // error so callers can swallow it — an email failure must never break the RSVP.
 import { buildEmailHtml, btn, esc, infoRow } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
+import { formatEventWhen } from "@/lib/events/when";
 import type { SignupAttendee } from "@/lib/types";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-
-// Event times are stored as UTC timestamptz with no per-event zone; format them
-// in the coach's local zone so "10:00 AM" doesn't render as the UTC "5:00 PM".
-// Single-tenant default (Arizona); override with EVENT_TIMEZONE if needed.
-function formatWhen(startsAt?: string | null, endsAt?: string | null): string {
-  if (!startsAt) return "";
-  const timeZone = process.env.EVENT_TIMEZONE || "America/Phoenix";
-  const start = new Date(startsAt);
-  const startStr = start.toLocaleString("en-US", {
-    timeZone,
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  if (endsAt) {
-    const endStr = new Date(endsAt).toLocaleString("en-US", { timeZone, hour: "numeric", minute: "2-digit" });
-    return `${startStr} – ${endStr}`;
-  }
-  return startStr;
-}
 
 const sectionHeading = (t: string) =>
   `<p style="margin:22px 0 6px;font-size:12px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#9ca3af;">${esc(t)}</p>`;
@@ -153,7 +131,7 @@ export function buildSignupConfirmationEmail(args: SignupConfirmationArgs): {
   );
 
   // When & where.
-  const when = formatWhen(starts_at, ends_at);
+  const when = formatEventWhen(starts_at, ends_at);
   const whenWhere = (when ? infoRow("When", when) : "") + (location ? infoRow("Where", location) : "");
   if (whenWhere) sections.push(sectionHeading("When & where") + tbl(whenWhere));
 
