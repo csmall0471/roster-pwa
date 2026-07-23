@@ -5,6 +5,8 @@ import { headers } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { buildEmailHtml, btn, esc, infoRow, infoTable } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
+import { venmoPayLink, eventPayNote } from "@/lib/event-pay";
+import { sendSignupConfirmation } from "@/lib/events/signup-confirmation";
 import { buildPricedAttendees, type PricingTier } from "@/lib/events/signup-pricing";
 import type {
   AttendeeStatus,
@@ -323,6 +325,30 @@ export type SaveSignupInput = {
 
 export type SaveSignupResult = { error: string } | { ok: true; signup: EventSignup };
 
+// Every email address in a parent's family — the parent plus co-parents who
+// share a kid — so a coach-entered signup can confirm to both parents. Service
+// client so inconsistent phone/email RLS matching doesn't hide anyone.
+async function familyParentEmails(
+  service: ReturnType<typeof createServiceClient>,
+  parentId: string
+): Promise<string[]> {
+  const { data: mine } = await service
+    .from("player_parents")
+    .select("player_id")
+    .eq("parent_id", parentId);
+  const playerIds = [...new Set((mine ?? []).map((r) => r.player_id as string))];
+  let ids = [parentId];
+  if (playerIds.length) {
+    const { data: co } = await service
+      .from("player_parents")
+      .select("parent_id")
+      .in("player_id", playerIds);
+    ids = [...new Set([parentId, ...((co ?? []).map((r) => r.parent_id as string))])];
+  }
+  const { data: ps } = await service.from("parents").select("email").in("id", ids);
+  return ((ps ?? []) as { email: string | null }[]).map((p) => p.email ?? "").filter(Boolean);
+}
+
 export async function saveSignupAsCoach(
   input: SaveSignupInput
 ): Promise<SaveSignupResult> {
@@ -334,7 +360,7 @@ export async function saveSignupAsCoach(
 
   const { data: event } = await supabase
     .from("events")
-    .select("id, event_price_tiers(*, event_tier_fields(*))")
+    .select("id, title, pay_url, pay_instructions, event_price_tiers(*, event_tier_fields(*))")
     .eq("id", input.event_id)
     .single();
   if (!event) return { error: "Event not found." };
@@ -364,6 +390,35 @@ export async function saveSignupAsCoach(
     : supabase.from("event_signups").insert(row);
   const { data, error } = await q.select("*").single();
   if (error) return { error: error.message };
+
+  // Confirm to the family the same way a self-signup does — only for a brand-new
+  // signup (not edits) and never a decline. Send to the linked family's parents
+  // plus any typed contact email. An email failure must never block the save.
+  if (!input.signup_id && !declined) {
+    const byEmail = new Map<string, string>(); // lowercased key → original, deduped
+    const add = (e: string | null | undefined) => {
+      const t = (e ?? "").trim();
+      if (t) byEmail.set(t.toLowerCase(), t);
+    };
+    add(input.email);
+    if (input.parent_id) {
+      for (const e of await familyParentEmails(createServiceClient(), input.parent_id)) add(e);
+    }
+    if (byEmail.size) {
+      const ev = event as unknown as { title: string; pay_url: string | null; pay_instructions: string | null };
+      const payUrl = venmoPayLink(ev.pay_url, eventPayNote(attendees, name, ev.title), total_cents);
+      await sendSignupConfirmation({
+        to: [...byEmail.values()],
+        name,
+        title: ev.title,
+        attendees,
+        total_cents,
+        declined: false,
+        pay_url: payUrl,
+        pay_instructions: ev.pay_instructions,
+      }).catch(() => {});
+    }
+  }
 
   revalidatePath(`/events/${input.event_id}`);
   return { ok: true, signup: data as EventSignup };
