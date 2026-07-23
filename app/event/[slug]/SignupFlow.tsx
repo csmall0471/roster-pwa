@@ -20,11 +20,12 @@ import {
 
 type Step = "identify" | "otp" | "form" | "done";
 
-// Sanitized "who's coming" summary built server-side — names grouped by tier,
-// no contact info / amounts. `unnamed` counts attendees on count-only tiers.
+// Sanitized "who's coming" summary built server-side — one entry per family:
+// the lead (player) name(s) plus a summary of the rest (e.g. ["2 siblings",
+// "2 adults"]). Names/counts only — no contact info or amounts.
 export type AttendanceSummary = {
   total: number;
-  groups: { label: string; names: string[]; unnamed: number }[];
+  families: { lead: string; extras: string[] }[];
 };
 
 // Shape shared by event fields and tier attendee fields.
@@ -835,10 +836,11 @@ export default function SignupFlow({
 }
 
 // A collapsible headcount so a parent can see the total who've RSVP'd and, on
-// tap, the names grouped by tier (players/siblings/adults). Names only.
+// tap, one line per family — the player(s) plus a summary of the rest, e.g.
+// "Ben Jewell + 2 siblings + 2 adults". Alphabetized. Names/counts only.
 function WhoIsComing({ attendance }: { attendance: AttendanceSummary }) {
   const [open, setOpen] = useState(false);
-  const { total, groups } = attendance;
+  const { total, families } = attendance;
 
   if (total === 0) {
     return (
@@ -866,22 +868,16 @@ function WhoIsComing({ attendance }: { attendance: AttendanceSummary }) {
         <span className="text-gray-400">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
-        <div className="space-y-3 border-t border-gray-100 px-4 py-3">
-          {groups.map((g) => {
-            const count = g.names.length + g.unnamed;
-            const display = g.names.length
-              ? g.names.join(", ") + (g.unnamed > 0 ? `, +${g.unnamed} more` : "")
-              : `${g.unnamed} ${g.unnamed === 1 ? "guest" : "guests"}`;
-            return (
-              <div key={g.label}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  {g.label} · {count}
-                </p>
-                <p className="mt-0.5 text-sm text-gray-700">{display}</p>
-              </div>
-            );
-          })}
-        </div>
+        <ul className="divide-y divide-gray-100 border-t border-gray-100">
+          {families.map((f, i) => (
+            <li key={i} className="px-4 py-2.5 text-sm">
+              <span className="font-medium text-gray-900">{f.lead}</span>
+              {f.extras.length > 0 && (
+                <span className="text-gray-500"> + {f.extras.join(" + ")}</span>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
