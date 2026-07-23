@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { renderMarkdown, markdownClass } from "@/lib/markdown";
-import type { EventSignup, EventWithDetails } from "@/lib/types";
+import type { EventSignup, EventWithDetails, SavedSibling, SignupPlayer } from "@/lib/types";
 import EventManageControls from "../_components/EventManageControls";
 import EventInviteButton from "../_components/EventInviteButton";
 import InviteRosterPanel from "../_components/InviteRosterPanel";
@@ -25,6 +25,9 @@ type TeamWithParents = {
       id: string;
       first_name: string;
       last_name: string;
+      grade: string | null;
+      shirt_size: string | null;
+      date_of_birth: string | null;
       player_parents: {
         parents: {
           id: string;
@@ -107,12 +110,19 @@ export default async function EventManagePage({
   const recipients: Recipient[] = [];
   type RPlayer = { id: string; name: string; teams: Set<string>; parents: { id: string; name: string; email: string | null }[] };
   const rosterPlayerMap = new Map<string, RPlayer>();
-  // Parents keyed by id, with the names of their kids — feeds the coach's
-  // "link a signup to an invited player" picker + non-responder seeding.
-  const rosterParentMap = new Map<
-    string,
-    { id: string; name: string; email: string | null; phone: string | null; playerNames: Set<string> }
-  >();
+  // Parents keyed by id, with everything the coach needs to reproduce the
+  // parent-facing prefill when adding a signup on their behalf: the parent's
+  // kids (with roster attributes), the family's other parents, and — attached
+  // further down — their saved siblings.
+  type RParentAcc = {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    players: Map<string, SignupPlayer>;
+    familyParents: Map<string, string>; // id → name (co-parents who share a kid)
+  };
+  const rosterParentMap = new Map<string, RParentAcc>();
   const seenRecipient = new Set<string>();
   let teamName: string | null = null;
   const multiTeam = teamIds.length > 1;
@@ -120,7 +130,7 @@ export default async function EventManagePage({
     const { data: teamRows } = await supabase
       .from("teams")
       .select(
-        "id, name, roster(players(id, first_name, last_name, player_parents(parents(id, first_name, last_name, email, phone))))"
+        "id, name, roster(players(id, first_name, last_name, grade, shirt_size, date_of_birth, player_parents(parents(id, first_name, last_name, email, phone))))"
       )
       .in("id", teamIds);
     const teamArr = (teamRows ?? []) as unknown as (TeamWithParents & { id: string })[];
@@ -136,18 +146,28 @@ export default async function EventManagePage({
         }
         rp.teams.add(team.name);
         const playerName = `${pl.first_name} ${pl.last_name}`.trim();
-        for (const pp of pl.player_parents ?? []) {
-          const p = pp.parents;
-          if (!p) continue;
+        // Every parent on THIS kid, so each is recorded as the others' family parent.
+        const kidParents = (pl.player_parents ?? [])
+          .map((pp) => pp.parents)
+          .filter((p): p is NonNullable<typeof p> => Boolean(p));
+        for (const p of kidParents) {
           const pname = `${p.first_name} ${p.last_name}`.trim();
           if (!rp.parents.some((x) => x.id === p.id))
             rp.parents.push({ id: p.id, name: pname, email: p.email });
           let rpar = rosterParentMap.get(p.id);
           if (!rpar) {
-            rpar = { id: p.id, name: pname, email: p.email, phone: p.phone, playerNames: new Set() };
+            rpar = { id: p.id, name: pname, email: p.email, phone: p.phone, players: new Map(), familyParents: new Map() };
             rosterParentMap.set(p.id, rpar);
           }
-          rpar.playerNames.add(playerName);
+          rpar.players.set(pl.id, {
+            id: pl.id,
+            name: playerName,
+            grade: pl.grade,
+            shirt_size: pl.shirt_size,
+            date_of_birth: pl.date_of_birth,
+          });
+          for (const co of kidParents)
+            rpar.familyParents.set(co.id, `${co.first_name} ${co.last_name}`.trim());
           if (!seenRecipient.has(p.id)) {
             seenRecipient.add(p.id);
             recipients.push({ name: pname, email: p.email, phone: p.phone });
@@ -157,8 +177,43 @@ export default async function EventManagePage({
     }
   }
   const rosterPlayers = [...rosterPlayerMap.values()];
+
+  // Saved siblings for every roster parent (RLS lets the coach read their own
+  // roster's families). Skip any already linked to / named like a roster player,
+  // so the same kid isn't offered under both the Player and Sibling tiers.
+  const allParentIds = [...rosterParentMap.keys()];
+  const sibsByParent = new Map<string, SavedSibling[]>();
+  if (allParentIds.length) {
+    const { data: sibRows } = await supabase
+      .from("siblings")
+      .select("name, attributes, parent_id, player_id")
+      .in("parent_id", allParentIds);
+    for (const s of (sibRows ?? []) as {
+      name: string;
+      attributes: SavedSibling["attributes"] | null;
+      parent_id: string;
+      player_id: string | null;
+    }[]) {
+      if (s.player_id) continue;
+      const arr = sibsByParent.get(s.parent_id) ?? [];
+      arr.push({ name: s.name, attributes: s.attributes ?? {} });
+      sibsByParent.set(s.parent_id, arr);
+    }
+  }
+
   const rosterParents = [...rosterParentMap.values()]
-    .map((p) => ({ id: p.id, name: p.name, email: p.email, phone: p.phone, playerNames: [...p.playerNames] }))
+    .map((p) => {
+      const players = [...p.players.values()];
+      const kidNames = new Set(players.map((k) => k.name.trim().toLowerCase()));
+      const siblings = (sibsByParent.get(p.id) ?? []).filter(
+        (s) => !kidNames.has(s.name.trim().toLowerCase())
+      );
+      const familyParents = [...p.familyParents.entries()]
+        .sort(([idA], [idB]) => (idA === p.id ? -1 : idB === p.id ? 1 : 0))
+        .map(([, name]) => ({ name }))
+        .filter((x) => x.name);
+      return { id: p.id, name: p.name, email: p.email, phone: p.phone, players, siblings, familyParents };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   // Build the absolute share link server-side so client components don't need

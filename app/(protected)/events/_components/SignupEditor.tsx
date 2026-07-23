@@ -8,15 +8,20 @@ import type {
   EventFieldType,
   EventPriceTierWithFields,
   EventSignup,
+  SavedSibling,
+  SignupPlayer,
 } from "@/lib/types";
 
-// A roster parent the coach can link a signup to (and seed contact/kids from).
+// A roster parent the coach can link a signup to (and seed the whole family
+// from — mirrors what identifyParent returns for the parent-facing form).
 export type RosterParentOption = {
   id: string;
   name: string;
   email: string | null;
   phone: string | null;
-  playerNames: string[];
+  players: SignupPlayer[];
+  siblings: SavedSibling[];
+  familyParents: { name: string }[];
 };
 
 type FieldVal = string | number | boolean;
@@ -41,6 +46,20 @@ function attendeeFieldsFor(t: EventPriceTierWithFields): EditorField[] {
     .filter((c): c is (typeof PLAYER_ATTRIBUTE_CATALOG)[number] => Boolean(c))
     .map((c) => ({ id: c.label, label: c.label, field_type: c.field_type, options: c.options ?? [], required: false }));
   return [...common, ...custom];
+}
+
+// Map a roster kid's stored attributes onto a tier's selected player-attribute
+// fields, keyed by their LABEL — matching how attendeeFieldsFor keys the common
+// attributes and how the parent-facing form prefills them.
+function kidAttrsForTier(t: EventPriceTierWithFields, kid: SignupPlayer): Record<string, FieldVal> {
+  const out: Record<string, FieldVal> = {};
+  for (const key of t.player_attributes ?? []) {
+    const c = PLAYER_ATTRIBUTE_CATALOG.find((x) => x.key === key);
+    if (!c) continue;
+    const v = key === "grade" ? kid.grade : key === "shirt_size" ? kid.shirt_size : kid.date_of_birth;
+    if (v) out[c.label] = v;
+  }
+  return out;
 }
 
 // Client-side price preview (server recomputes authoritatively on save).
@@ -202,7 +221,9 @@ export default function SignupEditor({
     });
 
   // Link to (or seed from) a roster parent. Fills contact from that parent; when
-  // creating a fresh signup, also seeds a Player row per kid.
+  // creating a fresh, still-empty signup, seeds the whole family the way the
+  // parent's own form would — Players (with their roster attributes), Siblings,
+  // and Parents — so the coach doesn't have to retype everyone.
   function pickParent(id: string) {
     const p = rosterParents.find((x) => x.id === id);
     setParentId(id ? id : null);
@@ -210,20 +231,41 @@ export default function SignupEditor({
     setName(p.name);
     setEmail(p.email ?? "");
     setPhone(p.phone ?? "");
-    if (!signup && rows.length === 0) {
-      const playerTier = sorted.find((t) => t.is_player);
-      if (playerTier && p.playerNames.length) {
-        setRows(
-          p.playerNames.map((nm) => ({
-            key: nextKey(),
-            tierId: playerTier.id,
-            name: playerTier.collect_attendees ? nm : "",
-            attrs: {},
-            status: "attending" as const,
-          }))
-        );
+    // Only auto-seed a brand-new, untouched signup so we never clobber edits.
+    if (signup || rows.length > 0) return;
+
+    const seeded: Row[] = [];
+    const playerTier = sorted.find((t) => t.is_player);
+    if (playerTier && p.players.length) {
+      for (const kid of p.players) {
+        seeded.push({
+          key: nextKey(),
+          tierId: playerTier.id,
+          name: playerTier.collect_attendees ? kid.name : "",
+          attrs: playerTier.collect_attendees ? kidAttrsForTier(playerTier, kid) : {},
+          status: "attending",
+        });
       }
     }
+    const siblingTier = sorted.find((t) => t.is_sibling);
+    if (siblingTier?.collect_attendees && p.siblings.length) {
+      const labelToId = new Map((fieldsByTier.get(siblingTier.id) ?? []).map((f) => [f.label, f.id]));
+      for (const s of p.siblings) {
+        const attrs: Record<string, FieldVal> = {};
+        for (const [labelKey, v] of Object.entries(s.attributes ?? {})) {
+          const fid = labelToId.get(labelKey);
+          if (fid !== undefined) attrs[fid] = v;
+        }
+        seeded.push({ key: nextKey(), tierId: siblingTier.id, name: s.name, attrs, status: "attending" });
+      }
+    }
+    const parentTier = sorted.find((t) => t.is_parent);
+    const fam = p.familyParents.length ? p.familyParents : [{ name: p.name }];
+    if (parentTier?.collect_attendees) {
+      for (const par of fam)
+        seeded.push({ key: nextKey(), tierId: parentTier.id, name: par.name, attrs: {}, status: "attending" });
+    }
+    if (seeded.length) setRows(seeded);
   }
 
   const total = decline
@@ -298,7 +340,7 @@ export default function SignupEditor({
                 {rosterParents.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
-                    {p.playerNames.length ? ` — ${p.playerNames.join(", ")}` : ""}
+                    {p.players.length ? ` — ${p.players.map((k) => k.name).join(", ")}` : ""}
                   </option>
                 ))}
               </select>
