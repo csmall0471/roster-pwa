@@ -39,6 +39,10 @@ import { addPrintBleed, EXPORT_TRIM_W } from "@/lib/cardgen/print-bleed";
 import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign } from "@/lib/types";
 
+// Signature width on the sticker, as a fraction of the sticker's width, at
+// scale 1 (the resize slider multiplies it). Shared by the preview + export.
+const STICKER_SIG_BASE_WIDTH = 0.38;
+
 // ── Types ────────────────────────────────────────────────────
 
 type Step = "upload" | "processing" | "edit" | "saving" | "saved";
@@ -583,6 +587,20 @@ export default function CardEditor({
   const stickerBgRef = useRef<HTMLDivElement>(null);
   const stickerOverlayRef = useRef<HTMLDivElement>(null);
   const [stickerBusy, setStickerBusy] = useState(false);
+  // Sticker-only layout: curved perimeter lettering, and photo/signature
+  // placement independent of the card (the circle crops differently). stkPhoto
+  // is null until the user adjusts it — until then the sticker follows whatever
+  // framing the card photo currently has.
+  const [stkCurved, setStkCurved] = useState(true);
+  const [stkActive, setStkActive] = useState<"photo" | "sig">("photo");
+  const [stkPhoto, setStkPhoto] = useState<{ x: number; y: number; scale: number; rotation: number } | null>(null);
+  const [stkSig, setStkSig] = useState<{ x: number; y: number; scale: number }>({ x: 0.5, y: 0.59, scale: 1 });
+  const stkGesture = useRef<{
+    layer: "photo" | "sig";
+    px: number;
+    py: number;
+    start: { x: number; y: number; scale: number; rotation: number };
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
   const headshotFileRef = useRef<HTMLInputElement>(null);
@@ -1130,13 +1148,14 @@ export default function CardEditor({
         preloadImage(cutoutDataUrl),
         preloadImage(sigDataUrl ?? sigUrl),
       ]);
+      const photo = stkPhoto ?? { x: tx, y: ty, scale, rotation };
       const blob = await compositeSticker({
         bgEl: stickerBgRef.current,
         overlayEl: stickerOverlayRef.current,
         cutoutSrc: cutoutDataUrl,
-        cutout: { tx, ty, scale, rotation },
+        cutout: { tx: photo.x, ty: photo.y, scale: photo.scale, rotation: photo.rotation },
         sigSrc: sigDataUrl ?? sigUrl,
-        sig: { x: 0.5, y: 0.59, widthFrac: 0.38, rotation: 0 },
+        sig: { x: stkSig.x, y: stkSig.y, widthFrac: STICKER_SIG_BASE_WIDTH * stkSig.scale, rotation: 0 },
       });
       const who =
         (firstName || nameL1 || "card").toLowerCase().replace(/\s+/g, "-") || "card";
@@ -1149,6 +1168,58 @@ export default function CardEditor({
     } finally {
       setStickerBusy(false);
     }
+  }
+
+  // ── Sticker photo/signature drag + resize ───────────────────
+  // Drag either layer to reposition it on the sticker; the size slider resizes
+  // whichever is active. The photo follows the card until first touched (stkPhoto
+  // null → the card's live transform), then becomes independent.
+  const stkPhotoLive = () => stkPhoto ?? { x: tx, y: ty, scale, rotation };
+  function stkPointFrac(e: React.PointerEvent) {
+    const r = stickerStageRef.current!.getBoundingClientRect();
+    return { px: (e.clientX - r.left) / r.width, py: (e.clientY - r.top) / r.height };
+  }
+  function onStickerPointerDown(e: React.PointerEvent) {
+    if (!stickerStageRef.current || !cutoutUrl) return;
+    stickerStageRef.current.setPointerCapture?.(e.pointerId);
+    const { px, py } = stkPointFrac(e);
+    // Hit-test the signature box; anything else grabs the photo.
+    let layer: "photo" | "sig" = "photo";
+    if (sigDataUrl ?? sigUrl) {
+      const w = STICKER_SIG_BASE_WIDTH * stkSig.scale;
+      const h = w / (sigAspect || 3);
+      if (Math.abs(px - stkSig.x) <= w / 2 && Math.abs(py - stkSig.y) <= h / 2) layer = "sig";
+    }
+    setStkActive(layer);
+    const start =
+      layer === "sig"
+        ? { x: stkSig.x, y: stkSig.y, scale: stkSig.scale, rotation: 0 }
+        : stkPhotoLive();
+    if (layer === "photo" && !stkPhoto) setStkPhoto(start);
+    stkGesture.current = { layer, px, py, start };
+  }
+  function onStickerPointerMove(e: React.PointerEvent) {
+    const g = stkGesture.current;
+    if (!g || !stickerStageRef.current) return;
+    const { px, py } = stkPointFrac(e);
+    const dx = px - g.px;
+    const dy = py - g.py;
+    if (g.layer === "sig") setStkSig((s) => ({ ...s, x: g.start.x + dx, y: g.start.y + dy }));
+    else setStkPhoto({ x: g.start.x + dx, y: g.start.y + dy, scale: g.start.scale, rotation: g.start.rotation });
+  }
+  function onStickerPointerUp() {
+    stkGesture.current = null;
+  }
+  function setStickerScale(v: number) {
+    if (stkActive === "sig") setStkSig((s) => ({ ...s, scale: v }));
+    else {
+      const cur = stkPhotoLive();
+      setStkPhoto({ ...cur, scale: v });
+    }
+  }
+  function resetStickerLayer() {
+    if (stkActive === "sig") setStkSig({ x: 0.5, y: 0.59, scale: 1 });
+    else setStkPhoto(null); // back to following the card photo
   }
 
   // Export a print-ready Raised Foil PDF: the card art in CMYK plus a RUVgold
@@ -1595,6 +1666,14 @@ export default function CardEditor({
   const titleShadow = isLight
     ? "0 2px 8px rgba(0,0,0,0.45)"
     : "0 1px 0 rgba(255,255,255,0.15)";
+
+  // Sticker: effective (editable) photo transform + signature box.
+  const hasSig = Boolean(sigDataUrl ?? sigUrl);
+  const stkPhotoEff = stkPhoto ?? { x: tx, y: ty, scale, rotation };
+  const stkSigW = STICKER_SIG_BASE_WIDTH * stkSig.scale;
+  // A thin contrasting outline keeps curved perimeter text legible over the
+  // photo without needing a scrim (light text → dark stroke, and vice-versa).
+  const stkTextStroke = isLight ? "rgba(0,0,0,0.5)" : "rgba(255,255,255,0.55)";
 
   // Picking a player auto-fills the card from their details; choosing "no
   // player" leaves whatever the user already typed alone.
@@ -2812,13 +2891,18 @@ export default function CardEditor({
           <div className="flex justify-center">
             <div
               ref={stickerStageRef}
-              className="relative overflow-hidden rounded-full shadow-md ring-1 ring-black/10"
-              style={{ width: 200, height: 200 }}
+              onPointerDown={onStickerPointerDown}
+              onPointerMove={onStickerPointerMove}
+              onPointerUp={onStickerPointerUp}
+              onPointerCancel={onStickerPointerUp}
+              className="relative touch-none select-none overflow-hidden rounded-full shadow-md ring-1 ring-black/10"
+              style={{ width: 200, height: 200, cursor: cutoutUrl ? "grab" : "default" }}
             >
               {/* Background — fills the square (bleeds past the circle die-cut). */}
               <div ref={stickerBgRef} style={{ position: "absolute", inset: 0, ...bgStyle }} />
 
-              {/* Cutout photo (preview only; the export draws it on canvas). */}
+              {/* Cutout photo (preview only; the export draws it on canvas).
+                  Uses the sticker's own editable transform (drag/resize). */}
               {cutoutDataUrl && (
                 <div
                   style={{
@@ -2828,7 +2912,7 @@ export default function CardEditor({
                     backgroundSize: "contain",
                     backgroundPosition: "center",
                     backgroundRepeat: "no-repeat",
-                    transform: `translate(${tx * 100}%, ${ty * 100}%) rotate(${rotation}deg) scale(${scale})`,
+                    transform: `translate(${stkPhotoEff.x * 100}%, ${stkPhotoEff.y * 100}%) rotate(${stkPhotoEff.rotation}deg) scale(${stkPhotoEff.scale})`,
                     transformOrigin: "center center",
                   }}
                 />
@@ -2837,105 +2921,155 @@ export default function CardEditor({
               {/* Overlay: legibility scrim + team/season (top) + name (bottom),
                   kept inside the safe circle. Captured for the export. */}
               <div ref={stickerOverlayRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                {(nameL1 || nameL2) && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: "44%",
-                      background: isLight
-                        ? "linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0))"
-                        : "linear-gradient(to top, rgba(255,255,255,0.55), rgba(255,255,255,0))",
-                    }}
-                  />
-                )}
-
-                {(teamText || ageText || seasonText) && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "13.5%",
-                      left: "15%",
-                      right: "15%",
-                      textAlign: "center",
-                      color: titleColor,
-                      textShadow: titleShadow,
-                      lineHeight: 1,
-                    }}
+                {stkCurved ? (
+                  // Curved perimeter lettering: team along the top arc, player
+                  // name along the bottom arc (SVG textPath, so it's vector and
+                  // survives the html-to-image capture on export).
+                  <svg
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="xMidYMid meet"
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible" }}
                   >
+                    <defs>
+                      <path id="stk-arc-top" d="M 13,50 A 37,37 0 0 1 87,50" fill="none" />
+                      <path id="stk-arc-bottom" d="M 87,50 A 37,37 0 0 1 13,50" fill="none" />
+                    </defs>
                     {teamText && (
+                      <text
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={titleColor}
+                        stroke={stkTextStroke}
+                        strokeWidth={0.35}
+                        letterSpacing={0.3}
+                        style={{ paintOrder: "stroke", fontFamily: "var(--font-anton), Impact, sans-serif", fontSize: 8 }}
+                      >
+                        <textPath href="#stk-arc-top" startOffset="50%">
+                          {teamText}
+                        </textPath>
+                      </text>
+                    )}
+                    {fullName && (
+                      <text
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={titleColor}
+                        stroke={stkTextStroke}
+                        strokeWidth={0.35}
+                        fontStyle={nameItalic ? "italic" : "normal"}
+                        style={{ paintOrder: "stroke", fontFamily: getNameFont(nameFont).family, fontSize: 8.5 }}
+                      >
+                        <textPath href="#stk-arc-bottom" startOffset="50%">
+                          {fullName}
+                        </textPath>
+                      </text>
+                    )}
+                  </svg>
+                ) : (
+                  <>
+                    {(nameL1 || nameL2) && (
                       <div
                         style={{
-                          fontFamily: "var(--font-anton), Impact, sans-serif",
-                          fontSize: "calc(var(--stickerw, 200px) * 5 / 100)",
-                          letterSpacing: "0.03em",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          position: "absolute",
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          height: "44%",
+                          background: isLight
+                            ? "linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0))"
+                            : "linear-gradient(to top, rgba(255,255,255,0.55), rgba(255,255,255,0))",
                         }}
-                      >
-                        {teamText}
-                      </div>
+                      />
                     )}
-                    {(ageText || seasonText) && (
-                      <div
-                        style={{
-                          fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-                          fontSize: "calc(var(--stickerw, 200px) * 2.6 / 100)",
-                          letterSpacing: "0.16em",
-                          fontWeight: 700,
-                          marginTop: "3%",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {[ageText, seasonText].filter(Boolean).join(" · ")}
-                      </div>
-                    )}
-                  </div>
-                )}
 
-                {(nameL1 || nameL2) && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: "13%",
-                      right: "13%",
-                      bottom: "16%",
-                      textAlign: "center",
-                      color: titleColor,
-                      textShadow: titleShadow,
-                      fontFamily: getNameFont(nameFont).family,
-                      fontStyle: nameItalic ? "italic" : "normal",
-                      lineHeight: 0.95,
-                      letterSpacing: "0.01em",
-                    }}
-                  >
-                    <div style={{ fontSize: `calc(var(--stickerw, 200px) * ${9 * nameSize} / 100)` }}>{nameL1}</div>
-                    {nameL2 && (
-                      <div style={{ fontSize: `calc(var(--stickerw, 200px) * ${9 * nameSize} / 100)`, marginTop: "1%" }}>
-                        {nameL2}
+                    {(teamText || ageText || seasonText) && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "13.5%",
+                          left: "15%",
+                          right: "15%",
+                          textAlign: "center",
+                          color: titleColor,
+                          textShadow: titleShadow,
+                          lineHeight: 1,
+                        }}
+                      >
+                        {teamText && (
+                          <div
+                            style={{
+                              fontFamily: "var(--font-anton), Impact, sans-serif",
+                              fontSize: "calc(var(--stickerw, 200px) * 5 / 100)",
+                              letterSpacing: "0.03em",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {teamText}
+                          </div>
+                        )}
+                        {(ageText || seasonText) && (
+                          <div
+                            style={{
+                              fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+                              fontSize: "calc(var(--stickerw, 200px) * 2.6 / 100)",
+                              letterSpacing: "0.16em",
+                              fontWeight: 700,
+                              marginTop: "3%",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {[ageText, seasonText].filter(Boolean).join(" · ")}
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
+
+                    {(nameL1 || nameL2) && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: "13%",
+                          right: "13%",
+                          bottom: "16%",
+                          textAlign: "center",
+                          color: titleColor,
+                          textShadow: titleShadow,
+                          fontFamily: getNameFont(nameFont).family,
+                          fontStyle: nameItalic ? "italic" : "normal",
+                          lineHeight: 0.95,
+                          letterSpacing: "0.01em",
+                        }}
+                      >
+                        <div style={{ fontSize: `calc(var(--stickerw, 200px) * ${9 * nameSize} / 100)` }}>{nameL1}</div>
+                        {nameL2 && (
+                          <div style={{ fontSize: `calc(var(--stickerw, 200px) * ${9 * nameSize} / 100)`, marginTop: "1%" }}>
+                            {nameL2}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
-              {/* Signature (preview only; matches the export placement). */}
+              {/* Signature (preview only; uses the sticker's editable placement). */}
               {(sigDataUrl ?? sigUrl) && (
                 <div
                   style={{
                     position: "absolute",
-                    left: "50%",
-                    top: "59%",
-                    width: "38%",
+                    left: `${stkSig.x * 100}%`,
+                    top: `${stkSig.y * 100}%`,
+                    width: `${stkSigW * 100}%`,
                     aspectRatio: `${sigAspect}`,
                     transform: "translate(-50%, -50%)",
                     backgroundImage: `url(${sigDataUrl ?? sigUrl})`,
                     backgroundSize: "contain",
                     backgroundPosition: "center",
                     backgroundRepeat: "no-repeat",
+                    outline: stkActive === "sig" ? "1px dashed rgba(59,130,246,0.9)" : "none",
+                    outlineOffset: 2,
                     pointerEvents: "none",
                   }}
                 />
@@ -2954,6 +3088,79 @@ export default function CardEditor({
                   pointerEvents: "none",
                 }}
               />
+            </div>
+          </div>
+
+          {cutoutUrl && (
+            <p className="text-center text-[11px] text-gray-400">
+              Drag the photo{hasSig ? " or signature" : ""} to reposition. Adjust size below.
+            </p>
+          )}
+
+          {/* Layout controls */}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Curved vs straight text */}
+              <div className="inline-flex overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600 text-xs">
+                {([["Curved", true], ["Straight", false]] as const).map(([lbl, val]) => (
+                  <button
+                    key={lbl}
+                    type="button"
+                    onClick={() => setStkCurved(val)}
+                    className={`px-2.5 py-1 font-medium ${
+                      stkCurved === val
+                        ? "bg-blue-600 text-white"
+                        : "bg-white text-gray-600 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+
+              {/* Which layer the size slider / reset act on */}
+              {hasSig && (
+                <div className="inline-flex overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600 text-xs">
+                  {([["Photo", "photo"], ["Signature", "sig"]] as const).map(([lbl, val]) => (
+                    <button
+                      key={lbl}
+                      type="button"
+                      onClick={() => setStkActive(val)}
+                      className={`px-2.5 py-1 font-medium ${
+                        stkActive === val
+                          ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900"
+                          : "bg-white text-gray-600 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="w-14 shrink-0 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                {hasSig ? (stkActive === "sig" ? "Sig size" : "Photo") : "Size"}
+              </span>
+              <input
+                type="range"
+                min={0.3}
+                max={stkActive === "sig" ? 2.5 : 3}
+                step={0.01}
+                value={stkActive === "sig" ? stkSig.scale : stkPhotoEff.scale}
+                onChange={(e) => setStickerScale(Number(e.target.value))}
+                disabled={!cutoutUrl}
+                className="h-1.5 flex-1 cursor-pointer accent-blue-600 disabled:opacity-40"
+              />
+              <button
+                type="button"
+                onClick={resetStickerLayer}
+                disabled={!cutoutUrl}
+                className="shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 text-[11px] font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+              >
+                Reset
+              </button>
             </div>
           </div>
 
