@@ -116,6 +116,75 @@ export async function compositeFront(L: FrontLayers): Promise<Blob> {
   return pngBlobWithDpi(addPrintBleed(trim).toDataURL("image/png"), EXPORT_DPI);
 }
 
+// ── 2" circle sticker export ────────────────────────────────────────────────
+// A round die-cut sticker (GotPrint spec): 2.0" final size, 2.325" with bleed.
+// The file is a SQUARE at the bleed size with the background running to every
+// edge — the printer cuts the 2" circle out of it, so no circular clip is baked
+// in. Content is kept inside a safe circle. Same layered approach as the card
+// (vector via html-to-image, raster via drawImage) so iOS renders it reliably.
+export const STICKER_DPI = 350;
+export const STICKER_BLEED_PX = Math.round(2.325 * STICKER_DPI); // 814 (2.325")
+
+export type StickerLayers = {
+  bgEl: HTMLElement;
+  overlayEl: HTMLElement; // scrim + name + team/season, kept inside the safe circle
+  cutoutSrc: string | null;
+  cutout: { tx: number; ty: number; scale: number; rotation: number };
+  sigSrc: string | null;
+  sig: { x: number; y: number; widthFrac: number; rotation: number };
+};
+
+export async function compositeSticker(L: StickerLayers): Promise<Blob> {
+  const S = STICKER_BLEED_PX;
+  const canvas = document.createElement("canvas");
+  canvas.width = S;
+  canvas.height = S;
+  const ctx = canvas.getContext("2d")!;
+
+  // 1. Background — fills the whole square so it bleeds past the die-cut circle.
+  ctx.drawImage(await layerCanvas(L.bgEl, S), 0, 0, S, S);
+
+  // 2. Cutout photo — the same contain-then-transform math as the card front,
+  // but in a square, so the framing set on the card carries over.
+  if (L.cutoutSrc) {
+    const img = await loadImage(L.cutoutSrc);
+    if (img.naturalWidth) {
+      const r = Math.min(S / img.naturalWidth, S / img.naturalHeight);
+      const dw = img.naturalWidth * r;
+      const dh = img.naturalHeight * r;
+      ctx.save();
+      ctx.translate(S / 2, S / 2);
+      ctx.translate(L.cutout.tx * S, L.cutout.ty * S);
+      ctx.rotate((L.cutout.rotation * Math.PI) / 180);
+      ctx.scale(L.cutout.scale, L.cutout.scale);
+      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+      ctx.restore();
+    }
+  }
+
+  // 3. Overlay (scrim + name + team/season).
+  ctx.drawImage(await layerCanvas(L.overlayEl, S), 0, 0, S, S);
+
+  // 4. Signature — centered at (x,y) fractions, contained in its box, rotated.
+  if (L.sigSrc) {
+    const img = await loadImage(L.sigSrc);
+    if (img.naturalWidth) {
+      const boxW = L.sig.widthFrac * S;
+      const boxH = boxW * (img.naturalHeight / img.naturalWidth);
+      const r = Math.min(boxW / img.naturalWidth, boxH / img.naturalHeight);
+      const dw = img.naturalWidth * r;
+      const dh = img.naturalHeight * r;
+      ctx.save();
+      ctx.translate(L.sig.x * S, L.sig.y * S);
+      ctx.rotate((L.sig.rotation * Math.PI) / 180);
+      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+      ctx.restore();
+    }
+  }
+
+  return pngBlobWithDpi(canvas.toDataURL("image/png"), STICKER_DPI);
+}
+
 // ── Raised Foil export (separate from the normal PNG path) ─────────────────
 
 // OR a captured layer's alpha silhouette onto the (white-on-black) mask: every

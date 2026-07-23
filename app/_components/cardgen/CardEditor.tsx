@@ -33,6 +33,7 @@ import {
   compositeFront,
   compositeBack,
   compositeFoilMaskCanvas,
+  compositeSticker,
 } from "./card-raster";
 import { addPrintBleed, EXPORT_TRIM_W } from "@/lib/cardgen/print-bleed";
 import { buildZip, type ZipEntry } from "./zip";
@@ -576,6 +577,12 @@ export default function CardEditor({
   const bgLayerRef = useRef<HTMLDivElement>(null);
   const overlayLayerRef = useRef<HTMLDivElement>(null);
   const backStageRef = useRef<HTMLDivElement>(null);
+  // 2" circle sticker preview (a square whose corners the die-cut removes) — its
+  // own bg/overlay layers are captured for the sticker export.
+  const stickerStageRef = useRef<HTMLDivElement>(null);
+  const stickerBgRef = useRef<HTMLDivElement>(null);
+  const stickerOverlayRef = useRef<HTMLDivElement>(null);
+  const [stickerBusy, setStickerBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
   const headshotFileRef = useRef<HTMLInputElement>(null);
@@ -607,6 +614,18 @@ export default function CardEditor({
     ro.observe(el);
     return () => ro.disconnect();
   }, [step]);
+
+  // Same idea for the sticker preview: publish its rendered width as --stickerw
+  // so the sticker's text scales as a fraction of the circle at any preview size.
+  useEffect(() => {
+    const el = stickerStageRef.current;
+    if (!el) return;
+    const set = () => el.style.setProperty("--stickerw", `${el.clientWidth}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [step, side]);
 
   // Measure the signature's natural aspect ratio so the background-image box
   // matches it (no letterboxing).
@@ -1093,6 +1112,42 @@ export default function CardEditor({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // Export the 2" circle sticker (2.325" square with bleed, 350 DPI). Reuses the
+  // card's background + photo + signature; the name/team are re-laid-out for the
+  // circle by the hidden sticker stage. Share sheet on phones, download on desktop.
+  async function handleDownloadSticker() {
+    if (!stickerStageRef.current || !stickerBgRef.current || !stickerOverlayRef.current) return;
+    if (!cutoutUrl || stickerBusy) return;
+    setStickerBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if ("fonts" in document) await (document as Document).fonts.ready;
+      await Promise.all([
+        preloadImage(cutoutDataUrl),
+        preloadImage(sigDataUrl ?? sigUrl),
+      ]);
+      const blob = await compositeSticker({
+        bgEl: stickerBgRef.current,
+        overlayEl: stickerOverlayRef.current,
+        cutoutSrc: cutoutDataUrl,
+        cutout: { tx, ty, scale, rotation },
+        sigSrc: sigDataUrl ?? sigUrl,
+        sig: { x: 0.5, y: 0.59, widthFrac: 0.38, rotation: 0 },
+      });
+      const who =
+        (firstName || nameL1 || "card").toLowerCase().replace(/\s+/g, "-") || "card";
+      await shareFile(blob, `sticker-${who}.png`);
+      const template = bg.type === "template" ? bg.id : "custom";
+      track("card_sticker_downloaded", { standalone, template });
+      logClientActivity("card_sticker_downloaded", { standalone, template }).catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStickerBusy(false);
     }
   }
 
@@ -2737,6 +2792,179 @@ export default function CardEditor({
         >
           {downloading ? "Preparing…" : "⬇︎ Download front & back"}
         </button>
+
+        {/* 2" round die-cut sticker — the photo + name (and signature / team ·
+            season if present) on the card's background. Exported as a 2.325"
+            square with bleed at 350 DPI; the printer cuts the 2" circle out. The
+            preview's corners show what the die-cut removes. */}
+        <div className="w-full space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
+              2&Prime; circle sticker{" "}
+              <span className="font-normal normal-case text-gray-400">— round die-cut, print-ready</span>
+            </p>
+            <p className="mt-0.5 text-[11px] text-gray-400">
+              Photo &amp; name{(sigDataUrl ?? sigUrl) ? ", signature" : ""}
+              {teamText || seasonText || ageText ? ", team · season" : ""} on the card&rsquo;s background.
+            </p>
+          </div>
+
+          <div className="flex justify-center">
+            <div
+              ref={stickerStageRef}
+              className="relative overflow-hidden rounded-full shadow-md ring-1 ring-black/10"
+              style={{ width: 200, height: 200 }}
+            >
+              {/* Background — fills the square (bleeds past the circle die-cut). */}
+              <div ref={stickerBgRef} style={{ position: "absolute", inset: 0, ...bgStyle }} />
+
+              {/* Cutout photo (preview only; the export draws it on canvas). */}
+              {cutoutDataUrl && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundImage: `url(${cutoutDataUrl})`,
+                    backgroundSize: "contain",
+                    backgroundPosition: "center",
+                    backgroundRepeat: "no-repeat",
+                    transform: `translate(${tx * 100}%, ${ty * 100}%) rotate(${rotation}deg) scale(${scale})`,
+                    transformOrigin: "center center",
+                  }}
+                />
+              )}
+
+              {/* Overlay: legibility scrim + team/season (top) + name (bottom),
+                  kept inside the safe circle. Captured for the export. */}
+              <div ref={stickerOverlayRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                {(nameL1 || nameL2) && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: "44%",
+                      background: isLight
+                        ? "linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0))"
+                        : "linear-gradient(to top, rgba(255,255,255,0.55), rgba(255,255,255,0))",
+                    }}
+                  />
+                )}
+
+                {(teamText || ageText || seasonText) && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "13.5%",
+                      left: "15%",
+                      right: "15%",
+                      textAlign: "center",
+                      color: titleColor,
+                      textShadow: titleShadow,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {teamText && (
+                      <div
+                        style={{
+                          fontFamily: "var(--font-anton), Impact, sans-serif",
+                          fontSize: "calc(var(--stickerw, 200px) * 5 / 100)",
+                          letterSpacing: "0.03em",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {teamText}
+                      </div>
+                    )}
+                    {(ageText || seasonText) && (
+                      <div
+                        style={{
+                          fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+                          fontSize: "calc(var(--stickerw, 200px) * 2.6 / 100)",
+                          letterSpacing: "0.16em",
+                          fontWeight: 700,
+                          marginTop: "3%",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {[ageText, seasonText].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(nameL1 || nameL2) && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: "13%",
+                      right: "13%",
+                      bottom: "16%",
+                      textAlign: "center",
+                      color: titleColor,
+                      textShadow: titleShadow,
+                      fontFamily: getNameFont(nameFont).family,
+                      fontStyle: nameItalic ? "italic" : "normal",
+                      lineHeight: 0.95,
+                      letterSpacing: "0.01em",
+                    }}
+                  >
+                    <div style={{ fontSize: `calc(var(--stickerw, 200px) * ${9 * nameSize} / 100)` }}>{nameL1}</div>
+                    {nameL2 && (
+                      <div style={{ fontSize: `calc(var(--stickerw, 200px) * ${9 * nameSize} / 100)`, marginTop: "1%" }}>
+                        {nameL2}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Signature (preview only; matches the export placement). */}
+              {(sigDataUrl ?? sigUrl) && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: "59%",
+                    width: "38%",
+                    aspectRatio: `${sigAspect}`,
+                    transform: "translate(-50%, -50%)",
+                    backgroundImage: `url(${sigDataUrl ?? sigUrl})`,
+                    backgroundSize: "contain",
+                    backgroundPosition: "center",
+                    backgroundRepeat: "no-repeat",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+
+              {/* Cut-line guide — the 2" trim circle. Preview only: it sits
+                  outside the captured bg/overlay layers, so it never exports.
+                  Keep everything inside this dashed ring. */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: "7%",
+                  borderRadius: "9999px",
+                  border: "1px dashed rgba(255,255,255,0.85)",
+                  boxShadow: "0 0 0 1px rgba(0,0,0,0.3)",
+                  pointerEvents: "none",
+                }}
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleDownloadSticker}
+            disabled={!cutoutUrl || stickerBusy}
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+          >
+            {stickerBusy ? "Preparing…" : '⬇︎ Export 2" sticker'}
+          </button>
+        </div>
 
         {/* Raised Foil export — a print-ready CMYK PDF with a RUVgold spot
             channel over the toggled front elements. Separate from the PNG path. */}
