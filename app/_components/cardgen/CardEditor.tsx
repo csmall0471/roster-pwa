@@ -2931,11 +2931,13 @@ export default function CardEditor({
                     style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible" }}
                   >
                     <defs>
-                      {/* Top text reads left→right over the top (sweep 1); bottom
-                          text must run left→right UNDER the bottom (sweep 0) so its
-                          letters sit upright — sweep 1 there flips them upside-down. */}
-                      <path id="stk-arc-top" d="M 13,50 A 37,37 0 0 1 87,50" fill="none" />
-                      <path id="stk-arc-bottom" d="M 13,50 A 37,37 0 0 0 87,50" fill="none" />
+                      {/* Text baseline arcs at r=30 (60% dia) so the lettering
+                          stays well inside GotPrint's safe circle (~74% dia).
+                          Top reads left→right over the top (sweep 1); bottom must
+                          run left→right UNDER the bottom (sweep 0) so its letters
+                          sit upright — sweep 1 there flips them upside-down. */}
+                      <path id="stk-arc-top" d="M 20,50 A 30,30 0 0 1 80,50" fill="none" />
+                      <path id="stk-arc-bottom" d="M 20,50 A 30,30 0 0 0 80,50" fill="none" />
                     </defs>
                     {teamText && (
                       <text
@@ -2943,9 +2945,8 @@ export default function CardEditor({
                         dominantBaseline="central"
                         fill={titleColor}
                         stroke={stkTextStroke}
-                        strokeWidth={0.35}
-                        letterSpacing={0.3}
-                        style={{ paintOrder: "stroke", fontFamily: "var(--font-anton), Impact, sans-serif", fontSize: 8 }}
+                        strokeWidth={0.3}
+                        style={{ paintOrder: "stroke", fontFamily: "var(--font-anton), Impact, sans-serif", fontSize: 7 }}
                       >
                         <textPath href="#stk-arc-top" startOffset="50%">
                           {teamText}
@@ -2958,9 +2959,9 @@ export default function CardEditor({
                         dominantBaseline="central"
                         fill={titleColor}
                         stroke={stkTextStroke}
-                        strokeWidth={0.35}
+                        strokeWidth={0.3}
                         fontStyle={nameItalic ? "italic" : "normal"}
-                        style={{ paintOrder: "stroke", fontFamily: getNameFont(nameFont).family, fontSize: 8.5 }}
+                        style={{ paintOrder: "stroke", fontFamily: getNameFont(nameFont).family, fontSize: 7 }}
                       >
                         <textPath href="#stk-arc-bottom" startOffset="50%">
                           {fullName}
@@ -3078,16 +3079,25 @@ export default function CardEditor({
                 />
               )}
 
-              {/* Cut-line guide — the 2" trim circle. Preview only: it sits
-                  outside the captured bg/overlay layers, so it never exports.
-                  Keep everything inside this dashed ring. */}
+              {/* Guides (preview only — outside the captured layers, never
+                  exported). Outer ring = the 2" cut line; inner ring = the safe
+                  zone. Keep all text/content inside the inner ring. */}
               <div
                 style={{
                   position: "absolute",
                   inset: "7%",
                   borderRadius: "9999px",
-                  border: "1px dashed rgba(255,255,255,0.85)",
-                  boxShadow: "0 0 0 1px rgba(0,0,0,0.3)",
+                  border: "1px dashed rgba(255,255,255,0.55)",
+                  boxShadow: "0 0 0 1px rgba(0,0,0,0.25)",
+                  pointerEvents: "none",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: "13%",
+                  borderRadius: "9999px",
+                  border: "1px dashed rgba(56,189,248,0.9)",
                   pointerEvents: "none",
                 }}
               />
@@ -3096,7 +3106,8 @@ export default function CardEditor({
 
           {cutoutUrl && (
             <p className="text-center text-[11px] text-gray-400">
-              Drag the photo{hasSig ? " or signature" : ""} to reposition. Adjust size below.
+              Drag the photo{hasSig ? " or signature" : ""} to reposition; size below. Keep
+              key content inside the blue ring (safe zone).
             </p>
           )}
 
