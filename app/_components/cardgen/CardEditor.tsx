@@ -2931,18 +2931,21 @@ export default function CardEditor({
                     style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible" }}
                   >
                     <defs>
-                      {/* Text baseline arcs at r=30 (60% dia) so the lettering
-                          stays well inside GotPrint's safe circle (~74% dia).
-                          Top reads left→right over the top (sweep 1); bottom must
-                          run left→right UNDER the bottom (sweep 0) so its letters
-                          sit upright — sweep 1 there flips them upside-down. */}
-                      <path id="stk-arc-top" d="M 20,50 A 30,30 0 0 1 80,50" fill="none" />
-                      <path id="stk-arc-bottom" d="M 20,50 A 30,30 0 0 0 80,50" fill="none" />
+                      {/* Both words' letter BODIES center on the same ring (~r30,
+                          60% dia — inside GotPrint's ~74% safe circle). We use the
+                          default text baseline (html-to-image ignores
+                          dominant-baseline, so relying on it broke preview↔export
+                          symmetry), so the arcs are offset to compensate: the top
+                          baseline sits a touch inside (letters rise outward), the
+                          bottom a touch outside (letters rise inward). Top runs
+                          left→right over the top (sweep 1); bottom left→right UNDER
+                          the bottom (sweep 0) so its letters stay upright. */}
+                      <path id="stk-arc-top" d="M 22.5,50 A 27.5,27.5 0 0 1 77.5,50" fill="none" />
+                      <path id="stk-arc-bottom" d="M 17.5,50 A 32.5,32.5 0 0 0 82.5,50" fill="none" />
                     </defs>
                     {teamText && (
                       <text
                         textAnchor="middle"
-                        dominantBaseline="central"
                         fill={titleColor}
                         stroke={stkTextStroke}
                         strokeWidth={0.3}
@@ -2956,7 +2959,6 @@ export default function CardEditor({
                     {fullName && (
                       <text
                         textAnchor="middle"
-                        dominantBaseline="central"
                         fill={titleColor}
                         stroke={stkTextStroke}
                         strokeWidth={0.3}
