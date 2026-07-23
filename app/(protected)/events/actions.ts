@@ -360,7 +360,9 @@ export async function saveSignupAsCoach(
 
   const { data: event } = await supabase
     .from("events")
-    .select("id, title, pay_url, pay_instructions, event_price_tiers(*, event_tier_fields(*))")
+    .select(
+      "id, title, slug, starts_at, ends_at, location, description, image_urls, pay_url, pay_instructions, event_price_tiers(*, event_tier_fields(*))"
+    )
     .eq("id", input.event_id)
     .single();
   if (!event) return { error: "Event not found." };
@@ -405,8 +407,21 @@ export async function saveSignupAsCoach(
       for (const e of await familyParentEmails(createServiceClient(), input.parent_id)) add(e);
     }
     if (byEmail.size) {
-      const ev = event as unknown as { title: string; pay_url: string | null; pay_instructions: string | null };
+      const ev = event as unknown as {
+        title: string;
+        slug: string;
+        starts_at: string | null;
+        ends_at: string | null;
+        location: string | null;
+        description: string | null;
+        image_urls: string[] | null;
+        pay_url: string | null;
+        pay_instructions: string | null;
+      };
       const payUrl = venmoPayLink(ev.pay_url, eventPayNote(attendees, name, ev.title), total_cents);
+      const h = await headers();
+      const proto = h.get("x-forwarded-proto") ?? "https";
+      const eventUrl = `${proto}://${h.get("host")}/event/${ev.slug}`;
       await sendSignupConfirmation({
         to: [...byEmail.values()],
         name,
@@ -416,6 +431,12 @@ export async function saveSignupAsCoach(
         declined: false,
         pay_url: payUrl,
         pay_instructions: ev.pay_instructions,
+        event_url: eventUrl,
+        starts_at: ev.starts_at,
+        ends_at: ev.ends_at,
+        location: ev.location,
+        description: ev.description,
+        image_urls: ev.image_urls,
       }).catch(() => {});
     }
   }

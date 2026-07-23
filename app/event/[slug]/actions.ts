@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { logActivity } from "@/lib/activity";
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay";
@@ -279,7 +280,7 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   const { data: event } = await supabase
     .from("events")
     .select(
-      "id, title, team_id, status, pay_url, pay_instructions, event_fields(*), event_price_tiers(*, event_tier_fields(*))"
+      "id, title, slug, team_id, status, starts_at, ends_at, location, description, image_urls, pay_url, pay_instructions, event_fields(*), event_price_tiers(*, event_tier_fields(*))"
     )
     .eq("id", input.event_id)
     .single();
@@ -379,6 +380,9 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   // Confirmation email to the parent/guest. Never let an email failure break the
   // signup itself.
   if (email) {
+    const h = await headers();
+    const proto = h.get("x-forwarded-proto") ?? "https";
+    const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
     await sendSignupConfirmation({
       to: email,
       name,
@@ -388,6 +392,12 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
       declined,
       pay_url: payUrl,
       pay_instructions: declined ? null : event.pay_instructions,
+      event_url: eventUrl,
+      starts_at: event.starts_at,
+      ends_at: event.ends_at,
+      location: event.location,
+      description: event.description,
+      image_urls: event.image_urls,
     }).catch(() => {});
   }
 
