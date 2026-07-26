@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Question, QuestionSetStatus } from "@/lib/types";
 import QuestionSetView, {
+  type BoardGuardian,
   type BoardTeam,
   type PickerTeam,
 } from "./_components/QuestionSetView";
@@ -85,6 +86,7 @@ export default async function QuestionSetPage({
         id: row.player_id,
         name: `${row.players.first_name} ${row.players.last_name}`.trim(),
         jersey: row.jersey_number,
+        guardians: [],
       });
     }
     // Keep the targeted-team order; sort kids by jersey (numeric) then name.
@@ -101,6 +103,34 @@ export default async function QuestionSetPage({
         return a.name.localeCompare(b.name);
       });
       teams.push(bt);
+    }
+
+    // Guardians (with phones) for those kids — powers the "Text parents" button.
+    // The coach can read player_parents(parents(…)) for their own players (same
+    // path the players page uses).
+    const allPlayerIds = [...new Set(teams.flatMap((t) => t.players.map((p) => p.id)))];
+    if (allPlayerIds.length > 0) {
+      type ParentRow = { first_name: string | null; last_name: string | null; phone: string | null };
+      type GRow = { id: string; player_parents: { parents: ParentRow | ParentRow[] | null }[] | null };
+      const { data: gRows } = await supabase
+        .from("players")
+        .select("id, player_parents(parents(first_name, last_name, phone))")
+        .in("id", allPlayerIds);
+
+      const byPlayer = new Map<string, BoardGuardian[]>();
+      for (const row of (gRows ?? []) as unknown as GRow[]) {
+        const guardians: BoardGuardian[] = [];
+        for (const pp of row.player_parents ?? []) {
+          const pr = Array.isArray(pp.parents) ? pp.parents[0] : pp.parents;
+          if (!pr) continue;
+          guardians.push({
+            name: `${pr.first_name ?? ""} ${pr.last_name ?? ""}`.trim(),
+            phone: pr.phone ?? null,
+          });
+        }
+        byPlayer.set(row.id, guardians);
+      }
+      for (const t of teams) for (const p of t.players) p.guardians = byPlayer.get(p.id) ?? [];
     }
   }
 

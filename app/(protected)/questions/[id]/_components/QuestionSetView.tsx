@@ -6,8 +6,15 @@ import type { Question, QuestionSetStatus } from "@/lib/types";
 import { deleteSet, setAnswer, updateSet } from "../../actions";
 import AnswerCell from "./AnswerCell";
 import SetSettingsPanel from "./SetSettingsPanel";
+import TextParentsButton from "./TextParentsButton";
 
-export type BoardPlayer = { id: string; name: string; jersey: string | null };
+export type BoardGuardian = { name: string; phone: string | null };
+export type BoardPlayer = {
+  id: string;
+  name: string;
+  jersey: string | null;
+  guardians: BoardGuardian[];
+};
 export type BoardTeam = { id: string; label: string; players: BoardPlayer[] };
 export type PickerTeam = { id: string; label: string };
 
@@ -106,6 +113,27 @@ export default function QuestionSetView({
   }
 
   const answer = (q: Question, p: BoardPlayer) => answers.get(keyOf(q.id, p.id)) ?? "";
+
+  // ── Texting parents (opens Messages on Mac via the sms: scheme) ──────────────
+  const firstName = (full: string) => full.trim().split(/\s+/)[0] || full;
+  const phonesFor = (p: BoardPlayer) =>
+    p.guardians.map((g) => g.phone).filter((x): x is string => !!x && x.trim() !== "");
+  const guardianNames = (p: BoardPlayer) =>
+    p.guardians.map((g) => g.name.trim()).filter(Boolean).join(", ");
+
+  function bodyForPrompts(p: BoardPlayer, prompts: string[]): string {
+    const who = firstName(p.name);
+    if (prompts.length <= 1) {
+      return `Hi! Quick question for ${who}: ${prompts[0] ?? ""}\nThanks!`;
+    }
+    return `Hi! A few quick things for ${who}:\n${prompts.map((q) => `• ${q}`).join("\n")}\nThanks!`;
+  }
+  // A kid's still-open questions (fall back to all if everything's answered).
+  function bodyForPlayer(p: BoardPlayer): string {
+    const open = questions.filter((q) => answer(q, p).trim() === "");
+    const prompts = (open.length ? open : questions).map((q) => q.prompt);
+    return bodyForPrompts(p, prompts);
+  }
 
   const noTeams = targetTeamIds.length === 0;
   const noQuestions = questions.length === 0;
@@ -279,10 +307,20 @@ export default function QuestionSetView({
                           className="border-b border-gray-100 last:border-0 dark:border-gray-800/60"
                         >
                           <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-3 py-1.5 font-medium text-gray-900 dark:bg-gray-950 dark:text-white">
-                            {p.jersey ? (
-                              <span className="mr-1 text-gray-400">#{p.jersey}</span>
-                            ) : null}
-                            {p.name}
+                            <div className="flex items-center gap-2">
+                              <span>
+                                {p.jersey ? (
+                                  <span className="mr-1 text-gray-400">#{p.jersey}</span>
+                                ) : null}
+                                {p.name}
+                              </span>
+                              <TextParentsButton
+                                compact
+                                phones={phonesFor(p)}
+                                recipientsLabel={guardianNames(p)}
+                                body={bodyForPlayer(p)}
+                              />
+                            </div>
                           </td>
                           {questions.map((q) => (
                             <td key={q.id} className="px-2 py-1.5 align-middle">
@@ -330,7 +368,7 @@ export default function QuestionSetView({
                       </p>
                       <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-3">
                         {t.players.map((p) => (
-                          <div key={p.id} className="flex items-center gap-3">
+                          <div key={p.id} className="flex items-center gap-2">
                             <span className="w-40 shrink-0 truncate text-sm text-gray-700 dark:text-gray-200">
                               {p.jersey ? <span className="text-gray-400">#{p.jersey} </span> : null}
                               {p.name}
@@ -343,6 +381,12 @@ export default function QuestionSetView({
                                 onCommit={(v) => commit(q.id, p.id, v)}
                               />
                             </div>
+                            <TextParentsButton
+                              compact
+                              phones={phonesFor(p)}
+                              recipientsLabel={guardianNames(p)}
+                              body={bodyForPrompts(p, [q.prompt])}
+                            />
                           </div>
                         ))}
                       </div>
