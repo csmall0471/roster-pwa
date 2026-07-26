@@ -90,6 +90,10 @@ export async function createPlayer(
       date_of_birth: (formData.get("date_of_birth") as string) || null,
       grade: (formData.get("grade") as string)?.trim() || null,
       shirt_size: (formData.get("shirt_size") as string)?.trim() || null,
+      street: (formData.get("street") as string)?.trim() || null,
+      city: (formData.get("city") as string)?.trim() || null,
+      state: (formData.get("state") as string)?.trim() || null,
+      zip: (formData.get("zip") as string)?.trim() || null,
       notes: (formData.get("notes") as string)?.trim() || null,
     })
     .select("id")
@@ -143,6 +147,10 @@ export async function updatePlayer(
       date_of_birth: (formData.get("date_of_birth") as string) || null,
       grade: (formData.get("grade") as string)?.trim() || null,
       shirt_size: (formData.get("shirt_size") as string)?.trim() || null,
+      street: (formData.get("street") as string)?.trim() || null,
+      city: (formData.get("city") as string)?.trim() || null,
+      state: (formData.get("state") as string)?.trim() || null,
+      zip: (formData.get("zip") as string)?.trim() || null,
       notes: (formData.get("notes") as string)?.trim() || null,
     })
     .eq("id", id)

@@ -29,6 +29,10 @@ export default async function EditPlayerPage({
     date_of_birth: data.date_of_birth ?? null,
     grade: data.grade ?? null,
     shirt_size: data.shirt_size ?? null,
+    street: data.street ?? null,
+    city: data.city ?? null,
+    state: data.state ?? null,
+    zip: data.zip ?? null,
     notes: data.notes ?? null,
     parents: (
       data.player_parents as Array<{

@@ -195,6 +195,33 @@ export default async function PlayerDetailPage({
         </section>
       )}
 
+      {/* Address */}
+      {(player.street || player.city || player.state || player.zip) && (
+        <section className="mb-6">
+          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+            Address
+          </h2>
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
+            {(() => {
+              const cityState = [player.city, player.state].filter(Boolean).join(", ");
+              const line2 = [cityState, player.zip].filter(Boolean).join(" ");
+              const full = [player.street, line2].filter(Boolean).join(", ");
+              return (
+                <a
+                  href={`https://maps.google.com/?q=${encodeURIComponent(full)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  {player.street && <span className="block">{player.street}</span>}
+                  {line2 && <span className="block">{line2}</span>}
+                </a>
+              );
+            })()}
+          </div>
+        </section>
+      )}
+
       {/* Siblings */}
       <div className="mb-6">
         <SiblingsSection playerId={id} playerLastName={player.last_name as string} initialSiblings={siblings} linkablePlayers={linkablePlayers} canPromote />

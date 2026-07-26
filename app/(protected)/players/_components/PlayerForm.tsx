@@ -11,6 +11,10 @@ interface PlayerData {
   date_of_birth: string | null;
   grade: string | null;
   shirt_size: string | null;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
   notes: string | null;
   parents: Pick<Parent, "id" | "first_name" | "last_name" | "email" | "phone">[];
 }
@@ -94,6 +98,41 @@ export default function PlayerForm({ player, action }: Props) {
               defaultValue={player?.notes ?? ""}
               className="input resize-none"
             />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Address ─────────────────────────────────── */}
+      <section>
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+          Address
+        </h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <label htmlFor="street" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Street
+            </label>
+            <input id="street" name="street" defaultValue={player?.street ?? ""} className="input" />
+          </div>
+          <div>
+            <label htmlFor="city" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              City
+            </label>
+            <input id="city" name="city" defaultValue={player?.city ?? ""} className="input" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="state" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                State
+              </label>
+              <input id="state" name="state" defaultValue={player?.state ?? ""} className="input" />
+            </div>
+            <div>
+              <label htmlFor="zip" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                ZIP
+              </label>
+              <input id="zip" name="zip" inputMode="numeric" defaultValue={player?.zip ?? ""} className="input" />
+            </div>
           </div>
         </div>
       </section>
