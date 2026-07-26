@@ -40,11 +40,18 @@ CREATE TABLE IF NOT EXISTS questions (
   help_text   text,
   answer_type text NOT NULL DEFAULT 'text',   -- 'text' | 'number' | 'select' | 'bool'
   options     text[] NOT NULL DEFAULT '{}',   -- choices for 'select'
+  -- Extra kid data to display beside this question's answers (and in the export):
+  -- a player-profile key ('shirt_size' | 'grade' | 'age') or another question in
+  -- the same list encoded as 'q:<questionId>'.
+  ref_fields  text[] NOT NULL DEFAULT '{}',
   position    int NOT NULL DEFAULT 0,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS questions_set ON questions (set_id);
 CREATE INDEX IF NOT EXISTS questions_user ON questions (user_id);
+
+-- Idempotent add for DBs where questions predates ref_fields.
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS ref_fields text[] NOT NULL DEFAULT '{}';
 
 -- One answer per (question, kid). Everything is stored as text; number/bool are
 -- serialized ("12", "yes"/"no"). An absent row = still open.

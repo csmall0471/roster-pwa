@@ -5,16 +5,28 @@ import { useRouter } from "next/navigation";
 import type { Question, QuestionSetStatus } from "@/lib/types";
 import { deleteSet, setAnswer, updateSet } from "../../actions";
 import { renderTextTemplate } from "../../text-template";
+import {
+  PROFILE_REF_FIELDS,
+  ageFromDob,
+  isQuestionRef,
+  questionRefId,
+} from "../../ref-fields";
 import AnswerCell from "./AnswerCell";
 import SetSettingsPanel from "./SetSettingsPanel";
 import TextParentsButton from "./TextParentsButton";
 
 export type BoardGuardian = { name: string; phone: string | null };
+export type BoardPlayerAttrs = {
+  shirt_size: string | null;
+  grade: string | null;
+  dob: string | null;
+};
 export type BoardPlayer = {
   id: string;
   name: string;
   jersey: string | null;
   guardians: BoardGuardian[];
+  attrs: BoardPlayerAttrs;
 };
 export type BoardTeam = { id: string; label: string; players: BoardPlayer[] };
 export type PickerTeam = { id: string; label: string };
@@ -135,6 +147,70 @@ export default function QuestionSetView({
     return bodyForPrompts(p, prompts);
   }
 
+  // ── Reference fields (extra kid data shown beside a question) ────────────────
+  function refLabel(ref: string): string {
+    if (isQuestionRef(ref)) {
+      const q = questions.find((x) => x.id === questionRefId(ref));
+      return q ? q.prompt : "Question";
+    }
+    return PROFILE_REF_FIELDS.find((f) => f.key === ref)?.label ?? ref;
+  }
+  function refValue(ref: string, p: BoardPlayer): string {
+    if (isQuestionRef(ref)) return answers.get(keyOf(questionRefId(ref), p.id)) ?? "";
+    if (ref === "shirt_size") return p.attrs.shirt_size ?? "";
+    if (ref === "grade") return p.attrs.grade ?? "";
+    if (ref === "age") {
+      const a = p.attrs.dob ? ageFromDob(p.attrs.dob) : null;
+      return a == null ? "" : String(a);
+    }
+    return "";
+  }
+  const shortLabel = (s: string) => {
+    const t = s.replace(/\?+$/, "").trim();
+    return t.length > 22 ? `${t.slice(0, 22)}…` : t;
+  };
+
+  // ── CSV export ───────────────────────────────────────────────────────────────
+  function exportCsv() {
+    // Profile ref fields used anywhere become their own columns. Question-type
+    // refs are skipped — every question is already its own answer column.
+    const profileCols = PROFILE_REF_FIELDS.filter((f) =>
+      questions.some((q) => q.ref_fields.includes(f.key))
+    );
+    const header = [
+      "Team",
+      "Player",
+      "Jersey #",
+      ...profileCols.map((f) => f.label),
+      ...questions.map((q) => q.prompt),
+    ];
+    const rows: string[][] = [];
+    for (const t of teams) {
+      for (const p of t.players) {
+        rows.push([
+          t.label,
+          p.name,
+          p.jersey ?? "",
+          ...profileCols.map((f) => refValue(f.key, p)),
+          ...questions.map((q) => answer(q, p)),
+        ]);
+      }
+    }
+    const esc = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const csv = [header, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+    // Prepend a BOM so Excel reads it as UTF-8.
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "questions";
+    a.href = url;
+    a.download = `${slug}-results.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   const noTeams = targetTeamIds.length === 0;
   const noQuestions = questions.length === 0;
 
@@ -222,6 +298,15 @@ export default function QuestionSetView({
           >
             {showSettings ? "Done" : "⚙︎ Setup"}
           </button>
+          {!noTeams && !noQuestions && totalKids > 0 && (
+            <button
+              type="button"
+              onClick={exportCsv}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              ⬇ Export CSV
+            </button>
+          )}
           {totalCells > 0 && (
             <span className="text-sm text-gray-500 dark:text-gray-400">
               {answeredCells} / {totalCells} filled
@@ -351,6 +436,7 @@ export default function QuestionSetView({
               (n, t) => n + t.players.filter((p) => answer(q, p).trim() !== "").length,
               0
             );
+            const hasRefs = q.ref_fields.length > 0;
             return (
               <div
                 key={q.id}
@@ -368,14 +454,18 @@ export default function QuestionSetView({
                       <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                         {t.label}
                       </p>
-                      <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                      <div
+                        className={`grid gap-x-6 gap-y-1.5 ${
+                          hasRefs ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+                        }`}
+                      >
                         {t.players.map((p) => (
                           <div key={p.id} className="flex items-center gap-2">
                             <span className="w-40 shrink-0 truncate text-sm text-gray-700 dark:text-gray-200">
                               {p.jersey ? <span className="text-gray-400">#{p.jersey} </span> : null}
                               {p.name}
                             </span>
-                            <div className="flex-1">
+                            <div className={hasRefs ? "w-44 shrink-0" : "flex-1"}>
                               <AnswerCell
                                 type={q.answer_type}
                                 options={q.options}
@@ -383,6 +473,18 @@ export default function QuestionSetView({
                                 onCommit={(v) => commit(q.id, p.id, v)}
                               />
                             </div>
+                            {hasRefs && (
+                              <div className="min-w-0 flex-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                                {q.ref_fields.map((ref) => (
+                                  <span key={ref} className="mr-3 whitespace-nowrap">
+                                    <span className="text-gray-400 dark:text-gray-500">
+                                      {shortLabel(refLabel(ref))}:
+                                    </span>{" "}
+                                    {refValue(ref, p) || "—"}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             <TextParentsButton
                               compact
                               phones={phonesFor(p)}

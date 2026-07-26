@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { QuestionAnswerType, QuestionSetStatus } from "@/lib/types";
+import { isValidRef } from "./ref-fields";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -159,7 +160,13 @@ export async function setSetTeams(
 
 export async function addQuestion(
   setId: string,
-  input: { prompt: string; help_text: string; answer_type: QuestionAnswerType; options: string[] }
+  input: {
+    prompt: string;
+    help_text: string;
+    answer_type: QuestionAnswerType;
+    options: string[];
+    ref_fields?: string[];
+  }
 ): Promise<{ id?: string; error?: string }> {
   const supabase = await createClient();
   const userId = await requireCoach(supabase);
@@ -174,6 +181,7 @@ export async function addQuestion(
       : [];
   if (answer_type === "select" && options.length === 0)
     return { error: "Add at least one choice for a dropdown question." };
+  const ref_fields = [...new Set((input.ref_fields ?? []).filter(isValidRef))];
 
   // Append after the current last question.
   const { data: last } = await supabase
@@ -187,7 +195,7 @@ export async function addQuestion(
 
   const { data: q, error } = await supabase
     .from("questions")
-    .insert({ set_id: setId, user_id: userId, prompt, help_text: input.help_text.trim() || null, answer_type, options, position })
+    .insert({ set_id: setId, user_id: userId, prompt, help_text: input.help_text.trim() || null, answer_type, options, ref_fields, position })
     .select("id")
     .single();
   if (error || !q) return { error: error?.message ?? "Could not add the question." };
@@ -198,7 +206,13 @@ export async function addQuestion(
 
 export async function updateQuestion(
   questionId: string,
-  patch: { prompt?: string; help_text?: string; answer_type?: QuestionAnswerType; options?: string[] }
+  patch: {
+    prompt?: string;
+    help_text?: string;
+    answer_type?: QuestionAnswerType;
+    options?: string[];
+    ref_fields?: string[];
+  }
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const userId = await requireCoach(supabase);
@@ -216,6 +230,12 @@ export async function updateQuestion(
   }
   if (patch.options !== undefined) {
     update.options = patch.options.map((o) => o.trim()).filter(Boolean);
+  }
+  if (patch.ref_fields !== undefined) {
+    // Drop invalid entries and any self-reference.
+    update.ref_fields = [
+      ...new Set(patch.ref_fields.filter((r) => isValidRef(r) && r !== `q:${questionId}`)),
+    ];
   }
   if (Object.keys(update).length === 0) return {};
 

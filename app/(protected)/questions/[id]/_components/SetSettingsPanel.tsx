@@ -12,6 +12,7 @@ import {
 } from "../../actions";
 import QuestionForm, { type QuestionDraft } from "./QuestionForm";
 import MessageTemplateEditor from "./MessageTemplateEditor";
+import { PROFILE_REF_FIELDS } from "../../ref-fields";
 import type { PickerTeam } from "./QuestionSetView";
 
 const TYPE_BADGE: Record<string, string> = {
@@ -82,6 +83,14 @@ export default function SetSettingsPanel({
     return {};
   }
 
+  // "Also show" options: player-profile fields + the list's other questions.
+  const refOptionsFor = (excludeId?: string) => [
+    ...PROFILE_REF_FIELDS.map((f) => ({ value: f.key, label: f.label })),
+    ...questions
+      .filter((q) => q.id !== excludeId)
+      .map((q) => ({ value: `q:${q.id}`, label: q.prompt })),
+  ];
+
   return (
     <div className="space-y-6 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
       {/* Teams */}
@@ -130,11 +139,13 @@ export default function SetSettingsPanel({
               <li key={q.id}>
                 <QuestionForm
                   submitLabel="Save changes"
+                  refOptions={refOptionsFor(q.id)}
                   initial={{
                     prompt: q.prompt,
                     help_text: q.help_text ?? "",
                     answer_type: q.answer_type,
                     options: q.options,
+                    ref_fields: q.ref_fields,
                   }}
                   onSave={(draft) => handleEdit(q.id, draft)}
                   onCancel={() => setEditingId(null)}
@@ -176,7 +187,12 @@ export default function SetSettingsPanel({
 
         <div className="mt-3">
           {adding ? (
-            <QuestionForm submitLabel="Add question" onSave={handleAdd} onCancel={() => setAdding(false)} />
+            <QuestionForm
+              submitLabel="Add question"
+              refOptions={refOptionsFor()}
+              onSave={handleAdd}
+              onCancel={() => setAdding(false)}
+            />
           ) : (
             <button
               type="button"

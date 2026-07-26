@@ -8,7 +8,10 @@ export type QuestionDraft = {
   help_text: string;
   answer_type: QuestionAnswerType;
   options: string[];
+  ref_fields: string[];
 };
+
+export type RefOption = { value: string; label: string };
 
 const TYPE_LABELS: { value: QuestionAnswerType; label: string; hint: string }[] = [
   { value: "text", label: "Text", hint: "any short answer" },
@@ -20,11 +23,13 @@ const TYPE_LABELS: { value: QuestionAnswerType; label: string; hint: string }[] 
 export default function QuestionForm({
   initial,
   submitLabel,
+  refOptions,
   onSave,
   onCancel,
 }: {
   initial?: QuestionDraft;
   submitLabel: string;
+  refOptions: RefOption[];
   onSave: (draft: QuestionDraft) => Promise<{ error?: string }>;
   onCancel: () => void;
 }) {
@@ -32,8 +37,15 @@ export default function QuestionForm({
   const [helpText, setHelpText] = useState(initial?.help_text ?? "");
   const [type, setType] = useState<QuestionAnswerType>(initial?.answer_type ?? "text");
   const [optionsText, setOptionsText] = useState((initial?.options ?? []).join("\n"));
+  const [refFields, setRefFields] = useState<string[]>(initial?.ref_fields ?? []);
   const [error, setError] = useState<string | null>(null);
   const [busy, start] = useTransition();
+
+  function toggleRef(value: string) {
+    setRefFields((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    );
+  }
 
   function submit() {
     setError(null);
@@ -42,7 +54,13 @@ export default function QuestionForm({
       .map((o) => o.trim())
       .filter(Boolean);
     start(async () => {
-      const res = await onSave({ prompt, help_text: helpText, answer_type: type, options });
+      const res = await onSave({
+        prompt,
+        help_text: helpText,
+        answer_type: type,
+        options,
+        ref_fields: refFields,
+      });
       if (res.error) setError(res.error);
     });
   }
@@ -89,6 +107,37 @@ export default function QuestionForm({
             placeholder={"YS\nYM\nYL\nAdult S"}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
           />
+        </div>
+      )}
+
+      {refOptions.length > 0 && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+            Also show beside this question
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {refOptions.map((o) => {
+              const on = refFields.includes(o.value);
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => toggleRef(o.value)}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                    on
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 text-gray-600 hover:bg-white dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-900"
+                  }`}
+                >
+                  {on ? "✓ " : ""}
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+            Extra kid info shown next to this question and included in the export.
+          </p>
         </div>
       )}
 

@@ -350,6 +350,9 @@ export interface Question {
   help_text: string | null;
   answer_type: QuestionAnswerType;
   options: string[];
+  // Extra kid data shown beside this question — profile keys ("shirt_size" |
+  // "grade" | "age") or another question ("q:<id>"). See app/(protected)/questions/ref-fields.ts.
+  ref_fields: string[];
   position: number;
   created_at: string;
 }

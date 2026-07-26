@@ -29,7 +29,7 @@ export default async function QuestionSetPage({
     await Promise.all([
       supabase
         .from("questions")
-        .select("id, set_id, user_id, prompt, help_text, answer_type, options, position, created_at")
+        .select("id, set_id, user_id, prompt, help_text, answer_type, options, ref_fields, position, created_at")
         .eq("set_id", id)
         .order("position", { ascending: true }),
       supabase
@@ -65,7 +65,7 @@ export default async function QuestionSetPage({
   if (targetTeamIds.length > 0) {
     const { data: rosterRows } = await supabase
       .from("roster")
-      .select("player_id, jersey_number, team_id, status, players(first_name, last_name)")
+      .select("player_id, jersey_number, team_id, status, players(first_name, last_name, shirt_size, grade, date_of_birth)")
       .in("team_id", targetTeamIds);
 
     const byTeam = new Map<string, BoardTeam>();
@@ -78,7 +78,13 @@ export default async function QuestionSetPage({
         jersey_number: string | null;
         team_id: string;
         status: string | null;
-        players: { first_name: string; last_name: string } | null;
+        players: {
+          first_name: string;
+          last_name: string;
+          shirt_size: string | null;
+          grade: string | null;
+          date_of_birth: string | null;
+        } | null;
       };
       const t = byTeam.get(row.team_id);
       if (!t || !row.players) continue;
@@ -87,6 +93,11 @@ export default async function QuestionSetPage({
         name: `${row.players.first_name} ${row.players.last_name}`.trim(),
         jersey: row.jersey_number,
         guardians: [],
+        attrs: {
+          shirt_size: row.players.shirt_size ?? null,
+          grade: row.players.grade ?? null,
+          dob: row.players.date_of_birth ?? null,
+        },
       });
     }
     // Keep the targeted-team order; sort kids by jersey (numeric) then name.
