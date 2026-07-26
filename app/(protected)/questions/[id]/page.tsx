@@ -20,7 +20,7 @@ export default async function QuestionSetPage({
 
   const { data: set } = await supabase
     .from("question_sets")
-    .select("id, title, description, status")
+    .select("id, title, description, status, message_template")
     .eq("id", id)
     .maybeSingle();
   if (!set) notFound();
@@ -163,6 +163,7 @@ export default async function QuestionSetPage({
         initialTitle={set.title as string}
         initialDescription={(set.description as string | null) ?? ""}
         initialStatus={set.status as QuestionSetStatus}
+        initialMessageTemplate={(set.message_template as string | null) ?? ""}
         allTeams={pickerTeams}
         targetTeamIds={targetTeamIds}
         teams={teams}

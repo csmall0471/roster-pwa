@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Question, QuestionSetStatus } from "@/lib/types";
 import { deleteSet, setAnswer, updateSet } from "../../actions";
+import { renderTextTemplate } from "../../text-template";
 import AnswerCell from "./AnswerCell";
 import SetSettingsPanel from "./SetSettingsPanel";
 import TextParentsButton from "./TextParentsButton";
@@ -27,6 +28,7 @@ export default function QuestionSetView({
   initialTitle,
   initialDescription,
   initialStatus,
+  initialMessageTemplate,
   allTeams,
   targetTeamIds,
   teams,
@@ -37,6 +39,7 @@ export default function QuestionSetView({
   initialTitle: string;
   initialDescription: string;
   initialStatus: QuestionSetStatus;
+  initialMessageTemplate: string;
   allTeams: PickerTeam[];
   targetTeamIds: string[];
   teams: BoardTeam[];
@@ -53,6 +56,7 @@ export default function QuestionSetView({
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialDescription);
   const [status, setStatus] = useState<QuestionSetStatus>(initialStatus);
+  const [messageTemplate, setMessageTemplate] = useState(initialMessageTemplate);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [view, setView] = useState<"team" | "question">("team");
@@ -122,11 +126,7 @@ export default function QuestionSetView({
     p.guardians.map((g) => g.name.trim()).filter(Boolean).join(", ");
 
   function bodyForPrompts(p: BoardPlayer, prompts: string[]): string {
-    const who = firstName(p.name);
-    if (prompts.length <= 1) {
-      return `Hi! Quick question for ${who}: ${prompts[0] ?? ""}\nThanks!`;
-    }
-    return `Hi! A few quick things for ${who}:\n${prompts.map((q) => `• ${q}`).join("\n")}\nThanks!`;
+    return renderTextTemplate(messageTemplate, { player: firstName(p.name), prompts });
   }
   // A kid's still-open questions (fall back to all if everything's answered).
   function bodyForPlayer(p: BoardPlayer): string {
@@ -259,6 +259,8 @@ export default function QuestionSetView({
           allTeams={allTeams}
           targetTeamIds={targetTeamIds}
           questions={questions}
+          messageTemplate={messageTemplate}
+          onTemplateChange={setMessageTemplate}
         />
       )}
 

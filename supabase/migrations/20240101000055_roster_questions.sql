@@ -7,14 +7,20 @@
 
 -- The list a coach creates ("Next season signups", "Uniform sizes", …).
 CREATE TABLE IF NOT EXISTS question_sets (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title       text NOT NULL,
-  description text,
-  status      text NOT NULL DEFAULT 'open',   -- 'open' | 'closed'
-  created_at  timestamptz NOT NULL DEFAULT now()
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title            text NOT NULL,
+  description      text,
+  status           text NOT NULL DEFAULT 'open',   -- 'open' | 'closed'
+  -- Coach-editable SMS body for the "Text parents" button. {player} → kid's
+  -- first name, {questions} → the prompts as a bulleted list. NULL = built-in default.
+  message_template text,
+  created_at       timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS question_sets_user ON question_sets (user_id);
+
+-- Idempotent add for DBs where question_sets predates message_template.
+ALTER TABLE question_sets ADD COLUMN IF NOT EXISTS message_template text;
 
 -- Which of the coach's teams a list is asking. Kids come from these teams' rosters.
 CREATE TABLE IF NOT EXISTS question_set_teams (

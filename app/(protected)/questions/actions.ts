@@ -64,7 +64,12 @@ export async function createSet(input: {
 
 export async function updateSet(
   setId: string,
-  patch: { title?: string; description?: string; status?: QuestionSetStatus }
+  patch: {
+    title?: string;
+    description?: string;
+    status?: QuestionSetStatus;
+    message_template?: string;
+  }
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const userId = await requireCoach(supabase);
@@ -78,6 +83,8 @@ export async function updateSet(
   }
   if (patch.description !== undefined) update.description = patch.description.trim() || null;
   if (patch.status !== undefined) update.status = patch.status;
+  if (patch.message_template !== undefined)
+    update.message_template = patch.message_template.trim() || null; // blank → built-in default
   if (Object.keys(update).length === 0) return {};
 
   const { error } = await supabase

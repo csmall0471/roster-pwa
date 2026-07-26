@@ -8,8 +8,10 @@ import {
   deleteQuestion,
   setSetTeams,
   updateQuestion,
+  updateSet,
 } from "../../actions";
 import QuestionForm, { type QuestionDraft } from "./QuestionForm";
+import MessageTemplateEditor from "./MessageTemplateEditor";
 import type { PickerTeam } from "./QuestionSetView";
 
 const TYPE_BADGE: Record<string, string> = {
@@ -24,11 +26,15 @@ export default function SetSettingsPanel({
   allTeams,
   targetTeamIds,
   questions,
+  messageTemplate,
+  onTemplateChange,
 }: {
   setId: string;
   allTeams: PickerTeam[];
   targetTeamIds: string[];
   questions: Question[];
+  messageTemplate: string;
+  onTemplateChange: (template: string) => void;
 }) {
   const router = useRouter();
   const [picked, setPicked] = useState<Set<string>>(new Set(targetTeamIds));
@@ -67,6 +73,13 @@ export default function SetSettingsPanel({
     if (!confirm("Delete this question and all its answers?")) return;
     await deleteQuestion(id);
     router.refresh();
+  }
+
+  async function handleTemplate(template: string) {
+    const res = await updateSet(setId, { message_template: template });
+    if (res.error) return res;
+    onTemplateChange(template);
+    return {};
   }
 
   return (
@@ -174,6 +187,21 @@ export default function SetSettingsPanel({
             </button>
           )}
         </div>
+      </section>
+
+      {/* Text-parents message */}
+      <section>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+          Text message
+        </h3>
+        <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">
+          The draft that pre-fills when you tap 💬 to text a parent.
+        </p>
+        <MessageTemplateEditor
+          value={messageTemplate}
+          sampleQuestions={questions.map((q) => q.prompt)}
+          onSave={handleTemplate}
+        />
       </section>
     </div>
   );

@@ -338,6 +338,7 @@ export interface QuestionSet {
   title: string;
   description: string | null;
   status: QuestionSetStatus;
+  message_template: string | null;
   created_at: string;
 }
 
