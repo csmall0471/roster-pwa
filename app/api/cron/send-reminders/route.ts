@@ -3,6 +3,7 @@ import { Resend } from "resend"
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay"
 import { formatEventWhen, relativeEventPhrase, eventDayKey, shiftDayKey, todayKey } from "@/lib/events/when"
 import { buildEventReminderEmail } from "@/lib/events/reminder"
+import { familyParentEmails } from "@/lib/events/family"
 import type { SignupAttendee } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -182,7 +183,7 @@ export async function GET(request: Request) {
     .select(`
       id, title, slug, starts_at, ends_at, location, description, image_urls, pay_url, pay_instructions, status,
       reminder_days_before, reminder_note, reminder_sent_at,
-      event_signups(id, name, email, attendees, total_cents, paid, declined)
+      event_signups(id, name, email, parent_id, attendees, total_cents, paid, declined)
     `)
     .eq("status", "published")
     .gte("starts_at", `${runDay}T00:00:00`)
@@ -207,7 +208,19 @@ export async function GET(request: Request) {
       let eventSent = 0
 
       for (const s of (ev.event_signups as any[]) ?? []) {
-        if (s.declined || !s.email) continue
+        if (s.declined) continue
+
+        // One email to the whole family: contact email + co-parents' emails.
+        const byEmail = new Map<string, string>()
+        const add = (e: string | null | undefined) => {
+          const t = (e ?? "").trim()
+          if (t) byEmail.set(t.toLowerCase(), t)
+        }
+        add(s.email)
+        if (s.parent_id) for (const e of await familyParentEmails(supabase, s.parent_id)) add(e)
+        if (byEmail.size === 0) continue
+        const to = [...byEmail.values()]
+
         const first = String(s.name ?? "there").split(" ")[0] || "there"
         const total = (s.total_cents as number) ?? 0
         const owes = !s.paid && total > 0
@@ -229,17 +242,18 @@ export async function GET(request: Request) {
           note: (ev.reminder_note as string | null) ?? null,
           description: (ev.description as string | null) ?? null,
           payInstructions: (ev.pay_instructions as string | null) ?? null,
+          attendees: (s.attendees ?? null) as SignupAttendee[] | null,
         })
 
         if (dry) {
-          preview.push({ to: s.email, subject, body: text })
+          preview.push({ to: to.join(", "), subject, body: text })
         } else {
-          const { error } = await resend.emails.send({ from, to: s.email, subject, html, text })
-          if (error) errors.push(`event email ${s.email}: ${error.message}`)
+          const { error } = await resend.emails.send({ from, to, subject, html, text })
+          if (error) errors.push(`event email ${to.join(", ")}: ${error.message}`)
           else {
             emailsSent++
             eventSent++
-            sentSummary.push({ to: s.email, subject })
+            sentSummary.push({ to: to.join(", "), subject })
           }
         }
       }

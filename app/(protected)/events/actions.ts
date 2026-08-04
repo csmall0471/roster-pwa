@@ -8,8 +8,9 @@ import { renderMarkdown } from "@/lib/markdown";
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay";
 import { sendSignupConfirmation } from "@/lib/events/signup-confirmation";
 import { buildPricedAttendees, type PricingTier } from "@/lib/events/signup-pricing";
-import { buildEventReminderEmail } from "@/lib/events/reminder";
+import { buildEventReminderEmail, type ReminderEmailArgs } from "@/lib/events/reminder";
 import { formatEventWhen, relativeEventPhrase } from "@/lib/events/when";
+import { familyParentEmails } from "@/lib/events/family";
 import type {
   AttendeeStatus,
   EventFieldType,
@@ -328,30 +329,6 @@ export type SaveSignupInput = {
 
 export type SaveSignupResult = { error: string } | { ok: true; signup: EventSignup };
 
-// Every email address in a parent's family — the parent plus co-parents who
-// share a kid — so a coach-entered signup can confirm to both parents. Service
-// client so inconsistent phone/email RLS matching doesn't hide anyone.
-async function familyParentEmails(
-  service: ReturnType<typeof createServiceClient>,
-  parentId: string
-): Promise<string[]> {
-  const { data: mine } = await service
-    .from("player_parents")
-    .select("player_id")
-    .eq("parent_id", parentId);
-  const playerIds = [...new Set((mine ?? []).map((r) => r.player_id as string))];
-  let ids = [parentId];
-  if (playerIds.length) {
-    const { data: co } = await service
-      .from("player_parents")
-      .select("parent_id")
-      .in("player_id", playerIds);
-    ids = [...new Set([parentId, ...((co ?? []).map((r) => r.parent_id as string))])];
-  }
-  const { data: ps } = await service.from("parents").select("email").in("id", ids);
-  return ((ps ?? []) as { email: string | null }[]).map((p) => p.email ?? "").filter(Boolean);
-}
-
 export async function saveSignupAsCoach(
   input: SaveSignupInput
 ): Promise<SaveSignupResult> {
@@ -594,11 +571,66 @@ async function sendInviteEmail(
 }
 
 // ── Manual reminder ───────────────────────────────────────────────────────────
-// Send the event reminder email now to everyone who RSVP'd (non-declined, has an
-// email), with an optional coach note. Same email the 2-day cron sends, via the
-// shared builder. Deduped by email.
 export type SendReminderResult = { sent: number; failed: number; skipped: number; error?: string };
 
+// Fields the reminder needs from an event row.
+type ReminderEvent = {
+  title: string;
+  slug: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  location: string | null;
+  description: string | null;
+  image_urls: string[] | null;
+  pay_url: string | null;
+  pay_instructions: string | null;
+};
+// One family's RSVP.
+type ReminderSignup = {
+  name: string | null;
+  attendees: SignupAttendee[] | null;
+  total_cents: number | null;
+  paid: boolean;
+};
+const REMINDER_EVENT_COLS =
+  "title, slug, starts_at, ends_at, location, description, image_urls, pay_url, pay_instructions";
+
+// Build the reminder email args for one family. When there's no signup (generic
+// preview), attendees/who's-coming/cost are omitted. The Venmo pay link is added
+// only when the family owes (unpaid with a balance).
+function buildReminderArgs(
+  event: ReminderEvent,
+  signup: ReminderSignup | null,
+  eventUrl: string,
+  note?: string | null
+): ReminderEmailArgs {
+  const attendees = signup?.attendees ?? null;
+  const total = signup?.total_cents ?? 0;
+  const owes = !!signup && !signup.paid && total > 0;
+  const payUrl = owes
+    ? venmoPayLink(event.pay_url, eventPayNote(attendees ?? [], signup?.name ?? "", event.title), total)
+    : null;
+  return {
+    title: event.title,
+    firstName: String(signup?.name ?? "there").split(" ")[0] || "there",
+    leadPhrase: relativeEventPhrase(event.starts_at),
+    whenStr: formatEventWhen(event.starts_at, event.ends_at),
+    location: event.location ?? null,
+    heroUrl: event.image_urls?.find((u) => u?.trim()) ?? null,
+    eventUrl,
+    owes,
+    totalCents: total,
+    payUrl,
+    note,
+    description: event.description ?? null,
+    payInstructions: event.pay_instructions ?? null,
+    attendees,
+  };
+}
+
+// Send the reminder now to everyone who RSVP'd (non-declined). Each family gets
+// ONE email to all its parents (contact email + co-parents), with the coach
+// BCC'd, and its own who's-coming + cost breakdown + Venmo link (if unpaid).
 export async function sendEventReminder(
   eventId: string,
   note?: string | null
@@ -606,9 +638,14 @@ export async function sendEventReminder(
   const supabase = await createClient();
   if (!(await requireCoach(supabase))) return { sent: 0, failed: 0, skipped: 0, error: "Not authorized" };
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const coachEmail = user?.email ?? null; // BCC
+
   const { data: event } = await supabase
     .from("events")
-    .select("id, title, slug, status, starts_at, ends_at, location, description, image_urls, pay_url, pay_instructions")
+    .select(`id, status, ${REMINDER_EVENT_COLS}`)
     .eq("id", eventId)
     .single();
   if (!event) return { sent: 0, failed: 0, skipped: 0, error: "Event not found." };
@@ -617,16 +654,14 @@ export async function sendEventReminder(
 
   const { data: signups } = await supabase
     .from("event_signups")
-    .select("name, email, attendees, total_cents, paid, declined")
+    .select("name, email, parent_id, attendees, total_cents, paid, declined")
     .eq("event_id", eventId);
 
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
   const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
-  const whenStr = formatEventWhen(event.starts_at, event.ends_at);
-  const leadPhrase = relativeEventPhrase(event.starts_at);
-  const hero = (event.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null;
 
+  const service = createServiceClient();
   const { Resend } = await import("resend");
   const resend = new Resend(process.env.RESEND_API_KEY);
   const from = `${process.env.EMAIL_FROM_NAME ?? "CS Sports"} <${process.env.EMAIL_FROM ?? "onboarding@resend.dev"}>`;
@@ -634,55 +669,37 @@ export async function sendEventReminder(
   let sent = 0;
   let failed = 0;
   let skipped = 0;
-  const seen = new Set<string>(); // dedupe by email
 
-  type SignupRow = {
-    name: string | null;
-    email: string | null;
-    attendees: SignupAttendee[] | null;
-    total_cents: number | null;
-    paid: boolean;
-    declined: boolean;
-  };
+  type SignupRow = ReminderSignup & { email: string | null; parent_id: string | null; declined: boolean };
   for (const s of (signups ?? []) as SignupRow[]) {
     if (s.declined) continue;
-    const key = (s.email ?? "").trim().toLowerCase();
-    if (!key) {
+
+    // One email to the whole family: contact email + co-parents' emails.
+    const byEmail = new Map<string, string>();
+    const add = (e: string | null | undefined) => {
+      const t = (e ?? "").trim();
+      if (t) byEmail.set(t.toLowerCase(), t);
+    };
+    add(s.email);
+    if (s.parent_id) for (const e of await familyParentEmails(service, s.parent_id)) add(e);
+    if (byEmail.size === 0) {
       skipped++;
       continue;
     }
-    if (seen.has(key)) continue;
-    seen.add(key);
 
-    const first = String(s.name ?? "there").split(" ")[0] || "there";
-    const total = s.total_cents ?? 0;
-    const owes = !s.paid && total > 0;
-    const payUrl = owes
-      ? venmoPayLink(
-          event.pay_url ?? null,
-          eventPayNote((s.attendees ?? []) as SignupAttendee[], s.name ?? "", event.title),
-          total
-        )
-      : null;
-
-    const { subject, html, text } = buildEventReminderEmail({
-      title: event.title,
-      firstName: first,
-      leadPhrase,
-      whenStr,
-      location: event.location ?? null,
-      heroUrl: hero,
-      eventUrl,
-      owes,
-      totalCents: total,
-      payUrl,
-      note,
-      description: event.description ?? null,
-      payInstructions: event.pay_instructions ?? null,
-    });
+    const { subject, html, text } = buildEventReminderEmail(
+      buildReminderArgs(event as ReminderEvent, s, eventUrl, note)
+    );
 
     try {
-      const { error } = await resend.emails.send({ from, to: s.email as string, subject, html, text });
+      const { error } = await resend.emails.send({
+        from,
+        to: [...byEmail.values()],
+        subject,
+        html,
+        text,
+        ...(coachEmail ? { bcc: coachEmail } : {}),
+      });
       if (error) failed++;
       else sent++;
     } catch {
@@ -717,57 +734,51 @@ export async function updateReminderSettings(
   return {};
 }
 
-// Render the reminder email for an in-app preview. Uses a representative first
-// name from the signups and no balance (a "Pay now" button is added per-recipient
-// for anyone who owes).
+// Load one family's RSVP for a per-family preview/test (null when not chosen).
+async function loadReminderSignup(
+  supabase: SupabaseClient,
+  eventId: string,
+  signupId: string | null | undefined
+): Promise<ReminderSignup | null> {
+  if (!signupId) return null;
+  const { data } = await supabase
+    .from("event_signups")
+    .select("name, attendees, total_cents, paid")
+    .eq("id", signupId)
+    .eq("event_id", eventId)
+    .maybeSingle();
+  return (data as ReminderSignup | null) ?? null;
+}
+
+// Render the reminder email for an in-app preview — as the chosen family would
+// see it (their who's-coming, cost breakdown, and Venmo link if unpaid).
 export async function previewReminder(
   eventId: string,
+  signupId?: string | null,
   note?: string | null
 ): Promise<{ subject: string; html: string; error?: string }> {
   const supabase = await createClient();
   if (!(await requireCoach(supabase))) return { subject: "", html: "", error: "Not authorized" };
 
-  const { data: event } = await supabase
-    .from("events")
-    .select("title, slug, starts_at, ends_at, location, description, image_urls, pay_instructions")
-    .eq("id", eventId)
-    .single();
+  const { data: event } = await supabase.from("events").select(REMINDER_EVENT_COLS).eq("id", eventId).single();
   if (!event) return { subject: "", html: "", error: "Event not found." };
 
-  const { data: sample } = await supabase
-    .from("event_signups")
-    .select("name")
-    .eq("event_id", eventId)
-    .eq("declined", false)
-    .limit(1)
-    .maybeSingle();
-  const first = String(sample?.name ?? "there").split(" ")[0] || "there";
+  const signup = await loadReminderSignup(supabase, eventId, signupId);
 
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
   const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
 
-  const { subject, html } = buildEventReminderEmail({
-    title: event.title,
-    firstName: first,
-    leadPhrase: relativeEventPhrase(event.starts_at),
-    whenStr: formatEventWhen(event.starts_at, event.ends_at),
-    location: event.location ?? null,
-    heroUrl: (event.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null,
-    eventUrl,
-    owes: false,
-    totalCents: 0,
-    payUrl: null,
-    note,
-    description: event.description ?? null,
-    payInstructions: event.pay_instructions ?? null,
-  });
+  const { subject, html } = buildEventReminderEmail(
+    buildReminderArgs(event as ReminderEvent, signup, eventUrl, note)
+  );
   return { subject, html };
 }
 
-// Send the reminder to the coach's own email so they can see the real thing.
+// Send the reminder to the coach's own email — the chosen family's version.
 export async function sendTestReminder(
   eventId: string,
+  signupId?: string | null,
   note?: string | null
 ): Promise<{ sent: number; error?: string }> {
   const supabase = await createClient();
@@ -778,32 +789,18 @@ export async function sendTestReminder(
   const to = user?.email;
   if (!to) return { sent: 0, error: "Your account has no email address to send a test to." };
 
-  const { data: event } = await supabase
-    .from("events")
-    .select("title, slug, starts_at, ends_at, location, description, image_urls, pay_instructions")
-    .eq("id", eventId)
-    .single();
+  const { data: event } = await supabase.from("events").select(REMINDER_EVENT_COLS).eq("id", eventId).single();
   if (!event) return { sent: 0, error: "Event not found." };
+
+  const signup = await loadReminderSignup(supabase, eventId, signupId);
 
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
   const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
 
-  const { subject, html, text } = buildEventReminderEmail({
-    title: event.title,
-    firstName: "there",
-    leadPhrase: relativeEventPhrase(event.starts_at),
-    whenStr: formatEventWhen(event.starts_at, event.ends_at),
-    location: event.location ?? null,
-    heroUrl: (event.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null,
-    eventUrl,
-    owes: false,
-    totalCents: 0,
-    payUrl: null,
-    note,
-    description: event.description ?? null,
-    payInstructions: event.pay_instructions ?? null,
-  });
+  const { subject, html, text } = buildEventReminderEmail(
+    buildReminderArgs(event as ReminderEvent, signup, eventUrl, note)
+  );
 
   const { Resend } = await import("resend");
   const resend = new Resend(process.env.RESEND_API_KEY);

@@ -18,17 +18,20 @@ function dayLabel(n: number): string {
 export default function EventReminderPanel({
   eventId,
   count,
+  families,
   initialDaysBefore,
   initialNote,
 }: {
   eventId: string;
   count: number;
+  families: { id: string; label: string }[];
   initialDaysBefore: number | null;
   initialNote: string;
 }) {
   const [daysBefore, setDaysBefore] = useState<number | null>(initialDaysBefore);
   const [note, setNote] = useState(initialNote);
   const [savedNote, setSavedNote] = useState(initialNote);
+  const [family, setFamily] = useState(families[0]?.id ?? "");
 
   const [preview, setPreview] = useState<{ subject: string; html: string } | null>(null);
   const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -39,7 +42,7 @@ export default function EventReminderPanel({
   const [testing, startTest] = useTransition();
   const [sending, startSend] = useTransition();
 
-  const families = `${count} famil${count === 1 ? "y" : "ies"}`;
+  const familyCount = `${count} famil${count === 1 ? "y" : "ies"}`;
   const noteDirty = note !== savedNote;
 
   const dayOptions = (() => {
@@ -71,7 +74,7 @@ export default function EventReminderPanel({
   function doPreview() {
     setStatus(null);
     startPreview(async () => {
-      const res = await previewReminder(eventId, note.trim() || null);
+      const res = await previewReminder(eventId, family || null, note.trim() || null);
       if (res.error) setStatus({ kind: "err", text: res.error });
       else setPreview({ subject: res.subject, html: res.html });
     });
@@ -80,7 +83,7 @@ export default function EventReminderPanel({
   function doTest() {
     setStatus(null);
     startTest(async () => {
-      const res = await sendTestReminder(eventId, note.trim() || null);
+      const res = await sendTestReminder(eventId, family || null, note.trim() || null);
       setStatus(
         res.error ? { kind: "err", text: res.error } : { kind: "ok", text: "Test sent to your email." }
       );
@@ -88,7 +91,7 @@ export default function EventReminderPanel({
   }
 
   function doSend() {
-    if (!confirm(`Send a reminder email to ${families} now?`)) return;
+    if (!confirm(`Send a reminder email to ${familyCount} now?`)) return;
     setStatus(null);
     startSend(async () => {
       const res = await sendEventReminder(eventId, note.trim() || null);
@@ -109,8 +112,8 @@ export default function EventReminderPanel({
       <div>
         <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Reminder email</p>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Sent to everyone who signed up ({families}). Set when it goes out automatically, add a note,
-          preview it, or send it now.
+          Each family ({familyCount}) gets one email to all their parents — you&apos;re BCC&apos;d — with
+          their own who&apos;s-coming, cost breakdown, and a Venmo link if they still owe.
         </p>
       </div>
 
@@ -161,6 +164,27 @@ export default function EventReminderPanel({
         )}
       </div>
 
+      {/* Which family to preview / test as */}
+      {families.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="reminder-family" className="text-sm text-gray-600 dark:text-gray-300">
+            Preview / test as:
+          </label>
+          <select
+            id="reminder-family"
+            value={family}
+            onChange={(e) => setFamily(e.target.value)}
+            className="max-w-full rounded-lg border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white px-3 py-1.5 text-sm"
+          >
+            {families.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -185,7 +209,7 @@ export default function EventReminderPanel({
           disabled={sending || count === 0}
           className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {sending ? "Sending…" : `Send to ${families} now`}
+          {sending ? "Sending…" : `Send to ${familyCount} now`}
         </button>
       </div>
 

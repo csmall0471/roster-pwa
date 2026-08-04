@@ -1,5 +1,7 @@
 import { buildEmailHtml, btn, esc, infoRow, sectionHeading, tbl } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
+import { whosComingSection, costBreakdownSection, groupWhoText } from "@/lib/events/email-sections";
+import type { SignupAttendee } from "@/lib/types";
 
 // The event reminder email — shared by the automatic cron and the coach's manual
 // "Send reminder" button so the two never drift. Carries the same event
@@ -21,6 +23,7 @@ export type ReminderEmailArgs = {
   note?: string | null; // optional coach message
   description?: string | null; // the event's full write-up (markdown)
   payInstructions?: string | null; // how/where to pay (markdown)
+  attendees?: SignupAttendee[] | null; // this family's RSVP → who's coming + cost breakdown
 };
 
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -43,6 +46,19 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
 
   const whenWhere = (a.whenStr ? infoRow("When", a.whenStr) : "") + (a.location ? infoRow("Where", a.location) : "");
 
+  const attendees = a.attendees ?? [];
+  const whoSection = attendees.length ? whosComingSection(attendees) : "";
+  // When they still owe, show the itemized breakdown (falling back to a plain
+  // balance line if we don't have their attendee detail), then pay instructions.
+  const costSection = a.owes && attendees.length ? costBreakdownSection(attendees, a.totalCents) : "";
+  const oweBlock = a.owes
+    ? (costSection ||
+        `<p style="margin:14px 0 4px;font-size:15px;color:#111827;">Our records show a balance of <strong>${money(a.totalCents)}</strong>.</p>`) +
+      (a.payInstructions?.trim()
+        ? `<div style="margin:2px 0 8px;font-size:14px;color:#374151;">${renderMarkdown(a.payInstructions, { inline: true })}</div>`
+        : "")
+    : "";
+
   const buttons = [
     a.owes && a.payUrl ? btn(`Pay now · ${money(a.totalCents)}`, a.payUrl, "#16a34a") : "",
     btn("Change my RSVP", a.eventUrl, "#2563eb"),
@@ -56,12 +72,8 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
       `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Just a reminder — <strong>${esc(a.title)}</strong> ${esc(a.leadPhrase)}.</p>` +
       noteBlock +
       (whenWhere ? sectionHeading("When & where") + tbl(whenWhere) : "") +
-      (a.owes
-        ? `<p style="margin:14px 0 4px;font-size:15px;color:#111827;">Our records show a balance of <strong>${money(a.totalCents)}</strong>.</p>` +
-          (a.payInstructions?.trim()
-            ? `<div style="margin:2px 0 8px;font-size:14px;color:#374151;">${renderMarkdown(a.payInstructions, { inline: true })}</div>`
-            : "")
-        : "") +
+      whoSection +
+      oweBlock +
       `<div style="margin:16px 0 4px;">${buttons.join("")}</div>` +
       `<p style="margin:14px 0 0;font-size:15px;color:#111827;">See you there!</p>` +
       (a.description?.trim()
@@ -71,10 +83,12 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
         : ""),
   });
 
+  const whoText = attendees.length ? groupWhoText(attendees) : [];
   const text =
     `Hi ${a.firstName}, reminder: ${a.title} ${a.leadPhrase} (${a.whenStr}).` +
     (a.location ? ` Location: ${a.location}.` : "") +
     (a.note?.trim() ? `\n\n${a.note.trim()}` : "") +
+    (whoText.length ? `\n\nWho's coming:\n${whoText.join("\n")}` : "") +
     (a.owes
       ? `\n\nBalance due: ${money(a.totalCents)}.${a.payUrl ? ` Pay: ${a.payUrl}` : ""}${
           a.payInstructions?.trim() ? `\n${a.payInstructions.trim()}` : ""

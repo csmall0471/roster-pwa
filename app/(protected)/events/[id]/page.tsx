@@ -313,13 +313,17 @@ export default async function EventManagePage({
     ? new Date(ev.starts_at).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" })
     : null;
 
-  // How many distinct families would get a manual reminder (RSVP'd, not declined,
-  // has an email) — deduped by email, matching what sendEventReminder sends.
-  const remindableCount = new Set(
-    signups
-      .filter((s) => !s.declined && s.email)
-      .map((s) => (s.email as string).trim().toLowerCase())
-  ).size;
+  // Families that would get a manual reminder (RSVP'd, not declined, reachable by
+  // email — a contact email or a linked parent). Each family = one email.
+  const remindableSignups = signups.filter((s) => !s.declined && (s.email || s.parent_id));
+  const remindableCount = remindableSignups.length;
+  const money = (c: number) => `$${(c / 100).toFixed(2)}`;
+  const reminderFamilies = remindableSignups.map((s) => ({
+    id: s.id,
+    label:
+      (s.name?.trim() || s.email || "Guest") +
+      (!s.paid && (s.total_cents ?? 0) > 0 ? ` · ${money(s.total_cents)} due` : ""),
+  }));
 
   return (
     <div className="space-y-6">
@@ -361,6 +365,7 @@ export default async function EventManagePage({
             <EventReminderPanel
               eventId={ev.id}
               count={remindableCount}
+              families={reminderFamilies}
               initialDaysBefore={ev.reminder_days_before ?? null}
               initialNote={ev.reminder_note ?? ""}
             />

@@ -8,41 +8,10 @@
 import { buildEmailHtml, btn, esc, infoRow, sectionHeading, tbl } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
 import { formatEventWhen } from "@/lib/events/when";
+import { whosComingSection, costBreakdownSection, groupWhoText } from "@/lib/events/email-sections";
 import type { SignupAttendee } from "@/lib/types";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-
-// A row in the itemized cost breakdown (label left, amount right-aligned).
-function payRow(left: string, right: string, opts?: { strong?: boolean; top?: boolean }): string {
-  const base = "padding:6px 0;font-size:14px;";
-  const top = opts?.top ? "border-top:2px solid #e5e7eb;padding-top:10px;" : "";
-  const strong = opts?.strong ? "font-weight:700;color:#111827;" : "color:#374151;";
-  return `<tr>
-    <td style="${base}${top}${strong}">${left}</td>
-    <td style="${base}${top}${strong}text-align:right;white-space:nowrap;">${right}</td>
-  </tr>`;
-}
-
-type WhoGroup = { label: string; names: string[]; unnamed: number };
-function groupWho(list: SignupAttendee[]): WhoGroup[] {
-  const g: WhoGroup[] = [];
-  for (const a of list) {
-    let e = g.find((x) => x.label === a.tier_label);
-    if (!e) {
-      e = { label: a.tier_label, names: [], unnamed: 0 };
-      g.push(e);
-    }
-    const nm = a.name?.trim();
-    if (nm) e.names.push(nm);
-    else e.unnamed++;
-  }
-  return g;
-}
-function whoValue(e: WhoGroup): string {
-  let v = e.names.join(", ");
-  if (e.unnamed > 0) v = v ? `${v} + ${e.unnamed} more` : `× ${e.unnamed}`;
-  return v;
-}
 
 export type SignupConfirmationArgs = {
   to: string | string[];
@@ -106,9 +75,6 @@ export function buildSignupConfirmationEmail(args: SignupConfirmationArgs): {
     };
   }
 
-  const attending = attendees.filter((a) => (a.status ?? "attending") !== "declined");
-  const declinedAttendees = attendees.filter((a) => a.status === "declined");
-
   const sections: string[] = [];
 
   // Hero photo (first event image), if any.
@@ -130,39 +96,13 @@ export function buildSignupConfirmationEmail(args: SignupConfirmationArgs): {
   if (whenWhere) sections.push(sectionHeading("When & where") + tbl(whenWhere));
 
   // Who's coming (grouped by tier).
-  const whoRows = groupWho(attending)
-    .map((e) => infoRow(e.label, whoValue(e)))
-    .join("");
-  const declinedRows = groupWho(declinedAttendees)
-    .map((e) => infoRow(`${e.label} (not coming)`, whoValue(e)))
-    .join("");
-  if (whoRows || declinedRows) sections.push(sectionHeading("Who's coming") + tbl(whoRows + declinedRows));
+  const who = whosComingSection(attendees);
+  if (who) sections.push(who);
 
-  // Itemized cost breakdown: one line per tier + per-person price, then the
-  // total. Charged and free units are split (e.g. participating vs watching
-  // adults price differently), so this reconciles to the exact total.
-  if (total_cents > 0) {
-    const groups: { label: string; count: number; unit: number }[] = [];
-    for (const a of attending) {
-      const e = groups.find((x) => x.label === a.tier_label && x.unit === a.amount_cents);
-      if (e) e.count++;
-      else groups.push({ label: a.tier_label, count: 1, unit: a.amount_cents });
-    }
-    const rows = groups
-      .map((g) => {
-        const left =
-          g.unit > 0
-            ? `${esc(g.label)} <span style="color:#9ca3af;">${g.count} × ${money(g.unit)}</span>`
-            : `${esc(g.label)} <span style="color:#9ca3af;">× ${g.count}</span>`;
-        const right = g.unit > 0 ? money(g.unit * g.count) : `<span style="color:#9ca3af;">No charge</span>`;
-        return payRow(left, right);
-      })
-      .join("");
-    const totalRow = payRow("Total due", money(total_cents), { strong: true, top: true });
-    sections.push(
-      sectionHeading("What you owe") +
-        `<table width="100%" cellpadding="0" cellspacing="0" style="margin:2px 0 8px;border-collapse:collapse;">${rows}${totalRow}</table>`
-    );
+  // Itemized cost breakdown, then pay instructions.
+  const cost = costBreakdownSection(attendees, total_cents);
+  if (cost) {
+    sections.push(cost);
     if (pay_instructions?.trim())
       sections.push(
         `<div style="margin:2px 0 12px;font-size:14px;color:#374151;">${renderMarkdown(pay_instructions, { inline: true })}</div>`
@@ -190,7 +130,7 @@ export function buildSignupConfirmationEmail(args: SignupConfirmationArgs): {
   const textLines = [`Hi ${name}, you're all set for ${title}.`];
   if (when) textLines.push("", `When: ${when}`);
   if (location) textLines.push(`Where: ${location}`);
-  const whoText = groupWho(attending).map((e) => `${e.label}: ${whoValue(e)}`);
+  const whoText = groupWhoText(attendees);
   if (whoText.length) textLines.push("", "Who's coming:", ...whoText);
   if (total_cents > 0) textLines.push("", `Total due: ${money(total_cents)}`);
   if (pay_url) textLines.push("", `Pay: ${pay_url}`);
