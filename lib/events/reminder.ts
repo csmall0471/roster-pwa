@@ -48,16 +48,28 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
 
   const attendees = a.attendees ?? [];
   const whoSection = attendees.length ? whosComingSection(attendees) : "";
-  // When they still owe, show the itemized breakdown (falling back to a plain
-  // balance line if we don't have their attendee detail), then pay instructions.
-  const costSection = a.owes && attendees.length ? costBreakdownSection(attendees, a.totalCents) : "";
-  const oweBlock = a.owes
-    ? (costSection ||
-        `<p style="margin:14px 0 4px;font-size:15px;color:#111827;">Our records show a balance of <strong>${money(a.totalCents)}</strong>.</p>`) +
-      (a.payInstructions?.trim()
-        ? `<div style="margin:2px 0 8px;font-size:14px;color:#374151;">${renderMarkdown(a.payInstructions, { inline: true })}</div>`
-        : "")
+
+  // Cost breakdown shows whenever there's a charge — labeled "owe" when unpaid
+  // (with pay instructions), or "paid" with a thank-you when settled. total > 0
+  // and not owing means paid.
+  const hasCost = attendees.length > 0 && a.totalCents > 0;
+  const paid = hasCost && !a.owes;
+  const payInstrDiv = a.payInstructions?.trim()
+    ? `<div style="margin:2px 0 8px;font-size:14px;color:#374151;">${renderMarkdown(a.payInstructions, { inline: true })}</div>`
     : "";
+
+  let costBlock = "";
+  if (hasCost) {
+    costBlock = a.owes
+      ? costBreakdownSection(attendees, a.totalCents) + payInstrDiv
+      : costBreakdownSection(attendees, a.totalCents, { heading: "What you paid", totalLabel: "Total paid" }) +
+        `<p style="margin:6px 0 0;font-size:14px;font-weight:600;color:#16a34a;">✓ Paid — thank you!</p>`;
+  } else if (a.owes) {
+    // Owed, but no itemized attendee detail (e.g. a generic preview).
+    costBlock =
+      `<p style="margin:14px 0 4px;font-size:15px;color:#111827;">Our records show a balance of <strong>${money(a.totalCents)}</strong>.</p>` +
+      payInstrDiv;
+  }
 
   const buttons = [
     a.owes && a.payUrl ? btn(`Pay now · ${money(a.totalCents)}`, a.payUrl, "#16a34a") : "",
@@ -73,7 +85,7 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
       noteBlock +
       (whenWhere ? sectionHeading("When & where") + tbl(whenWhere) : "") +
       whoSection +
-      oweBlock +
+      costBlock +
       `<div style="margin:16px 0 4px;">${buttons.join("")}</div>` +
       `<p style="margin:14px 0 0;font-size:15px;color:#111827;">See you there!</p>` +
       (a.description?.trim()
@@ -93,7 +105,9 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
       ? `\n\nBalance due: ${money(a.totalCents)}.${a.payUrl ? ` Pay: ${a.payUrl}` : ""}${
           a.payInstructions?.trim() ? `\n${a.payInstructions.trim()}` : ""
         }`
-      : "") +
+      : paid
+        ? `\n\nTotal paid: ${money(a.totalCents)} — thank you!`
+        : "") +
     `\n\nChange your RSVP: ${a.eventUrl}` +
     (a.description?.trim() ? `\n\n${a.description.trim()}` : "") +
     `\n\nSee you there!\n— Coach Connor`;

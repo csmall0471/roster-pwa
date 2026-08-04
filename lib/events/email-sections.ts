@@ -57,12 +57,15 @@ function payRow(left: string, right: string, opts?: { strong?: boolean; top?: bo
 
 // Itemized cost breakdown → a labeled section reconciling to totalCents. One line
 // per (tier, unit price); charged and free units split. Returns "" when free.
+// Labels default to the owed wording; pass overrides for a paid breakdown.
 export function costBreakdownSection(
   attendees: SignupAttendee[],
   totalCents: number,
-  heading = "What you owe"
+  opts?: { heading?: string; totalLabel?: string }
 ): string {
   if (totalCents <= 0) return "";
+  const heading = opts?.heading ?? "What you owe";
+  const totalLabel = opts?.totalLabel ?? "Total due";
   const attending = attendees.filter(isAttending);
   const groups: { label: string; count: number; unit: number }[] = [];
   for (const a of attending) {
@@ -80,7 +83,7 @@ export function costBreakdownSection(
       return payRow(left, right);
     })
     .join("");
-  const totalRow = payRow("Total due", money(totalCents), { strong: true, top: true });
+  const totalRow = payRow(totalLabel, money(totalCents), { strong: true, top: true });
   return (
     sectionHeading(heading) +
     `<table width="100%" cellpadding="0" cellspacing="0" style="margin:2px 0 8px;border-collapse:collapse;">${rows}${totalRow}</table>`
