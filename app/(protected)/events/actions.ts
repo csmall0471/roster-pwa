@@ -692,6 +692,121 @@ export async function sendEventReminder(
   return { sent, failed, skipped };
 }
 
+// Save the automatic-reminder schedule and/or the persisted note. Changing the
+// schedule re-arms the reminder (clears reminder_sent_at) so it can fire again.
+export async function updateReminderSettings(
+  eventId: string,
+  patch: { days_before?: number | null; note?: string }
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  if (!(await requireCoach(supabase))) return { error: "Not authorized" };
+
+  const update: Record<string, unknown> = {};
+  if (patch.days_before !== undefined) {
+    update.reminder_days_before = patch.days_before; // null = off
+    update.reminder_sent_at = null; // re-arm
+  }
+  if (patch.note !== undefined) update.reminder_note = patch.note.trim() || null;
+  if (Object.keys(update).length === 0) return {};
+
+  const { error } = await supabase.from("events").update(update).eq("id", eventId);
+  if (error) return { error: error.message };
+  revalidatePath(`/events/${eventId}`);
+  return {};
+}
+
+// Render the reminder email for an in-app preview. Uses a representative first
+// name from the signups and no balance (a "Pay now" button is added per-recipient
+// for anyone who owes).
+export async function previewReminder(
+  eventId: string,
+  note?: string | null
+): Promise<{ subject: string; html: string; error?: string }> {
+  const supabase = await createClient();
+  if (!(await requireCoach(supabase))) return { subject: "", html: "", error: "Not authorized" };
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("title, slug, starts_at, ends_at, location, image_urls")
+    .eq("id", eventId)
+    .single();
+  if (!event) return { subject: "", html: "", error: "Event not found." };
+
+  const { data: sample } = await supabase
+    .from("event_signups")
+    .select("name")
+    .eq("event_id", eventId)
+    .eq("declined", false)
+    .limit(1)
+    .maybeSingle();
+  const first = String(sample?.name ?? "there").split(" ")[0] || "there";
+
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
+
+  const { subject, html } = buildEventReminderEmail({
+    title: event.title,
+    firstName: first,
+    leadPhrase: relativeEventPhrase(event.starts_at),
+    whenStr: formatEventWhen(event.starts_at, event.ends_at),
+    location: event.location ?? null,
+    heroUrl: (event.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null,
+    eventUrl,
+    owes: false,
+    totalCents: 0,
+    payUrl: null,
+    note,
+  });
+  return { subject, html };
+}
+
+// Send the reminder to the coach's own email so they can see the real thing.
+export async function sendTestReminder(
+  eventId: string,
+  note?: string | null
+): Promise<{ sent: number; error?: string }> {
+  const supabase = await createClient();
+  if (!(await requireCoach(supabase))) return { sent: 0, error: "Not authorized" };
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const to = user?.email;
+  if (!to) return { sent: 0, error: "Your account has no email address to send a test to." };
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("title, slug, starts_at, ends_at, location, image_urls")
+    .eq("id", eventId)
+    .single();
+  if (!event) return { sent: 0, error: "Event not found." };
+
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
+
+  const { subject, html, text } = buildEventReminderEmail({
+    title: event.title,
+    firstName: "there",
+    leadPhrase: relativeEventPhrase(event.starts_at),
+    whenStr: formatEventWhen(event.starts_at, event.ends_at),
+    location: event.location ?? null,
+    heroUrl: (event.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null,
+    eventUrl,
+    owes: false,
+    totalCents: 0,
+    payUrl: null,
+    note,
+  });
+
+  const { Resend } = await import("resend");
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const from = `${process.env.EMAIL_FROM_NAME ?? "CS Sports"} <${process.env.EMAIL_FROM ?? "onboarding@resend.dev"}>`;
+  const { error } = await resend.emails.send({ from, to, subject: `[Test] ${subject}`, html, text });
+  if (error) return { sent: 0, error: error.message };
+  return { sent: 1 };
+}
+
 // ── AI pre-fill ───────────────────────────────────────────────────────────────
 // Paste a raw event email/flyer; Claude distills it into the form fields a parent
 // needs (title, parent-relevant description, location, dates). Internal/marketing

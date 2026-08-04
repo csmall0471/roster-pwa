@@ -197,6 +197,12 @@ export interface EventRecord {
   pay_instructions: string | null;
   signup_deadline: string | null;
   status: EventStatus;
+  // Automatic reminder: send N days before the event (null = off). reminder_note
+  // is an optional coach message included in every reminder; reminder_sent_at
+  // guards the cron against re-sending the automatic one.
+  reminder_days_before: number | null;
+  reminder_note: string | null;
+  reminder_sent_at: string | null;
   created_at: string;
 }
 

@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { Resend } from "resend"
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay"
-import { formatEventWhen } from "@/lib/events/when"
+import { formatEventWhen, relativeEventPhrase, eventDayKey, shiftDayKey, todayKey } from "@/lib/events/when"
 import { buildEventReminderEmail } from "@/lib/events/reminder"
 import type { SignupAttendee } from "@/lib/types"
 
@@ -55,16 +55,9 @@ export async function GET(request: Request) {
   tomorrow.setDate(tomorrow.getDate() + 1)
   const targetDate = dateOverride ?? tomorrow.toISOString().split("T")[0]
 
-  // Event reminders fire 2 days out (snack/training are next-day). Separate
-  // override (?eventDate=) so the 1-day and 2-day windows can be tested apart.
-  const twoOut = new Date()
-  twoOut.setDate(twoOut.getDate() + 2)
-  const eventDate = url.searchParams.get("eventDate") ?? twoOut.toISOString().split("T")[0]
-  const eventDayAfter = (() => {
-    const d = new Date(`${eventDate}T00:00:00Z`)
-    d.setUTCDate(d.getUTCDate() + 1)
-    return d.toISOString().split("T")[0]
-  })()
+  // Event reminders fire per-event: each event stores how many days before it the
+  // reminder should go out. "today" is the run date (overridable via ?eventToday=).
+  const runDay = url.searchParams.get("eventToday") ?? todayKey()
 
   let emailsSent = 0
   const errors: string[] = []
@@ -179,29 +172,39 @@ export async function GET(request: Request) {
     }
   }
 
-  // ── Event reminders (2 days out) ──────────────────────────────────────────
-  // Remind everyone who RSVP'd "going" to a published event happening in 2 days.
-  // Include the Venmo pay link ONLY for those who still owe (unpaid, balance > 0).
+  // ── Event reminders (per-event lead time) ─────────────────────────────────
+  // Each event stores reminder_days_before; on the day that's that many days
+  // before the event, remind everyone who RSVP'd "going". reminder_sent_at guards
+  // against re-sending. Venmo pay link only for those who still owe.
 
   const { data: events, error: eventErr } = await supabase
     .from("events")
     .select(`
       id, title, slug, starts_at, ends_at, location, image_urls, pay_url, status,
+      reminder_days_before, reminder_note, reminder_sent_at,
       event_signups(id, name, email, attendees, total_cents, paid, declined)
     `)
     .eq("status", "published")
-    .gte("starts_at", `${eventDate}T00:00:00`)
-    .lt("starts_at", `${eventDayAfter}T00:00:00`)
+    .gte("starts_at", `${runDay}T00:00:00`)
 
+  const dueEvents = (events ?? []).filter((ev) => {
+    const days = ev.reminder_days_before as number | null
+    if (days == null || !ev.starts_at) return false
+    if (ev.reminder_sent_at) return false // already auto-sent
+    return shiftDayKey(eventDayKey(ev.starts_at as string), -days) === runDay
+  })
   debug.eventsFound = events?.length ?? 0
+  debug.eventsDue = dueEvents.length
 
   if (eventErr) {
     errors.push(`event query: ${eventErr.message}`)
   } else {
-    for (const ev of events ?? []) {
+    for (const ev of dueEvents) {
       const whenStr = formatEventWhen(ev.starts_at as string | null, ev.ends_at as string | null)
+      const leadPhrase = relativeEventPhrase(ev.starts_at as string | null)
       const eventUrl = `${base}/event/${ev.slug}`
       const hero = (ev.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null
+      let eventSent = 0
 
       for (const s of (ev.event_signups as any[]) ?? []) {
         if (s.declined || !s.email) continue
@@ -215,7 +218,7 @@ export async function GET(request: Request) {
         const { subject, html, text } = buildEventReminderEmail({
           title: ev.title as string,
           firstName: first,
-          leadPhrase: "is in 2 days",
+          leadPhrase,
           whenStr,
           location: (ev.location as string | null) ?? null,
           heroUrl: hero,
@@ -223,6 +226,7 @@ export async function GET(request: Request) {
           owes,
           totalCents: total,
           payUrl,
+          note: (ev.reminder_note as string | null) ?? null,
         })
 
         if (dry) {
@@ -232,9 +236,15 @@ export async function GET(request: Request) {
           if (error) errors.push(`event email ${s.email}: ${error.message}`)
           else {
             emailsSent++
+            eventSent++
             sentSummary.push({ to: s.email, subject })
           }
         }
+      }
+
+      // Mark auto-sent so a later run today doesn't repeat it.
+      if (!dry && eventSent > 0) {
+        await supabase.from("events").update({ reminder_sent_at: new Date().toISOString() }).eq("id", ev.id)
       }
     }
   }

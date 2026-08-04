@@ -22,6 +22,23 @@ export function formatEventWhen(startsAt?: string | null, endsAt?: string | null
   return startStr;
 }
 
+// Calendar-day key (YYYY-MM-DD) for a timestamp, in the event's zone.
+export function eventDayKey(iso: string, timeZone = process.env.EVENT_TIMEZONE || "America/Phoenix"): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    new Date(iso)
+  );
+}
+
+// Today's calendar-day key in the event's zone.
+export function todayKey(timeZone = process.env.EVENT_TIMEZONE || "America/Phoenix"): string {
+  return eventDayKey(new Date().toISOString(), timeZone);
+}
+
+// Shift a YYYY-MM-DD key by whole days (treated as UTC midnight for the math).
+export function shiftDayKey(dayKey: string, deltaDays: number): string {
+  return new Date(Date.parse(`${dayKey}T00:00:00Z`) + deltaDays * 86_400_000).toISOString().slice(0, 10);
+}
+
 // A natural "how soon" phrase for reminder subject/body ("is tomorrow", "is in
 // 3 days", "is today"). Computed on calendar days in the event's zone so an
 // evening event two nights out still reads "in 2 days". Falls back to a neutral

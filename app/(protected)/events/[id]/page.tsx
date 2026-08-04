@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { renderMarkdown, markdownClass } from "@/lib/markdown";
 import type { EventSignup, EventWithDetails, SavedSibling, SignupPlayer } from "@/lib/types";
 import EventManageControls from "../_components/EventManageControls";
-import EventReminderButton from "../_components/EventReminderButton";
+import EventReminderPanel from "../_components/EventReminderPanel";
 import EventInviteButton from "../_components/EventInviteButton";
 import InviteRosterPanel from "../_components/InviteRosterPanel";
 import SignupsDashboard from "../_components/SignupsDashboard";
@@ -358,7 +358,12 @@ export default async function EventManagePage({
         )}
         {ev.status !== "draft" && remindableCount > 0 && (
           <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-            <EventReminderButton eventId={ev.id} count={remindableCount} />
+            <EventReminderPanel
+              eventId={ev.id}
+              count={remindableCount}
+              initialDaysBefore={ev.reminder_days_before ?? null}
+              initialNote={ev.reminder_note ?? ""}
+            />
           </div>
         )}
       </div>
