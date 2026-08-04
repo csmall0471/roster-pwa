@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { renderMarkdown, markdownClass } from "@/lib/markdown";
 import type { EventSignup, EventWithDetails, SavedSibling, SignupPlayer } from "@/lib/types";
 import EventManageControls from "../_components/EventManageControls";
+import EventReminderButton from "../_components/EventReminderButton";
 import EventInviteButton from "../_components/EventInviteButton";
 import InviteRosterPanel from "../_components/InviteRosterPanel";
 import SignupsDashboard from "../_components/SignupsDashboard";
@@ -312,6 +313,14 @@ export default async function EventManagePage({
     ? new Date(ev.starts_at).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" })
     : null;
 
+  // How many distinct families would get a manual reminder (RSVP'd, not declined,
+  // has an email) — deduped by email, matching what sendEventReminder sends.
+  const remindableCount = new Set(
+    signups
+      .filter((s) => !s.declined && s.email)
+      .map((s) => (s.email as string).trim().toLowerCase())
+  ).size;
+
   return (
     <div className="space-y-6">
       <Link href="/events" className="text-sm text-gray-500 hover:text-gray-700">
@@ -345,6 +354,11 @@ export default async function EventManagePage({
               recipients={recipients}
               teamName={teamName}
             />
+          </div>
+        )}
+        {ev.status !== "draft" && remindableCount > 0 && (
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+            <EventReminderButton eventId={ev.id} count={remindableCount} />
           </div>
         )}
       </div>

@@ -8,11 +8,14 @@ import { renderMarkdown } from "@/lib/markdown";
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay";
 import { sendSignupConfirmation } from "@/lib/events/signup-confirmation";
 import { buildPricedAttendees, type PricingTier } from "@/lib/events/signup-pricing";
+import { buildEventReminderEmail } from "@/lib/events/reminder";
+import { formatEventWhen, relativeEventPhrase } from "@/lib/events/when";
 import type {
   AttendeeStatus,
   EventFieldType,
   EventSignup,
   EventStatus,
+  SignupAttendee,
 } from "@/lib/types";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -588,6 +591,105 @@ async function sendInviteEmail(
     text,
   });
   if (error) throw new Error(error.message);
+}
+
+// ── Manual reminder ───────────────────────────────────────────────────────────
+// Send the event reminder email now to everyone who RSVP'd (non-declined, has an
+// email), with an optional coach note. Same email the 2-day cron sends, via the
+// shared builder. Deduped by email.
+export type SendReminderResult = { sent: number; failed: number; skipped: number; error?: string };
+
+export async function sendEventReminder(
+  eventId: string,
+  note?: string | null
+): Promise<SendReminderResult> {
+  const supabase = await createClient();
+  if (!(await requireCoach(supabase))) return { sent: 0, failed: 0, skipped: 0, error: "Not authorized" };
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("id, title, slug, status, starts_at, ends_at, location, image_urls, pay_url")
+    .eq("id", eventId)
+    .single();
+  if (!event) return { sent: 0, failed: 0, skipped: 0, error: "Event not found." };
+  if (event.status === "draft")
+    return { sent: 0, failed: 0, skipped: 0, error: "Publish the event before sending reminders." };
+
+  const { data: signups } = await supabase
+    .from("event_signups")
+    .select("name, email, attendees, total_cents, paid, declined")
+    .eq("event_id", eventId);
+
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
+  const whenStr = formatEventWhen(event.starts_at, event.ends_at);
+  const leadPhrase = relativeEventPhrase(event.starts_at);
+  const hero = (event.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null;
+
+  const { Resend } = await import("resend");
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const from = `${process.env.EMAIL_FROM_NAME ?? "CS Sports"} <${process.env.EMAIL_FROM ?? "onboarding@resend.dev"}>`;
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  const seen = new Set<string>(); // dedupe by email
+
+  type SignupRow = {
+    name: string | null;
+    email: string | null;
+    attendees: SignupAttendee[] | null;
+    total_cents: number | null;
+    paid: boolean;
+    declined: boolean;
+  };
+  for (const s of (signups ?? []) as SignupRow[]) {
+    if (s.declined) continue;
+    const key = (s.email ?? "").trim().toLowerCase();
+    if (!key) {
+      skipped++;
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const first = String(s.name ?? "there").split(" ")[0] || "there";
+    const total = s.total_cents ?? 0;
+    const owes = !s.paid && total > 0;
+    const payUrl = owes
+      ? venmoPayLink(
+          event.pay_url ?? null,
+          eventPayNote((s.attendees ?? []) as SignupAttendee[], s.name ?? "", event.title),
+          total
+        )
+      : null;
+
+    const { subject, html, text } = buildEventReminderEmail({
+      title: event.title,
+      firstName: first,
+      leadPhrase,
+      whenStr,
+      location: event.location ?? null,
+      heroUrl: hero,
+      eventUrl,
+      owes,
+      totalCents: total,
+      payUrl,
+      note,
+    });
+
+    try {
+      const { error } = await resend.emails.send({ from, to: s.email as string, subject, html, text });
+      if (error) failed++;
+      else sent++;
+    } catch {
+      failed++;
+    }
+  }
+
+  revalidatePath(`/events/${eventId}`);
+  return { sent, failed, skipped };
 }
 
 // ── AI pre-fill ───────────────────────────────────────────────────────────────

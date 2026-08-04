@@ -21,3 +21,21 @@ export function formatEventWhen(startsAt?: string | null, endsAt?: string | null
   }
   return startStr;
 }
+
+// A natural "how soon" phrase for reminder subject/body ("is tomorrow", "is in
+// 3 days", "is today"). Computed on calendar days in the event's zone so an
+// evening event two nights out still reads "in 2 days". Falls back to a neutral
+// phrase for missing or past dates.
+export function relativeEventPhrase(startsAt?: string | null): string {
+  if (!startsAt) return "is coming up";
+  const timeZone = process.env.EVENT_TIMEZONE || "America/Phoenix";
+  const dayKey = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  const today = Date.parse(`${dayKey(new Date())}T00:00:00Z`);
+  const event = Date.parse(`${dayKey(new Date(startsAt))}T00:00:00Z`);
+  const days = Math.round((event - today) / 86_400_000);
+  if (Number.isNaN(days) || days < 0) return "is coming up";
+  if (days === 0) return "is today";
+  if (days === 1) return "is tomorrow";
+  return `is in ${days} days`;
+}

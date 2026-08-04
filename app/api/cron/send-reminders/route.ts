@@ -1,8 +1,8 @@
 import { createClient } from "@supabase/supabase-js"
 import { Resend } from "resend"
-import { buildEmailHtml, btn, infoRow, infoTable } from "@/lib/email-template"
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay"
 import { formatEventWhen } from "@/lib/events/when"
+import { buildEventReminderEmail } from "@/lib/events/reminder"
 import type { SignupAttendee } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -200,12 +200,8 @@ export async function GET(request: Request) {
   } else {
     for (const ev of events ?? []) {
       const whenStr = formatEventWhen(ev.starts_at as string | null, ev.ends_at as string | null)
-      const money = (c: number) => `$${(c / 100).toFixed(2)}`
       const eventUrl = `${base}/event/${ev.slug}`
-      const hero = (ev.image_urls as string[] | null)?.find((u) => u?.trim())
-      const heroImg = hero
-        ? `<img src="${hero}" alt="" width="496" style="display:block;width:100%;max-width:496px;height:auto;border-radius:10px;margin:0 0 22px;" />`
-        : ""
+      const hero = (ev.image_urls as string[] | null)?.find((u) => u?.trim()) ?? null
 
       for (const s of (ev.event_signups as any[]) ?? []) {
         if (s.declined || !s.email) continue
@@ -216,31 +212,18 @@ export async function GET(request: Request) {
           ? venmoPayLink(ev.pay_url as string | null, eventPayNote((s.attendees ?? []) as SignupAttendee[], s.name ?? "", ev.title as string), total)
           : null
 
-        const buttons = [
-          payUrl ? btn(`Pay now · ${money(total)}`, payUrl, "#16a34a") : "",
-          btn("Change my RSVP", eventUrl, "#2563eb"),
-        ].filter(Boolean)
-
-        const subject = `Reminder: ${ev.title} is in 2 days`
-        const html = buildEmailHtml({
-          teamName: ev.title as string,
-          htmlBody:
-            heroImg +
-            `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${first},</p>` +
-            `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Just a reminder — <strong>${ev.title}</strong> is in 2 days.</p>` +
-            infoTable(infoRow("When", whenStr) + (ev.location ? infoRow("Where", ev.location as string) : "")) +
-            (owes
-              ? `<p style="margin:14px 0 8px;font-size:15px;color:#111827;">Our records show a balance of <strong>${money(total)}</strong>.</p>`
-              : "") +
-            `<div style="margin:16px 0 4px;">${buttons.join("")}</div>` +
-            `<p style="margin:14px 0 0;font-size:15px;color:#111827;">See you there!</p>`,
+        const { subject, html, text } = buildEventReminderEmail({
+          title: ev.title as string,
+          firstName: first,
+          leadPhrase: "is in 2 days",
+          whenStr,
+          location: (ev.location as string | null) ?? null,
+          heroUrl: hero,
+          eventUrl,
+          owes,
+          totalCents: total,
+          payUrl,
         })
-        const text =
-          `Hi ${first}, reminder: ${ev.title} is in 2 days (${whenStr}).` +
-          (ev.location ? ` Location: ${ev.location}.` : "") +
-          (owes ? `\n\nBalance due: ${money(total)}.${payUrl ? ` Pay: ${payUrl}` : ""}` : "") +
-          `\n\nChange your RSVP: ${eventUrl}` +
-          `\n\nSee you there!\n— Coach Connor`
 
         if (dry) {
           preview.push({ to: s.email, subject, body: text })
