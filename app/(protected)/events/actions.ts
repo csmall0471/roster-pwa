@@ -628,6 +628,23 @@ function buildReminderArgs(
   };
 }
 
+// Every address one family's reminder goes to: the signup's contact email plus
+// all linked parents (co-parents), deduped case-insensitively.
+async function reminderRecipients(
+  service: ReturnType<typeof createServiceClient>,
+  contactEmail: string | null,
+  parentId: string | null
+): Promise<string[]> {
+  const byEmail = new Map<string, string>();
+  const add = (e: string | null | undefined) => {
+    const t = (e ?? "").trim();
+    if (t) byEmail.set(t.toLowerCase(), t);
+  };
+  add(contactEmail);
+  if (parentId) for (const e of await familyParentEmails(service, parentId)) add(e);
+  return [...byEmail.values()];
+}
+
 // Send the reminder now to everyone who RSVP'd (non-declined). Each family gets
 // ONE email to all its parents (contact email + co-parents), with the coach
 // BCC'd, and its own who's-coming + cost breakdown + Venmo link (if unpaid).
@@ -674,15 +691,8 @@ export async function sendEventReminder(
   for (const s of (signups ?? []) as SignupRow[]) {
     if (s.declined) continue;
 
-    // One email to the whole family: contact email + co-parents' emails.
-    const byEmail = new Map<string, string>();
-    const add = (e: string | null | undefined) => {
-      const t = (e ?? "").trim();
-      if (t) byEmail.set(t.toLowerCase(), t);
-    };
-    add(s.email);
-    if (s.parent_id) for (const e of await familyParentEmails(service, s.parent_id)) add(e);
-    if (byEmail.size === 0) {
+    const to = await reminderRecipients(service, s.email, s.parent_id);
+    if (to.length === 0) {
       skipped++;
       continue;
     }
@@ -694,7 +704,7 @@ export async function sendEventReminder(
     try {
       const { error } = await resend.emails.send({
         from,
-        to: [...byEmail.values()],
+        to,
         subject,
         html,
         text,
@@ -751,19 +761,38 @@ async function loadReminderSignup(
 }
 
 // Render the reminder email for an in-app preview — as the chosen family would
-// see it (their who's-coming, cost breakdown, and Venmo link if unpaid).
+// see it (their who's-coming, cost breakdown, and Venmo link if unpaid) — plus
+// the exact recipients it would send to and the BCC (the coach).
 export async function previewReminder(
   eventId: string,
   signupId?: string | null,
   note?: string | null
-): Promise<{ subject: string; html: string; error?: string }> {
+): Promise<{ subject: string; html: string; recipients: string[]; bcc: string | null; error?: string }> {
   const supabase = await createClient();
-  if (!(await requireCoach(supabase))) return { subject: "", html: "", error: "Not authorized" };
+  if (!(await requireCoach(supabase)))
+    return { subject: "", html: "", recipients: [], bcc: null, error: "Not authorized" };
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const bcc = user?.email ?? null;
 
   const { data: event } = await supabase.from("events").select(REMINDER_EVENT_COLS).eq("id", eventId).single();
-  if (!event) return { subject: "", html: "", error: "Event not found." };
+  if (!event) return { subject: "", html: "", recipients: [], bcc, error: "Event not found." };
 
   const signup = await loadReminderSignup(supabase, eventId, signupId);
+
+  // The addresses this family's reminder would actually go to.
+  let recipients: string[] = [];
+  if (signupId) {
+    const { data: row } = await supabase
+      .from("event_signups")
+      .select("email, parent_id")
+      .eq("id", signupId)
+      .eq("event_id", eventId)
+      .maybeSingle();
+    recipients = await reminderRecipients(createServiceClient(), row?.email ?? null, row?.parent_id ?? null);
+  }
 
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
@@ -772,7 +801,7 @@ export async function previewReminder(
   const { subject, html } = buildEventReminderEmail(
     buildReminderArgs(event as ReminderEvent, signup, eventUrl, note)
   );
-  return { subject, html };
+  return { subject, html, recipients, bcc };
 }
 
 // Send the reminder to the coach's own email — the chosen family's version.

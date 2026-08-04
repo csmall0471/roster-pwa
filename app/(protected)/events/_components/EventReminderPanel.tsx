@@ -33,7 +33,12 @@ export default function EventReminderPanel({
   const [savedNote, setSavedNote] = useState(initialNote);
   const [family, setFamily] = useState(families[0]?.id ?? "");
 
-  const [preview, setPreview] = useState<{ subject: string; html: string } | null>(null);
+  const [preview, setPreview] = useState<{
+    subject: string;
+    html: string;
+    recipients: string[];
+    bcc: string | null;
+  } | null>(null);
   const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const [savingSchedule, startSchedule] = useTransition();
@@ -76,7 +81,7 @@ export default function EventReminderPanel({
     startPreview(async () => {
       const res = await previewReminder(eventId, family || null, note.trim() || null);
       if (res.error) setStatus({ kind: "err", text: res.error });
-      else setPreview({ subject: res.subject, html: res.html });
+      else setPreview({ subject: res.subject, html: res.html, recipients: res.recipients, bcc: res.bcc });
     });
   }
 
@@ -223,9 +228,22 @@ export default function EventReminderPanel({
       {/* Preview */}
       {preview && (
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 px-3 py-2">
-            <p className="text-xs text-gray-400">Subject</p>
-            <p className="text-sm font-medium text-gray-800 dark:text-gray-100">{preview.subject}</p>
+          <div className="space-y-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 px-3 py-2">
+            <div>
+              <p className="text-xs text-gray-400">To</p>
+              {preview.recipients.length > 0 ? (
+                <p className="text-sm text-gray-800 dark:text-gray-100">{preview.recipients.join(", ")}</p>
+              ) : (
+                <p className="text-sm text-amber-600 dark:text-amber-400">
+                  No email on file for this family — they&apos;d be skipped.
+                </p>
+              )}
+              {preview.bcc && <p className="text-xs text-gray-400">Bcc: {preview.bcc} (you)</p>}
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Subject</p>
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-100">{preview.subject}</p>
+            </div>
           </div>
           <iframe
             title="Reminder preview"
