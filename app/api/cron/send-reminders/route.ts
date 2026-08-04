@@ -3,7 +3,7 @@ import { Resend } from "resend"
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay"
 import { formatEventWhen, relativeEventPhrase, eventDayKey, shiftDayKey, todayKey } from "@/lib/events/when"
 import { buildEventReminderEmail } from "@/lib/events/reminder"
-import { familyParentEmails } from "@/lib/events/family"
+import { reminderFamily } from "@/lib/events/family"
 import type { SignupAttendee } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -210,16 +210,11 @@ export async function GET(request: Request) {
       for (const s of (ev.event_signups as any[]) ?? []) {
         if (s.declined) continue
 
-        // One email to the whole family: contact email + co-parents' emails.
-        const byEmail = new Map<string, string>()
-        const add = (e: string | null | undefined) => {
-          const t = (e ?? "").trim()
-          if (t) byEmail.set(t.toLowerCase(), t)
-        }
-        add(s.email)
-        if (s.parent_id) for (const e of await familyParentEmails(supabase, s.parent_id)) add(e)
-        if (byEmail.size === 0) continue
-        const to = [...byEmail.values()]
+        // One email to the whole family: contact + co-parents; greet them all.
+        const { recipients: to, greetingNames } = await reminderFamily(
+          supabase, s.name ?? null, s.email ?? null, s.parent_id ?? null,
+        )
+        if (to.length === 0) continue
 
         const first = String(s.name ?? "there").split(" ")[0] || "there"
         const total = (s.total_cents as number) ?? 0
@@ -231,6 +226,7 @@ export async function GET(request: Request) {
         const { subject, html, text } = buildEventReminderEmail({
           title: ev.title as string,
           firstName: first,
+          greetingNames,
           leadPhrase,
           whenStr,
           location: (ev.location as string | null) ?? null,

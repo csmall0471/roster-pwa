@@ -24,15 +24,27 @@ export type ReminderEmailArgs = {
   description?: string | null; // the event's full write-up (markdown)
   payInstructions?: string | null; // how/where to pay (markdown)
   attendees?: SignupAttendee[] | null; // this family's RSVP → who's coming + cost breakdown
+  greetingNames?: string[] | null; // all parents to greet ("Sara and Brandon"); falls back to firstName
 };
 
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
+
+// "Sara" · "Sara and Brandon" · "Sara, Brandon, and Alex"
+function formatNames(names: string[]): string {
+  const n = names.filter((x) => x.trim());
+  if (n.length === 0) return "there";
+  if (n.length === 1) return n[0];
+  if (n.length === 2) return `${n[0]} and ${n[1]}`;
+  return `${n.slice(0, -1).join(", ")}, and ${n[n.length - 1]}`;
+}
 
 export function buildEventReminderEmail(a: ReminderEmailArgs): {
   subject: string;
   html: string;
   text: string;
 } {
+  const greeting = a.greetingNames && a.greetingNames.length ? formatNames(a.greetingNames) : a.firstName;
+
   const heroImg = a.heroUrl
     ? `<img src="${a.heroUrl}" alt="" width="496" style="display:block;width:100%;max-width:496px;height:auto;border-radius:10px;margin:0 0 22px;" />`
     : "";
@@ -90,7 +102,7 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
     teamName: a.title,
     htmlBody:
       heroImg +
-      `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${esc(a.firstName)},</p>` +
+      `<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ${esc(greeting)},</p>` +
       `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Just a reminder — <strong>${esc(a.title)}</strong> ${esc(a.leadPhrase)}.</p>` +
       noteBlock +
       (whenWhere ? sectionHeading("When & where") + tbl(whenWhere) : "") +
@@ -108,7 +120,7 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
 
   const whoText = attendees.length ? groupWhoText(attendees) : [];
   const text =
-    `Hi ${a.firstName}, reminder: ${a.title} ${a.leadPhrase} (${a.whenStr}).` +
+    `Hi ${greeting}, reminder: ${a.title} ${a.leadPhrase} (${a.whenStr}).` +
     (a.location ? ` Location: ${a.location}.` : "") +
     (a.note?.trim() ? `\n\n${a.note.trim()}` : "") +
     (whoText.length ? `\n\nWho's coming:\n${whoText.join("\n")}` : "") +

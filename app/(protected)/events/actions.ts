@@ -10,7 +10,7 @@ import { sendSignupConfirmation } from "@/lib/events/signup-confirmation";
 import { buildPricedAttendees, type PricingTier } from "@/lib/events/signup-pricing";
 import { buildEventReminderEmail, type ReminderEmailArgs } from "@/lib/events/reminder";
 import { formatEventWhen, relativeEventPhrase } from "@/lib/events/when";
-import { familyParentEmails } from "@/lib/events/family";
+import { familyParentEmails, reminderFamily } from "@/lib/events/family";
 import type {
   AttendeeStatus,
   EventFieldType,
@@ -597,12 +597,14 @@ const REMINDER_EVENT_COLS =
 
 // Build the reminder email args for one family. When there's no signup (generic
 // preview), attendees/who's-coming/cost are omitted. The Venmo pay link is added
-// only when the family owes (unpaid with a balance).
+// only when the family owes (unpaid with a balance). greetingNames greets all
+// the family's parents ("Sara and Brandon").
 function buildReminderArgs(
   event: ReminderEvent,
   signup: ReminderSignup | null,
   eventUrl: string,
-  note?: string | null
+  note?: string | null,
+  greetingNames?: string[] | null
 ): ReminderEmailArgs {
   const attendees = signup?.attendees ?? null;
   const total = signup?.total_cents ?? 0;
@@ -625,24 +627,8 @@ function buildReminderArgs(
     description: event.description ?? null,
     payInstructions: event.pay_instructions ?? null,
     attendees,
+    greetingNames: greetingNames && greetingNames.length ? greetingNames : null,
   };
-}
-
-// Every address one family's reminder goes to: the signup's contact email plus
-// all linked parents (co-parents), deduped case-insensitively.
-async function reminderRecipients(
-  service: ReturnType<typeof createServiceClient>,
-  contactEmail: string | null,
-  parentId: string | null
-): Promise<string[]> {
-  const byEmail = new Map<string, string>();
-  const add = (e: string | null | undefined) => {
-    const t = (e ?? "").trim();
-    if (t) byEmail.set(t.toLowerCase(), t);
-  };
-  add(contactEmail);
-  if (parentId) for (const e of await familyParentEmails(service, parentId)) add(e);
-  return [...byEmail.values()];
 }
 
 // Send the reminder now to everyone who RSVP'd (non-declined). Each family gets
@@ -691,14 +677,14 @@ export async function sendEventReminder(
   for (const s of (signups ?? []) as SignupRow[]) {
     if (s.declined) continue;
 
-    const to = await reminderRecipients(service, s.email, s.parent_id);
+    const { recipients: to, greetingNames } = await reminderFamily(service, s.name, s.email, s.parent_id);
     if (to.length === 0) {
       skipped++;
       continue;
     }
 
     const { subject, html, text } = buildEventReminderEmail(
-      buildReminderArgs(event as ReminderEvent, s, eventUrl, note)
+      buildReminderArgs(event as ReminderEvent, s, eventUrl, note, greetingNames)
     );
 
     try {
@@ -782,8 +768,9 @@ export async function previewReminder(
 
   const signup = await loadReminderSignup(supabase, eventId, signupId);
 
-  // The addresses this family's reminder would actually go to.
+  // The addresses this family's reminder would actually go to + who to greet.
   let recipients: string[] = [];
+  let greetingNames: string[] = [];
   if (signupId) {
     const { data: row } = await supabase
       .from("event_signups")
@@ -791,7 +778,9 @@ export async function previewReminder(
       .eq("id", signupId)
       .eq("event_id", eventId)
       .maybeSingle();
-    recipients = await reminderRecipients(createServiceClient(), row?.email ?? null, row?.parent_id ?? null);
+    const fam = await reminderFamily(createServiceClient(), signup?.name ?? null, row?.email ?? null, row?.parent_id ?? null);
+    recipients = fam.recipients;
+    greetingNames = fam.greetingNames;
   }
 
   const h = await headers();
@@ -799,7 +788,7 @@ export async function previewReminder(
   const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
 
   const { subject, html } = buildEventReminderEmail(
-    buildReminderArgs(event as ReminderEvent, signup, eventUrl, note)
+    buildReminderArgs(event as ReminderEvent, signup, eventUrl, note, greetingNames)
   );
   return { subject, html, recipients, bcc };
 }
@@ -823,12 +812,26 @@ export async function sendTestReminder(
 
   const signup = await loadReminderSignup(supabase, eventId, signupId);
 
+  // Greet the same parents the family would see, even though this test goes to you.
+  let greetingNames: string[] = [];
+  if (signupId) {
+    const { data: row } = await supabase
+      .from("event_signups")
+      .select("email, parent_id")
+      .eq("id", signupId)
+      .eq("event_id", eventId)
+      .maybeSingle();
+    greetingNames = (
+      await reminderFamily(createServiceClient(), signup?.name ?? null, row?.email ?? null, row?.parent_id ?? null)
+    ).greetingNames;
+  }
+
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
   const eventUrl = `${proto}://${h.get("host")}/event/${event.slug}`;
 
   const { subject, html, text } = buildEventReminderEmail(
-    buildReminderArgs(event as ReminderEvent, signup, eventUrl, note)
+    buildReminderArgs(event as ReminderEvent, signup, eventUrl, note, greetingNames)
   );
 
   const { Resend } = await import("resend");
