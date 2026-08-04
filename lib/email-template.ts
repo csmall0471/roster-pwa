@@ -34,6 +34,16 @@ export function divider(): string {
   return `<hr style="border:none;border-top:1px solid #f3f4f6;margin:22px 0;">`
 }
 
+// Small uppercase section label + a tight table wrapper — shared by the event
+// confirmation and reminder emails so their sections look identical.
+export function sectionHeading(t: string): string {
+  return `<p style="margin:22px 0 6px;font-size:12px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#9ca3af;">${esc(t)}</p>`
+}
+
+export function tbl(rows: string): string {
+  return `<table cellpadding="0" cellspacing="0" style="margin:2px 0 8px;">${rows}</table>`
+}
+
 export function buildEmailHtml({
   body,
   htmlBody,

@@ -180,7 +180,7 @@ export async function GET(request: Request) {
   const { data: events, error: eventErr } = await supabase
     .from("events")
     .select(`
-      id, title, slug, starts_at, ends_at, location, image_urls, pay_url, status,
+      id, title, slug, starts_at, ends_at, location, description, image_urls, pay_url, pay_instructions, status,
       reminder_days_before, reminder_note, reminder_sent_at,
       event_signups(id, name, email, attendees, total_cents, paid, declined)
     `)
@@ -227,6 +227,8 @@ export async function GET(request: Request) {
           totalCents: total,
           payUrl,
           note: (ev.reminder_note as string | null) ?? null,
+          description: (ev.description as string | null) ?? null,
+          payInstructions: (ev.pay_instructions as string | null) ?? null,
         })
 
         if (dry) {

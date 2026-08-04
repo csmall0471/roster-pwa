@@ -5,18 +5,12 @@
 //
 // `to` may be several addresses (e.g. both parents of a family). Throws on send
 // error so callers can swallow it — an email failure must never break the RSVP.
-import { buildEmailHtml, btn, esc, infoRow } from "@/lib/email-template";
+import { buildEmailHtml, btn, esc, infoRow, sectionHeading, tbl } from "@/lib/email-template";
 import { renderMarkdown } from "@/lib/markdown";
 import { formatEventWhen } from "@/lib/events/when";
 import type { SignupAttendee } from "@/lib/types";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-
-const sectionHeading = (t: string) =>
-  `<p style="margin:22px 0 6px;font-size:12px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#9ca3af;">${esc(t)}</p>`;
-
-const tbl = (rows: string) =>
-  `<table cellpadding="0" cellspacing="0" style="margin:2px 0 8px;">${rows}</table>`;
 
 // A row in the itemized cost breakdown (label left, amount right-aligned).
 function payRow(left: string, right: string, opts?: { strong?: boolean; top?: boolean }): string {

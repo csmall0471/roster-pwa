@@ -608,7 +608,7 @@ export async function sendEventReminder(
 
   const { data: event } = await supabase
     .from("events")
-    .select("id, title, slug, status, starts_at, ends_at, location, image_urls, pay_url")
+    .select("id, title, slug, status, starts_at, ends_at, location, description, image_urls, pay_url, pay_instructions")
     .eq("id", eventId)
     .single();
   if (!event) return { sent: 0, failed: 0, skipped: 0, error: "Event not found." };
@@ -677,6 +677,8 @@ export async function sendEventReminder(
       totalCents: total,
       payUrl,
       note,
+      description: event.description ?? null,
+      payInstructions: event.pay_instructions ?? null,
     });
 
     try {
@@ -727,7 +729,7 @@ export async function previewReminder(
 
   const { data: event } = await supabase
     .from("events")
-    .select("title, slug, starts_at, ends_at, location, image_urls")
+    .select("title, slug, starts_at, ends_at, location, description, image_urls, pay_instructions")
     .eq("id", eventId)
     .single();
   if (!event) return { subject: "", html: "", error: "Event not found." };
@@ -757,6 +759,8 @@ export async function previewReminder(
     totalCents: 0,
     payUrl: null,
     note,
+    description: event.description ?? null,
+    payInstructions: event.pay_instructions ?? null,
   });
   return { subject, html };
 }
@@ -776,7 +780,7 @@ export async function sendTestReminder(
 
   const { data: event } = await supabase
     .from("events")
-    .select("title, slug, starts_at, ends_at, location, image_urls")
+    .select("title, slug, starts_at, ends_at, location, description, image_urls, pay_instructions")
     .eq("id", eventId)
     .single();
   if (!event) return { sent: 0, error: "Event not found." };
@@ -797,6 +801,8 @@ export async function sendTestReminder(
     totalCents: 0,
     payUrl: null,
     note,
+    description: event.description ?? null,
+    payInstructions: event.pay_instructions ?? null,
   });
 
   const { Resend } = await import("resend");
