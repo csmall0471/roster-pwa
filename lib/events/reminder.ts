@@ -76,6 +76,16 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
     btn("Change my RSVP", a.eventUrl, "#2563eb"),
   ].filter(Boolean);
 
+  // How to pay (only when there's a balance): Venmo via the button, or Zelle / cash.
+  const payNote = a.owes
+    ? `<p style="margin:12px 0 4px;font-size:14px;color:#374151;">${
+        a.payUrl ? "Pay with the <strong>Pay now</strong> button below (Venmo), or by " : "You can pay by "
+      }<strong>Zelle</strong> or <strong>cash</strong>.</p>`
+    : "";
+  const payNoteText = a.owes
+    ? `\n\n${a.payUrl ? "Pay with the Venmo link above, or by" : "You can pay by"} Zelle or cash.`
+    : "";
+
   const html = buildEmailHtml({
     teamName: a.title,
     htmlBody:
@@ -86,6 +96,7 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
       (whenWhere ? sectionHeading("When & where") + tbl(whenWhere) : "") +
       whoSection +
       costBlock +
+      payNote +
       `<div style="margin:16px 0 4px;">${buttons.join("")}</div>` +
       `<p style="margin:14px 0 0;font-size:15px;color:#111827;">See you there!</p>` +
       (a.description?.trim()
@@ -108,6 +119,7 @@ export function buildEventReminderEmail(a: ReminderEmailArgs): {
       : paid
         ? `\n\nTotal paid: ${money(a.totalCents)} — thank you!`
         : "") +
+    payNoteText +
     `\n\nChange your RSVP: ${a.eventUrl}` +
     (a.description?.trim() ? `\n\n${a.description.trim()}` : "") +
     `\n\nSee you there!\n— Coach Connor`;
