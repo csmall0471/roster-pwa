@@ -86,7 +86,7 @@ export default function PlayerRanking({
   // Filters
   const [query, setQuery] = useState("");
   const [sport, setSport] = useState("");
-  const [age, setAge] = useState("");
+  const [selectedAges, setSelectedAges] = useState<Set<number>>(new Set());
   const [sortMode, setSortMode] = useState<"rank" | "az">("rank");
 
   const [saving, setSaving] = useState<Set<string>>(new Set());
@@ -114,7 +114,10 @@ export default function PlayerRanking({
     let list = players.filter((p) => {
       if (q && !`${p.first_name} ${p.last_name}`.toLowerCase().includes(q)) return false;
       if (sport && !p.teams.some((t) => t.sport === sport)) return false;
-      if (age && String(calcAge(p.date_of_birth)) !== age) return false;
+      if (selectedAges.size) {
+        const a = calcAge(p.date_of_birth);
+        if (a == null || !selectedAges.has(a)) return false;
+      }
       return true;
     });
 
@@ -128,9 +131,18 @@ export default function PlayerRanking({
       list = [...list].sort((a, b) => (rank[a.id] ?? 0) - (rank[b.id] ?? 0));
     }
     return list;
-  }, [players, query, sport, age, sortMode, order, nameOf]);
+  }, [players, query, sport, selectedAges, sortMode, order, nameOf]);
 
-  const activeFilters = (sport ? 1 : 0) + (age ? 1 : 0) + (query ? 1 : 0);
+  const activeFilters = (sport ? 1 : 0) + (selectedAges.size ? 1 : 0) + (query ? 1 : 0);
+
+  function toggleAge(a: number) {
+    setSelectedAges((prev) => {
+      const n = new Set(prev);
+      if (n.has(a)) n.delete(a);
+      else n.add(a);
+      return n;
+    });
+  }
 
   // ── Slider handlers ─────────────────────────────────────────
 
@@ -189,16 +201,27 @@ export default function PlayerRanking({
         )}
 
         {ages.length > 0 && (
-          <select
-            value={age}
-            onChange={(e) => setAge(e.target.value)}
-            className={`rounded-lg border px-2.5 py-1.5 text-sm bg-white dark:bg-gray-900 focus:border-blue-500 focus:outline-none ${
-              age ? "border-blue-500 text-blue-700 dark:text-blue-300 font-medium" : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
-            }`}
-          >
-            <option value="">All ages</option>
-            {ages.map((a) => <option key={a} value={String(a)}>Age {a}</option>)}
-          </select>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm text-gray-600 dark:text-gray-300">Age:</span>
+            {ages.map((a) => {
+              const on = selectedAges.has(a);
+              return (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => toggleAge(a)}
+                  aria-pressed={on}
+                  className={`rounded-full border px-2.5 py-1 text-xs tabular-nums transition-colors ${
+                    on
+                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-medium"
+                      : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  {a}
+                </button>
+              );
+            })}
+          </div>
         )}
 
         <select
@@ -213,7 +236,7 @@ export default function PlayerRanking({
 
         {activeFilters > 0 && (
           <button
-            onClick={() => { setQuery(""); setSport(""); setAge(""); }}
+            onClick={() => { setQuery(""); setSport(""); setSelectedAges(new Set()); }}
             className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline"
           >
             Clear {activeFilters} filter{activeFilters !== 1 ? "s" : ""}
