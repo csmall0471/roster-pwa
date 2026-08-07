@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { phoneKey } from "@/lib/phone";
+import { RATING_CATEGORIES, type RatingValues } from "@/lib/types";
 
 export type PlayerFormState = { error?: string } | null;
 
@@ -253,6 +254,31 @@ export async function bulkAddToTeam(
 
   revalidatePath("/players");
   revalidatePath(`/teams/${teamId}`);
+  return {};
+}
+
+// Save the coach's 1–10 ratings for one player (upsert on the coach+player pair).
+// Called from the Ranking tab as each slider is released.
+export async function savePlayerRating(
+  playerId: string,
+  values: RatingValues
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const clamp = (n: number) => Math.min(10, Math.max(1, Math.round(Number(n) || 5)));
+  const row: Record<string, unknown> = { user_id: user.id, player_id: playerId };
+  for (const { key } of RATING_CATEGORIES) row[key] = clamp(values[key]);
+  row.updated_at = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("player_ratings")
+    .upsert(row, { onConflict: "user_id,player_id" });
+
+  if (error) return { error: error.message };
   return {};
 }
 

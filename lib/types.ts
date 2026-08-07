@@ -45,6 +45,36 @@ export interface PlayerWithParents extends Player {
   }>;
 }
 
+// ── Player rankings (coach's private favorites tracker) ─────────────────────
+// Five equally-weighted qualities, each rated 1–10. Keys match the columns on
+// player_ratings; an unrated player is treated as a neutral 5 across the board.
+export const RATING_CATEGORIES = [
+  { key: "good_person",  label: "Good person",  help: "How good of a person they are" },
+  { key: "coachable",    label: "Coachable",    help: "How coachable they are" },
+  { key: "personality",  label: "Personality",  help: "Overall personality" },
+  { key: "teammate",     label: "Teammate",     help: "How good of a teammate they are" },
+  { key: "hard_working", label: "Hard working", help: "How hard-working they are" },
+] as const;
+
+export type RatingKey = (typeof RATING_CATEGORIES)[number]["key"];
+export type RatingValues = Record<RatingKey, number>;
+export const RATING_DEFAULT = 5;
+
+export interface PlayerRating extends RatingValues {
+  player_id: string;
+}
+
+// The lean per-player shape the Ranking tab renders (identity + what it filters
+// on: age from date_of_birth, sport from the teams the player is rostered to).
+export interface RankPlayer {
+  id: string;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string | null;
+  photo: string | null;
+  teams: { name: string; sport: string }[];
+}
+
 export interface Parent {
   id: string;
   user_id: string;
