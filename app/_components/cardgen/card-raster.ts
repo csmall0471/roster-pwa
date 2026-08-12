@@ -43,6 +43,21 @@ async function layerCanvas(
   });
 }
 
+export type FrontCutout = {
+  src: string | null;
+  tx: number;
+  ty: number;
+  scale: number;
+  rotation: number;
+};
+export type FrontSig = {
+  src: string | null;
+  x: number;
+  y: number;
+  rotation: number;
+  widthFrac: number;
+};
+
 export type FrontLayers = {
   bgEl: HTMLElement;
   overlayEl: HTMLElement;
@@ -50,7 +65,55 @@ export type FrontLayers = {
   cutout: { tx: number; ty: number; scale: number; rotation: number };
   sigSrc: string | null;
   sig: { x: number; y: number; rotation: number; widthFrac: number };
+  // Additional players on a duo/trio card — drawn with the same math as the
+  // primary cutout/signature. Empty/absent for a normal solo card.
+  extraCutouts?: FrontCutout[];
+  extraSigs?: FrontSig[];
 };
+
+// Draw a cutout photo — object-fit: contain, then the CSS transform about center.
+async function drawCutout(
+  ctx: CanvasRenderingContext2D,
+  c: { src: string | null; tx: number; ty: number; scale: number; rotation: number },
+  outW: number,
+  outH: number
+) {
+  if (!c.src) return;
+  const img = await loadImage(c.src);
+  if (!img.naturalWidth) return;
+  const r = Math.min(outW / img.naturalWidth, outH / img.naturalHeight);
+  const dw = img.naturalWidth * r;
+  const dh = img.naturalHeight * r;
+  ctx.save();
+  ctx.translate(outW / 2, outH / 2);
+  ctx.translate(c.tx * outW, c.ty * outH);
+  ctx.rotate((c.rotation * Math.PI) / 180);
+  ctx.scale(c.scale, c.scale);
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+}
+
+// Draw a signature — centered at (x,y) fractions, contained in its box, rotated.
+async function drawSig(
+  ctx: CanvasRenderingContext2D,
+  s: { src: string | null; x: number; y: number; rotation: number; widthFrac: number },
+  outW: number,
+  outH: number
+) {
+  if (!s.src) return;
+  const img = await loadImage(s.src);
+  if (!img.naturalWidth) return;
+  const boxW = s.widthFrac * outW;
+  const boxH = boxW * (img.naturalHeight / img.naturalWidth);
+  const r = Math.min(boxW / img.naturalWidth, boxH / img.naturalHeight);
+  const dw = img.naturalWidth * r;
+  const dh = img.naturalHeight * r;
+  ctx.save();
+  ctx.translate(s.x * outW, s.y * outH);
+  ctx.rotate((s.rotation * Math.PI) / 180);
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+}
 
 // Composite the front onto a canvas at an arbitrary output width (height keeps
 // the 5:7 ratio). Shared by the full-size export (outW = 750) and the smaller
@@ -69,42 +132,16 @@ export async function compositeFrontCanvas(
   // 1. Background (gradient/image).
   ctx.drawImage(await layerCanvas(L.bgEl, outW), 0, 0, outW, outH);
 
-  // 2. Cutout photo — object-fit: contain, then the CSS transform about center.
-  if (L.cutoutSrc) {
-    const img = await loadImage(L.cutoutSrc);
-    if (img.naturalWidth) {
-      const r = Math.min(outW / img.naturalWidth, outH / img.naturalHeight);
-      const dw = img.naturalWidth * r;
-      const dh = img.naturalHeight * r;
-      ctx.save();
-      ctx.translate(outW / 2, outH / 2);
-      ctx.translate(L.cutout.tx * outW, L.cutout.ty * outH);
-      ctx.rotate((L.cutout.rotation * Math.PI) / 180);
-      ctx.scale(L.cutout.scale, L.cutout.scale);
-      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-      ctx.restore();
-    }
-  }
+  // 2. Cutout photo(s) — primary first, then any duo/trio players on top.
+  await drawCutout(ctx, { src: L.cutoutSrc, ...L.cutout }, outW, outH);
+  for (const c of L.extraCutouts ?? []) await drawCutout(ctx, c, outW, outH);
 
-  // 3. Overlays (jersey badge, team plate, player name) — on top of the photo.
+  // 3. Overlays (jersey badge, team plate, player name) — on top of the photos.
   ctx.drawImage(await layerCanvas(L.overlayEl, outW), 0, 0, outW, outH);
 
-  // 4. Signature — centered at (x,y) fractions, contained in its box, rotated.
-  if (L.sigSrc) {
-    const img = await loadImage(L.sigSrc);
-    if (img.naturalWidth) {
-      const boxW = L.sig.widthFrac * outW;
-      const boxH = boxW * (img.naturalHeight / img.naturalWidth);
-      const r = Math.min(boxW / img.naturalWidth, boxH / img.naturalHeight);
-      const dw = img.naturalWidth * r;
-      const dh = img.naturalHeight * r;
-      ctx.save();
-      ctx.translate(L.sig.x * outW, L.sig.y * outH);
-      ctx.rotate((L.sig.rotation * Math.PI) / 180);
-      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-      ctx.restore();
-    }
-  }
+  // 4. Signature(s) — primary first, then each extra player's.
+  await drawSig(ctx, { src: L.sigSrc, ...L.sig }, outW, outH);
+  for (const s of L.extraSigs ?? []) await drawSig(ctx, s, outW, outH);
 
   return canvas;
 }

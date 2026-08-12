@@ -113,9 +113,45 @@ export interface PlayerPhoto {
 // app/_components/cardgen/sports.ts. Absent = basketball (the original default).
 export type CardSport = "basketball" | "football";
 
+// A hand-drawn signature placed on the front. Position is stored as fractions
+// of the stage so it scales across screen sizes (same convention as transform).
+export interface CardSignature {
+  url: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation?: number;
+  // Vector strokes (points normalized so x=1 = the signature width) kept so the
+  // color/thickness can be changed later without redrawing. Absent on signatures
+  // drawn before this was added — those can only be redrawn.
+  strokes?: { x: number; y: number }[][];
+  color?: string;
+  thickness?: number;
+}
+
+// An additional player on a duo/trio card. The primary player stays on the
+// top-level CardDesign fields (cutout_url/transform/signature/name); each extra
+// subject carries its own cutout, placement, name, and signature.
+export interface CardSubject {
+  cutout_url: string;
+  transform: { x: number; y: number; scale: number; rotation?: number };
+  name: string; // first name shown on the shared name plate
+  signature?: CardSignature | null;
+}
+
+// The duo/trio back: a shared set of fun questions (no per-player stat columns).
+export interface CardDuo {
+  questions: string[];
+  answers: Record<string, string>; // keyed by question text
+}
+
 export interface CardDesign {
   cutout_url: string;
   sport?: CardSport;
+  // Additional players for a duo/trio card. Absent/empty = a normal solo card.
+  extra_subjects?: CardSubject[];
+  // Present on a duo/trio card: the shared back questions + answers.
+  duo?: CardDuo;
   background:
     | { type: "template"; id: string }
     | { type: "image"; url: string };
@@ -135,21 +171,8 @@ export interface CardDesign {
   // Number of copies "in circulation" — shown as a limited-edition stamp on the
   // front. Null/absent = no stamp.
   circulation?: number | null;
-  // Hand-drawn signature placed on the front. Position is stored as fractions of
-  // the stage so it scales across screen sizes (same convention as `transform`).
-  signature?: {
-    url: string;
-    x: number;
-    y: number;
-    scale: number;
-    rotation?: number;
-    // Vector strokes (points normalized so x=1 = the signature width) kept so
-    // the color/thickness can be changed later without redrawing. Absent on
-    // signatures drawn before this was added — those can only be redrawn.
-    strokes?: { x: number; y: number }[][];
-    color?: string;
-    thickness?: number;
-  } | null;
+  // Hand-drawn signature placed on the front (the primary player's).
+  signature?: CardSignature | null;
 }
 
 export interface CardBackDesign {
