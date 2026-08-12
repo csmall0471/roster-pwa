@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { CardDesign } from "@/lib/types";
 import CardEditor from "@/app/_components/cardgen/CardEditor";
+import { sportFromTeam } from "@/app/_components/cardgen/sports";
 
 type SeasonRow = {
   status: string;
@@ -12,6 +13,7 @@ type SeasonRow = {
     season: string | null;
     age_group: string | null;
     season_start: string | null;
+    sport: string | null;
   } | null;
 };
 
@@ -47,7 +49,7 @@ export default async function ParentPlayerCardPage({
 
   const { data: seasonsRaw } = await supabase
     .from("roster")
-    .select("status, team_id, jersey_number, teams(id, name, season, age_group, season_start)")
+    .select("status, team_id, jersey_number, teams(id, name, season, age_group, season_start, sport)")
     .eq("player_id", id)
     .order("created_at", { ascending: false });
   const seasons = (seasonsRaw ?? []) as unknown as (SeasonRow & {
@@ -61,6 +63,7 @@ export default async function ParentPlayerCardPage({
   let season: string | null = null;
   let ageGroup: string | null = null;
   let jersey: string | null = null;
+  let teamSport: string | null = null;
   if (teamIdParam) {
     const match = seasons.find((s) => s.teams?.id === teamIdParam);
     if (match?.teams) {
@@ -68,6 +71,7 @@ export default async function ParentPlayerCardPage({
       teamName = match.teams.name;
       season = match.teams.season ?? null;
       ageGroup = match.teams.age_group ?? null;
+      teamSport = match.teams.sport ?? null;
       jersey = match.jersey_number != null ? String(match.jersey_number) : null;
     }
   }
@@ -80,6 +84,7 @@ export default async function ParentPlayerCardPage({
       teamName = active.teams.name;
       season = active.teams.season ?? null;
       ageGroup = active.teams.age_group ?? null;
+      teamSport = active.teams.sport ?? null;
       jersey = active.jersey_number != null ? String(active.jersey_number) : null;
     }
   }
@@ -151,6 +156,7 @@ export default async function ParentPlayerCardPage({
           playerAge={playerAge}
           returnHref={returnHref}
           initialDesign={initialDesign}
+          defaultSport={sportFromTeam(teamSport)}
         />
       )}
     </div>

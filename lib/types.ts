@@ -108,8 +108,14 @@ export interface PlayerPhoto {
   created_at: string;
 }
 
+// Which sport a card is styled for — drives backgrounds, the position options,
+// the two sport-flavored questionnaire fields, and the "plays like" match. See
+// app/_components/cardgen/sports.ts. Absent = basketball (the original default).
+export type CardSport = "basketball" | "football";
+
 export interface CardDesign {
   cutout_url: string;
+  sport?: CardSport;
   background:
     | { type: "template"; id: string }
     | { type: "image"; url: string };

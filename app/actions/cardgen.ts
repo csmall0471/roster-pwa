@@ -2,6 +2,60 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
+import type { CardSport } from "@/lib/types";
+
+// Sport-specific phrasing for the two AI features. Keeps the scouting report and
+// the "plays like" match on-sport (a football card matches NFL/college players
+// and searches Wikipedia for football, not basketball).
+const SPORT_AI: Record<
+  CardSport,
+  { noun: string; leagues: string; household: string; wikiSuffix: string; lenses: string[] }
+> = {
+  basketball: {
+    noun: "basketball",
+    leagues: "NBA or WNBA, any era (current stars, all-time greats, international players, or beloved role players), any position",
+    household: "LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant",
+    wikiSuffix: "basketball player",
+    lenses: [
+      "a lightning-quick guard",
+      "a crafty playmaker",
+      "a lockdown defender",
+      "a smooth mid-range scorer",
+      "a high-energy hustle player",
+      "a knockdown sharpshooter",
+      "a fearless slasher who attacks the rim",
+      "a poised floor general",
+      "an old-school throwback",
+      "a modern positionless star",
+      "a WNBA standout",
+      "a beloved cult-favorite role player",
+      "a relentless rebounder",
+      "a flashy showman",
+    ],
+  },
+  football: {
+    noun: "football",
+    leagues: "the NFL or major college football, any era (current stars, all-time greats, or beloved role players), any position",
+    household: "Patrick Mahomes, Tom Brady, Travis Kelce, Tyreek Hill, Aaron Donald, Lamar Jackson",
+    wikiSuffix: "football player",
+    lenses: [
+      "a mobile dual-threat quarterback",
+      "a bruising downhill running back",
+      "a shifty change-of-pace back",
+      "a sure-handed possession receiver",
+      "a burner deep threat",
+      "a physical run-blocking tight end",
+      "a shutdown cornerback",
+      "a ball-hawking safety",
+      "a sideline-to-sideline linebacker",
+      "a road-grading offensive lineman",
+      "a disruptive edge rusher",
+      "a clutch kicker",
+      "a special-teams gunner",
+      "an all-purpose athlete",
+    ],
+  },
+};
 
 // 851-labs/background-remover (BRIA RMBG) — fast, transparent PNG output.
 // Pinned version id from https://replicate.com/851-labs/background-remover/versions.
@@ -90,6 +144,7 @@ export async function removeBackground(sourceUrl: string): Promise<RemoveBgResul
 type ScoutingInput = {
   photoUrl: string;
   firstName: string;
+  sport?: CardSport;
   stats?: {
     position?: string;
     height?: string;
@@ -129,7 +184,7 @@ export async function generateScoutingReport(
             { type: "image", source: { type: "url", url: input.photoUrl } },
             {
               type: "text",
-              text: `Write a fun "scouting report" for this youth basketball player named ${input.firstName}.
+              text: `Write a fun "scouting report" for this youth ${SPORT_AI[input.sport ?? "basketball"].noun} player named ${input.firstName}.
 Two short sentences. Focus on apparent vibe and energy in the photo (smile, intensity, body language) — DO NOT describe physical features, ethnicity, or appearance. Be encouraging.
 ${filledStats ? `Known facts: ${filledStats}\n` : ""}
 Respond with just the two sentences. No quotes, no labels, no preamble.`,
@@ -147,20 +202,20 @@ Respond with just the two sentences. No quotes, no labels, no preamble.`,
 
 // ── Look-alike pick (vibe match via Claude vision) ──────────────
 //
-// This is NOT face recognition. We send the photo to Claude with a curated
-// list of NBA players and ask it to pick a "vibe" match based on demeanor,
-// energy, and body language — explicitly NOT facial features. Designed for
-// kids, where face-match would be both creepy and inaccurate.
+// This is NOT face recognition. We send the photo to Claude and ask it to pick
+// "vibe" matches from that sport's pros based on demeanor, energy, and body
+// language — explicitly NOT facial features. Designed for kids, where a
+// face-match would be both creepy and inaccurate.
 
 // Look up a player's photo from Wikipedia (free, broad coverage, CORS-enabled so
-// the card canvas can draw it). Searches "<name> basketball player" to dodge
+// the card canvas can draw it). Searches "<name> <sport> player" to dodge
 // disambiguation, and returns the page's lead thumbnail.
-async function wikipediaPhoto(name: string): Promise<string | null> {
+async function wikipediaPhoto(name: string, suffix: string): Promise<string | null> {
   try {
     const url =
       "https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages" +
       "&piprop=thumbnail&pithumbsize=400&generator=search&gsrlimit=1&gsrsearch=" +
-      encodeURIComponent(`${name} basketball player`);
+      encodeURIComponent(`${name} ${suffix}`);
     const res = await fetch(url, {
       headers: { "User-Agent": "roster-pwa/1.0 (card plays-like)" },
     });
@@ -176,26 +231,6 @@ async function wikipediaPhoto(name: string): Promise<string | null> {
   }
 }
 
-// A rotating set of "lenses" — each call picks one at random so the same photo
-// doesn't keep resolving to the same handful of superstars. It's a soft nudge
-// ("if it fits"), not a hard constraint, so the match still reflects the kid.
-const LOOKALIKE_LENSES = [
-  "a lightning-quick guard",
-  "a crafty playmaker",
-  "a lockdown defender",
-  "a smooth mid-range scorer",
-  "a high-energy hustle player",
-  "a knockdown sharpshooter",
-  "a fearless slasher who attacks the rim",
-  "a poised floor general",
-  "an old-school throwback",
-  "a modern positionless star",
-  "a WNBA standout",
-  "a beloved cult-favorite role player",
-  "a relentless rebounder",
-  "a flashy showman",
-];
-
 export type LookalikeOption = {
   name: string;
   blurb?: string;
@@ -206,6 +241,7 @@ export async function findLookalike(
   photoUrl: string,
   context?: {
     firstName?: string;
+    sport?: CardSport;
     position?: string;
     height?: string;
     favoritePlayer?: string;
@@ -220,9 +256,11 @@ export async function findLookalike(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
+  const ai = SPORT_AI[context?.sport ?? "basketball"];
+
   // Seed a few random "lenses" so repeat runs surface a different mix rather
   // than the same ten household names.
-  const seeds = [...LOOKALIKE_LENSES]
+  const seeds = [...ai.lenses]
     .sort(() => Math.random() - 0.5)
     .slice(0, 6)
     .join("; ");
@@ -256,13 +294,13 @@ export async function findLookalike(
             { type: "image", source: { type: "url", url: photoUrl } },
             {
               type: "text",
-              text: `Suggest TEN fun "plays like" comparisons for a youth basketball trading card${
+              text: `Suggest TEN fun "plays like" comparisons for a youth ${ai.noun} trading card${
                 context?.firstName ? ` for a player named ${context.firstName}` : ""
               }, so the coach can choose one.
 
-Each is a real professional basketball player — NBA or WNBA, any era (current stars, all-time greats, international players, or beloved role players), any position — whose VIBE and ENERGY match this kid, judged only from body language, posture, smile, and confidence in the photo. Match on personality and energy — NOT facial features, ethnicity, or skin tone.
+Each is a real professional ${ai.noun} player — ${ai.leagues} — whose VIBE and ENERGY match this kid, judged only from body language, posture, smile, and confidence in the photo. Match on personality and energy — NOT facial features, ethnicity, or skin tone.
 
-Make the ten DIVERSE: mix positions, eras, and leagues; include some less-obvious picks, not just the handful of household names (LeBron James, Stephen Curry, Michael Jordan, Kevin Durant, Giannis Antetokounmpo, Ja Morant). ${favHint}${roleHint}${scoutHint}For range, draw on styles like: ${seeds}.
+Make the ten DIVERSE: mix positions, eras, and leagues; include some less-obvious picks, not just the handful of household names (${ai.household}). ${favHint}${roleHint}${scoutHint}For range, draw on styles like: ${seeds}.
 
 Respond with EXACTLY 10 lines and nothing else — no numbering, no preamble. Each line:
 Full Name | one short present-tense sentence (about 8-14 words) on how that player plays. No quotation marks.`,
@@ -323,7 +361,7 @@ Full Name | one short present-tense sentence (about 8-14 words) on how that play
       top.map(async (o) => ({
         name: o.name,
         blurb: o.blurb || undefined,
-        photoUrl: await wikipediaPhoto(o.name),
+        photoUrl: await wikipediaPhoto(o.name, ai.wikiSuffix),
       }))
     );
     return { options };

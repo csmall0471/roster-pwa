@@ -1,4 +1,6 @@
 import { forwardRef, type CSSProperties } from "react";
+import type { CardSport } from "@/lib/types";
+import { abbreviatePositionFor, getSport } from "./sports";
 
 export type BackStats = {
   position: string;
@@ -18,6 +20,7 @@ export type BackStats = {
 
 type Props = {
   bgStyle: CSSProperties;
+  sport?: CardSport;
   teamText: string;
   ageText: string;
   seasonText: string;
@@ -42,6 +45,7 @@ type Props = {
 const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
   {
     bgStyle,
+    sport,
     teamText,
     ageText,
     seasonText,
@@ -61,8 +65,9 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
   },
   ref
 ) {
+  const qL = getSport(sport).qLabels;
   const statRows: Array<[string, string]> = [
-    ["POS", abbreviatePosition(stats.position)],
+    ["POS", abbreviatePositionFor(sport, stats.position)],
     ["HT", stats.height],
     ["#", jersey || stats.jersey],
     ["AGE", stats.age],
@@ -336,10 +341,10 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               <QACell label="FAV PLAYER" value={stats.favorite_player} />
             )}
             {stats.signature_move && (
-              <QACell label="SIG MOVE" value={stats.signature_move} />
+              <QACell label={qL.signature_move.back} value={stats.signature_move} />
             )}
             {stats.favorite_drill && (
-              <QACell label="FAV DRILL" value={stats.favorite_drill} />
+              <QACell label={qL.favorite_drill.back} value={stats.favorite_drill} />
             )}
             {stats.biggest_fan && (
               <QACell label="BIGGEST FAN" value={stats.biggest_fan} />
@@ -456,25 +461,6 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
 
 // Shorten common positions to a badge code so they fit the stat pill; custom
 // values (e.g. "Wing") pass through and the pill shrinks the font to fit.
-function abbreviatePosition(pos: string): string {
-  const key = pos.trim().toLowerCase().replace(/\s+/g, " ");
-  const map: Record<string, string> = {
-    "point guard": "PG",
-    "shooting guard": "SG",
-    "small forward": "SF",
-    "power forward": "PF",
-    center: "C",
-    guard: "G",
-    forward: "F",
-    "guard/forward": "G/F",
-    "forward/center": "F/C",
-    "combo guard": "CG",
-    wing: "W",
-    utility: "UTIL",
-  };
-  return map[key] ?? pos;
-}
-
 // Coaching staff cell — larger, bolder (Anton) name under an amber label so the
 // staff reads as the marquee info, above the fun Q&A grid.
 function CoachCell({ label, value }: { label: string; value: string }) {

@@ -20,6 +20,7 @@ export type ActivityEvent =
   | "card_template_picked"
   | "card_bg_image_uploaded"
   | "card_side_switched"
+  | "card_sport_changed"
   | "card_scouting_generated"
   | "card_lookalike_generated"
   | "card_saved"

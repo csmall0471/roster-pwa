@@ -20,6 +20,7 @@ import {
 import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
+import { SPORTS, getSport, CARD_SPORTS, type CardSport } from "./sports";
 import { compositeFrontCanvas } from "./card-raster";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
@@ -80,6 +81,9 @@ type Props = {
   // Pre-selected assign target (a "playerId::teamId" key) when reopening a draft
   // that was earmarked for a kid, so publishing it is one tap.
   initialAssignKey?: string;
+  // Which sport the card starts styled for (usually the team's sport). A saved
+  // design's own `sport` wins; falls back to this, then basketball.
+  defaultSport?: CardSport;
 };
 
 export type AssignTarget = {
@@ -403,6 +407,7 @@ export default function CardEditor({
   allowDrafts = false,
   draftId,
   initialAssignKey,
+  defaultSport,
 }: Props) {
   const router = useRouter();
 
@@ -450,8 +455,18 @@ export default function CardEditor({
   // Data-URL mirror of the cutout so html-to-image rasterizes deterministically
   // (cross-origin <img> elements sometimes race the rasterizer and snapshot blank).
   const [cutoutDataUrl, setCutoutDataUrl] = useState<string | null>(null);
+  // Which sport the card is styled for — drives backgrounds, the position
+  // options, the two sport-flavored questionnaire fields, and the "plays like"
+  // match. A reopened design keeps its own sport (older cards predate the field,
+  // so they stay basketball); a brand-new card starts from the team's sport.
+  const [sport, setSport] = useState<CardSport>(
+    initialDesign ? initialDesign.sport ?? "basketball" : defaultSport ?? "basketball"
+  );
   const [bg, setBg] = useState<BgChoice>(
-    initialDesign?.background ?? { type: "template", id: TEMPLATES[0].id }
+    initialDesign?.background ??
+      (defaultSport && defaultSport !== "basketball"
+        ? { type: "template", id: SPORTS[defaultSport].defaultBackgroundId }
+        : { type: "template", id: TEMPLATES[0].id })
   );
   // Transform stored as fractions of stage dimensions so it scales across screen sizes.
   const [tx, setTx] = useState(initialDesign?.transform.x ?? 0);
@@ -607,6 +622,23 @@ export default function CardEditor({
 
   function patchStats(patch: Partial<BackStats>) {
     setStats((s) => ({ ...s, ...patch }));
+  }
+
+  // Switch sport: swap in a matching background if the current one wouldn't be
+  // offered for the new sport, and clear a position that isn't valid there. A
+  // custom photo background and neutral templates (solids/gradients) are kept.
+  function changeSport(next: CardSport) {
+    if (next === sport) return;
+    setSport(next);
+    const cfg = SPORTS[next];
+    if (bg.type === "template" && !cfg.backgroundCategories.includes(getTemplate(bg.id).category)) {
+      setBg({ type: "template", id: cfg.defaultBackgroundId });
+    }
+    if (stats.position && !cfg.positions.some((p) => p.value === stats.position)) {
+      patchStats({ position: "" });
+    }
+    track("card_sport_changed", { sport: next });
+    logClientActivity("card_sport_changed", { sport: next }).catch(() => {});
   }
 
   // Mirror a remote image into a data URL so html-to-image rasterizes it
@@ -980,6 +1012,7 @@ export default function CardEditor({
       const res = await generateScoutingReport({
         photoUrl: cutoutUrl,
         firstName,
+        sport,
         stats: {
           position: stats.position,
           height: stats.height,
@@ -1010,6 +1043,7 @@ export default function CardEditor({
     try {
       const res = await findLookalike(cutoutUrl, {
         firstName,
+        sport,
         position: stats.position,
         height: stats.height,
         favoritePlayer: stats.favorite_player,
@@ -1064,6 +1098,7 @@ export default function CardEditor({
   function buildDesign(): CardDesign {
     return {
       cutout_url: cutoutUrl ?? "",
+      sport,
       background: bg,
       transform: { x: tx, y: ty, scale, rotation },
       text: {
@@ -1818,6 +1853,7 @@ export default function CardEditor({
           <CardBack
             ref={backStageRef}
             bgStyle={bgStyle}
+            sport={sport}
             teamText={teamText}
             ageText={ageText}
             seasonText={seasonText}
@@ -2063,6 +2099,26 @@ export default function CardEditor({
       {/* Player picker — first thing below the preview (auto-fills the card). */}
       {playerPicker}
 
+      {/* Sport — governs backgrounds, positions, the questionnaire wording, and
+          the "plays like" match for the whole card. */}
+      <div className="mt-4 flex items-center gap-2">
+        <label htmlFor="card-sport" className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          Sport
+        </label>
+        <select
+          id="card-sport"
+          value={sport}
+          onChange={(e) => changeSport(e.target.value as CardSport)}
+          className="text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+        >
+          {CARD_SPORTS.map((s) => (
+            <option key={s} value={s}>
+              {SPORTS[s].label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Toolbar — different content for front vs back. */}
       <div className="mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
         {side === "front" && (
@@ -2256,7 +2312,9 @@ export default function CardEditor({
 
           {tab === "bg" && (
             <div className="space-y-4">
-              {TEMPLATE_CATEGORIES.map((cat) => {
+              {getSport(sport).backgroundCategories.map((catKey) => {
+                const cat = TEMPLATE_CATEGORIES.find((c) => c.key === catKey);
+                if (!cat) return null;
                 const items = TEMPLATES.filter((t) => t.category === cat.key);
                 if (items.length === 0) return null;
                 return (
@@ -2641,10 +2699,11 @@ export default function CardEditor({
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 >
                   <option value="">—</option>
-                  <option value="GUARD">Guard</option>
-                  <option value="FORWARD">Forward</option>
-                  <option value="CENTER">Center</option>
-                  <option value="UTILITY">Utility</option>
+                  {getSport(sport).positions.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field label="Height">
@@ -2704,21 +2763,21 @@ export default function CardEditor({
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
-              <Field label="Signature move">
+              <Field label={getSport(sport).qLabels.signature_move.editor}>
                 <input
                   value={stats.signature_move}
                   onChange={(e) =>
                     patchStats({ signature_move: e.target.value })
                   }
-                  placeholder="Step-back"
+                  placeholder={getSport(sport).qLabels.signature_move.placeholder}
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
-              <Field label="Fav practice drill">
+              <Field label={getSport(sport).qLabels.favorite_drill.editor}>
                 <input
                   value={stats.favorite_drill}
                   onChange={(e) => patchStats({ favorite_drill: e.target.value })}
-                  placeholder="Suicides"
+                  placeholder={getSport(sport).qLabels.favorite_drill.placeholder}
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
