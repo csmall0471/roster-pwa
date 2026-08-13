@@ -127,19 +127,21 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
         )}
       </div>
 
-      {/* Headshot — small circle, upper-right (above the content panel). */}
+      {/* Headshot — small circle, upper-right (above the content panel). The
+          compositor reads this element's box so it stays aligned in either
+          orientation (landscape uses a smaller circle). */}
       {headshotUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
         <div
+          data-headshot
           onPointerDown={onHeadshotPointerDown}
           onPointerMove={onHeadshotPointerMove}
           onPointerUp={onHeadshotPointerUp}
           onPointerCancel={onHeadshotPointerUp}
           style={{
             position: "absolute",
-            top: "3.5%",
-            right: "9.5%",
-            width: "22%",
+            top: landscape ? "5%" : "3.5%",
+            right: landscape ? "5%" : "9.5%",
+            width: landscape ? "17%" : "22%",
             aspectRatio: "1 / 1",
             // background-image (not <img>) so iOS Safari includes it in the snapshot.
             backgroundImage: `url(${headshotUrl})`,
@@ -157,7 +159,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
         />
       )}
 
-      {/* Content panel — semi-transparent dark sheet anchored to the bottom 75%. */}
+      {/* Content panel (portrait) — semi-transparent dark sheet, bottom ~75%. */}
+      {!landscape && (
       <div
         style={{
           position: "absolute",
@@ -457,6 +460,261 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           </div>
         )}
       </div>
+      )}
+
+      {/* Content panel (landscape) — two columns so the wide, short back doesn't
+          cram everything into one narrow band. Identity + stats on the left,
+          the write-up on the right. */}
+      {landscape && (
+        <div
+          style={{
+            position: "absolute",
+            left: "4%",
+            right: "4%",
+            top: "30%",
+            bottom: "5%",
+            background: "rgba(0,0,0,0.62)",
+            borderRadius: "14px",
+            padding: "2.4% 3%",
+            color: "#fff",
+            display: "flex",
+            gap: "3.5%",
+            fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+            overflow: "hidden",
+          }}
+        >
+          {/* Left column — name, stats, coaching */}
+          <div style={{ flex: "0 0 33%", display: "flex", flexDirection: "column", gap: "5%", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "4%" }}>
+              <span
+                style={{
+                  fontFamily: "var(--font-anton), Impact, sans-serif",
+                  fontSize: "calc(var(--cardw, 22rem) * 6.5 / 100)",
+                  letterSpacing: "0.03em",
+                  lineHeight: 1,
+                  flex: "1 1 auto",
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {playerName || "PLAYER"}
+              </span>
+              {jersey && (
+                <span
+                  style={{
+                    fontFamily: "var(--font-anton), Impact, sans-serif",
+                    fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
+                    color: "#fbbf24",
+                    lineHeight: 1,
+                  }}
+                >
+                  #{jersey}
+                </span>
+              )}
+            </div>
+
+            {statRows.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5%" }}>
+                {statRows.map(([k, v]) => (
+                  <div
+                    key={k}
+                    style={{
+                      background: "rgba(255,255,255,0.12)",
+                      borderRadius: "8px",
+                      padding: "0.5em 0.3em",
+                      textAlign: "center",
+                      minWidth: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
+                        letterSpacing: "0.18em",
+                        color: "rgba(255,255,255,0.55)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {k}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--font-anton), Impact, sans-serif",
+                        fontSize:
+                          v.length > 4
+                            ? "calc(var(--cardw, 22rem) * 3 / 100)"
+                            : "calc(var(--cardw, 22rem) * 4.2 / 100)",
+                        lineHeight: 1.1,
+                        marginTop: "2px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {v}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(stats.coach || stats.assistant_coaches) && (
+              <div
+                style={{
+                  marginTop: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.5em",
+                  borderTop: "1px solid rgba(255,255,255,0.2)",
+                  paddingTop: "0.6em",
+                }}
+              >
+                {stats.coach && <CoachCell label="HEAD COACH" value={stats.coach} />}
+                {stats.assistant_coaches && (
+                  <CoachCell label="ASSISTANTS" value={stats.assistant_coaches} />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right column — quote, scouting, favorites, player match */}
+          <div style={{ flex: "1 1 auto", display: "flex", flexDirection: "column", gap: "4%", minWidth: 0, overflow: "hidden" }}>
+            {seasonQuote && (
+              <div style={{ borderLeft: "3px solid #fbbf24", paddingLeft: "0.7em" }}>
+                <p
+                  style={{
+                    fontSize: "calc(var(--cardw, 22rem) * 2.9 / 100)",
+                    lineHeight: 1.3,
+                    fontStyle: "italic",
+                    fontWeight: 600,
+                    color: "#fff",
+                    margin: 0,
+                  }}
+                >
+                  &ldquo;{seasonQuote}&rdquo;
+                </p>
+              </div>
+            )}
+
+            {scoutingReport && (
+              <div>
+                <div
+                  style={{
+                    fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
+                    letterSpacing: "0.22em",
+                    color: "rgba(255,255,255,0.55)",
+                    fontWeight: 700,
+                    marginBottom: "0.35em",
+                  }}
+                >
+                  SCOUTING REPORT
+                </div>
+                <p
+                  style={{
+                    fontSize: "calc(var(--cardw, 22rem) * 2.8 / 100)",
+                    lineHeight: 1.35,
+                    fontStyle: "italic",
+                    color: "rgba(255,255,255,0.92)",
+                    margin: 0,
+                  }}
+                >
+                  {scoutingReport}
+                </p>
+              </div>
+            )}
+
+            {(stats.favorite_team ||
+              stats.favorite_player ||
+              stats.signature_move ||
+              stats.favorite_drill ||
+              stats.biggest_fan ||
+              stats.loudest_parent ||
+              stats.hype_song) && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5em 0.9em" }}>
+                {stats.favorite_team && <QACell label="FAV TEAM" value={stats.favorite_team} />}
+                {stats.favorite_player && <QACell label="FAV PLAYER" value={stats.favorite_player} />}
+                {stats.signature_move && <QACell label={qL.signature_move.back} value={stats.signature_move} />}
+                {stats.favorite_drill && <QACell label={qL.favorite_drill.back} value={stats.favorite_drill} />}
+                {stats.biggest_fan && <QACell label="BIGGEST FAN" value={stats.biggest_fan} />}
+                {stats.loudest_parent && <QACell label="LOUDEST FAN" value={stats.loudest_parent} />}
+                {stats.hype_song && <QACell label="HYPE SONG" value={stats.hype_song} />}
+              </div>
+            )}
+
+            {lookAlike && (
+              <div
+                style={{
+                  marginTop: "auto",
+                  background: "linear-gradient(90deg, rgba(251,191,36,0.95) 0%, rgba(251,146,60,0.95) 100%)",
+                  color: "#0a0a0a",
+                  borderRadius: "10px",
+                  padding: "0.6em 0.8em",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.7em",
+                }}
+              >
+                {lookAlikePhoto && (
+                  <div
+                    data-lookalike-photo
+                    style={{
+                      width: "14%",
+                      aspectRatio: "1 / 1",
+                      flexShrink: 0,
+                      borderRadius: "9999px",
+                      backgroundImage: `url(${lookAlikePhoto})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center 22%",
+                      border: "2px solid rgba(10,10,10,0.55)",
+                    }}
+                  />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
+                      letterSpacing: "0.22em",
+                      fontWeight: 800,
+                      color: "rgba(10,10,10,0.6)",
+                      marginBottom: "0.12em",
+                    }}
+                  >
+                    PLAYER MATCH
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-anton), Impact, sans-serif",
+                      fontSize: "calc(var(--cardw, 22rem) * 5 / 100)",
+                      lineHeight: 1,
+                      letterSpacing: "0.03em",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {lookAlike.toUpperCase()}
+                  </div>
+                  {lookAlikeBlurb && (
+                    <p
+                      style={{
+                        margin: "0.25em 0 0",
+                        fontSize: "calc(var(--cardw, 22rem) * 2.3 / 100)",
+                        lineHeight: 1.2,
+                        fontWeight: 600,
+                        fontStyle: "italic",
+                        color: "rgba(10,10,10,0.82)",
+                      }}
+                    >
+                      {lookAlikeBlurb}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 });

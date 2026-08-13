@@ -390,13 +390,18 @@ async function compositeBackCanvas(
     outH
   );
 
-  // 2. Headshot circle, upper-right (matches CardBack's CSS box) with its pan.
+  // 2. Headshot circle — position + size read from the DOM element so it stays
+  // aligned in either orientation. Cover-fit with its pan (posX/posY).
   if (L.headshotSrc) {
+    const el = L.backEl.querySelector<HTMLElement>("[data-headshot]");
     const img = await loadImage(L.headshotSrc);
-    if (img.naturalWidth) {
-      const size = 0.22 * outW;
-      const left = 0.905 * outW - size; // right: 9.5% (matches CardBack's inset)
-      const top = 0.035 * outH; // top: 3.5%
+    if (el && img.naturalWidth) {
+      const br = L.backEl.getBoundingClientRect();
+      const er = el.getBoundingClientRect();
+      const s = outW / (br.width || outW);
+      const left = (er.left - br.left) * s;
+      const top = (er.top - br.top) * s;
+      const size = er.width * s;
       const r = Math.max(size / img.naturalWidth, size / img.naturalHeight); // cover
       const dw = img.naturalWidth * r;
       const dh = img.naturalHeight * r;
@@ -411,9 +416,10 @@ async function compositeBackCanvas(
       ctx.clip();
       ctx.drawImage(img, left + ox, top + oy, dw, dh);
       ctx.restore();
+      // Ring scaled to the headshot (matches the portrait look: ~6.4% of size).
       ctx.beginPath();
-      ctx.arc(cx, cy, rad - 0.007 * outW, 0, Math.PI * 2);
-      ctx.lineWidth = 0.014 * outW;
+      ctx.arc(cx, cy, rad - 0.032 * size, 0, Math.PI * 2);
+      ctx.lineWidth = 0.064 * size;
       ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.stroke();
     }

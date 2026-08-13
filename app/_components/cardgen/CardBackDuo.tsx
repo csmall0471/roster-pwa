@@ -100,7 +100,16 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
           {namesTitle || "THE DUO"}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "3%", flex: "1 1 auto" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: landscape ? "1fr 1fr" : "1fr",
+            columnGap: "6%",
+            rowGap: landscape ? "4%" : "3%",
+            alignContent: "start",
+            flex: "1 1 auto",
+          }}
+        >
           {items.map(({ q, a }, i) => (
             <div key={i} style={{ display: "flex", flexDirection: "column", gap: "0.15em" }}>
               <span
