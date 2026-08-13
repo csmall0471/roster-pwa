@@ -21,6 +21,8 @@ import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
 import { SPORTS, getSport, CARD_SPORTS, type CardSport } from "./sports";
+import CardBackDuo from "./CardBackDuo";
+import { MAX_EXTRA, DEFAULT_DUO_QUESTIONS, joinNames } from "./card-duo";
 import { compositeFrontCanvas } from "./card-raster";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import CardBack, { type BackStats } from "./CardBack";
@@ -38,7 +40,7 @@ import {
 } from "./card-raster";
 import { addPrintBleed, EXPORT_TRIM_W } from "@/lib/cardgen/print-bleed";
 import { buildZip, type ZipEntry } from "./zip";
-import type { CardDesign } from "@/lib/types";
+import type { CardDesign, CardSubject } from "@/lib/types";
 
 // Signature width on the sticker, as a fraction of the sticker's width, at
 // scale 1 (the resize slider multiplies it). Shared by the preview + export.
@@ -387,6 +389,48 @@ const SIG_PRESET_COLORS = ["#0a0a0a", "#ffffff", "#1d4ed8", "#dc2626", "#f59e0b"
 // so we cap the in-memory bundle (a run of 100 is already a big collectible set).
 const SERIAL_CAP = 100;
 
+// An additional player on a duo/trio card. The primary player stays in the
+// editor's existing top-level state; these mirror it (cutout transform + a
+// signature) plus a display name. Placement/gestures route to whichever subject
+// is selected (see selectedId / activeState).
+type ExtraSubjectState = {
+  id: string;
+  cutoutUrl: string;
+  tx: number;
+  ty: number;
+  scale: number;
+  rotation: number;
+  name: string;
+  sigUrl: string | null;
+  sigX: number;
+  sigY: number;
+  sigScale: number;
+  sigRotation: number;
+  sigStrokes: SigStroke[] | null;
+  sigColor: string;
+  sigThickness: number;
+};
+
+function subjectFromDesign(s: CardSubject, i: number): ExtraSubjectState {
+  return {
+    id: `s_init_${i}`,
+    cutoutUrl: s.cutout_url,
+    tx: s.transform.x,
+    ty: s.transform.y,
+    scale: s.transform.scale,
+    rotation: s.transform.rotation ?? 0,
+    name: s.name ?? "",
+    sigUrl: s.signature?.url ?? null,
+    sigX: s.signature?.x ?? 0.5,
+    sigY: s.signature?.y ?? 0.72,
+    sigScale: s.signature?.scale ?? 1,
+    sigRotation: s.signature?.rotation ?? 0,
+    sigStrokes: s.signature?.strokes ?? null,
+    sigColor: s.signature?.color ?? "#0a0a0a",
+    sigThickness: s.signature?.thickness ?? DEFAULT_SIG_THICKNESS,
+  };
+}
+
 // ── Component ─────────────────────────────────────────────────
 
 export default function CardEditor({
@@ -494,6 +538,33 @@ export default function CardEditor({
     initialDesign?.signature?.thickness ?? DEFAULT_SIG_THICKNESS
   );
   const sigUploadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Duo/trio: additional players ────────────────────────────
+  // Extra subjects beyond the primary player. Placement/gestures route to
+  // whichever subject is selected ("main" = the primary). Empty = a solo card,
+  // in which case every path below is identical to the original single player.
+  const [extraSubjects, setExtraSubjects] = useState<ExtraSubjectState[]>(
+    () => (initialDesign?.extra_subjects ?? []).map(subjectFromDesign)
+  );
+  const [selectedId, setSelectedId] = useState<string>("main");
+  // Data-URL mirrors of each extra subject's cutout + signature (keyed by id) so
+  // the canvas export doesn't taint on cross-origin images (same reason as the
+  // primary cutoutDataUrl/sigDataUrl).
+  const [extraData, setExtraData] = useState<Record<string, { cutout?: string; sig?: string }>>({});
+  const [addingPlayer, setAddingPlayer] = useState(false);
+  const extraFileRef = useRef<HTMLInputElement>(null);
+  // Which subject a freshly-drawn signature belongs to (an extra subject id);
+  // null routes to the primary player (the original flow).
+  const [sigTargetId, setSigTargetId] = useState<string | null>(null);
+
+  const [duoQuestions, setDuoQuestions] = useState<string[]>(
+    initialDesign?.duo?.questions ?? DEFAULT_DUO_QUESTIONS
+  );
+  const [duoAnswers, setDuoAnswers] = useState<Record<string, string>>(
+    initialDesign?.duo?.answers ?? {}
+  );
+
+  const isDuo = extraSubjects.length > 0;
 
   const [teamText, setTeamText] = useState(
     initialDesign?.text.team_name ?? teamName.toUpperCase()
@@ -648,6 +719,24 @@ export default function CardEditor({
   useEffect(() => mirrorToDataUrl(sigUrl, setSigDataUrl), [sigUrl]);
   useEffect(() => mirrorToDataUrl(headshotUrl, setHeadshotDataUrl), [headshotUrl]);
 
+  // Mirror each extra subject's cutout + signature to a data URL (once each).
+  useEffect(() => {
+    for (const s of extraSubjects) {
+      if (s.cutoutUrl && !extraData[s.id]?.cutout) {
+        mirrorToDataUrl(s.cutoutUrl, (d) =>
+          setExtraData((p) => ({ ...p, [s.id]: { ...p[s.id], cutout: d ?? undefined } }))
+        );
+      }
+      if (s.sigUrl && !extraData[s.id]?.sig) {
+        mirrorToDataUrl(s.sigUrl, (d) =>
+          setExtraData((p) => ({ ...p, [s.id]: { ...p[s.id], sig: d ?? undefined } }))
+        );
+      }
+    }
+    // extraData is intentionally omitted — we only mirror URLs that changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extraSubjects]);
+
   // Publish the card's rendered width as a CSS variable (--cardw) so all on-card
   // text can be sized as a fraction of the CARD (calc(var(--cardw) * n / 100))
   // rather than the viewport. That keeps the card's proportions identical at any
@@ -718,22 +807,60 @@ export default function CardEditor({
     return { w: r?.width ?? 1, h: r?.height ?? 1 };
   }
 
+  // The selected subject's cutout transform + signature. "main" = the primary
+  // player (the editor's top-level state); otherwise an extra subject.
+  function activeState() {
+    if (selectedId === "main") {
+      return { tx, ty, scale, rotation, sigX, sigY, sigScale, sigRotation };
+    }
+    const s = extraSubjects.find((e) => e.id === selectedId);
+    return s
+      ? { tx: s.tx, ty: s.ty, scale: s.scale, rotation: s.rotation, sigX: s.sigX, sigY: s.sigY, sigScale: s.sigScale, sigRotation: s.sigRotation }
+      : { tx, ty, scale, rotation, sigX, sigY, sigScale, sigRotation };
+  }
+  function patchActiveCutout(p: Partial<{ tx: number; ty: number; scale: number; rotation: number }>) {
+    if (selectedId === "main") {
+      if (p.tx !== undefined) setTx(p.tx);
+      if (p.ty !== undefined) setTy(p.ty);
+      if (p.scale !== undefined) setScale(p.scale);
+      if (p.rotation !== undefined) setRotation(p.rotation);
+    } else {
+      setExtraSubjects((arr) => arr.map((e) => (e.id === selectedId ? { ...e, ...p } : e)));
+    }
+  }
+  function patchActiveSig(p: Partial<{ sigX: number; sigY: number; sigScale: number; sigRotation: number }>) {
+    if (selectedId === "main") {
+      if (p.sigX !== undefined) setSigX(p.sigX);
+      if (p.sigY !== undefined) setSigY(p.sigY);
+      if (p.sigScale !== undefined) setSigScale(p.sigScale);
+      if (p.sigRotation !== undefined) setSigRotation(p.sigRotation);
+    } else {
+      setExtraSubjects((arr) => arr.map((e) => (e.id === selectedId ? { ...e, ...p } : e)));
+    }
+  }
+  function activeSigSrc(): string | null {
+    if (selectedId === "main") return sigDataUrl ?? sigUrl;
+    const s = extraSubjects.find((e) => e.id === selectedId);
+    return s ? (extraData[s.id]?.sig ?? s.sigUrl) : null;
+  }
+
   function overSignature(x: number, y: number): boolean {
-    if (!(sigDataUrl ?? sigUrl) || !sigImgRef.current) return false;
+    if (!activeSigSrc() || !sigImgRef.current) return false;
     const r = sigImgRef.current.getBoundingClientRect();
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   }
 
   function gestureSnapshot(pts: { x: number; y: number }[]) {
+    const a = activeState();
     const base = {
-      tx,
-      ty,
-      pScale: scale,
-      pRot: rotation,
-      sx: sigX,
-      sy: sigY,
-      sScale: sigScale,
-      sRot: sigRotation,
+      tx: a.tx,
+      ty: a.ty,
+      pScale: a.scale,
+      pRot: a.rotation,
+      sx: a.sigX,
+      sy: a.sigY,
+      sScale: a.sigScale,
+      sRot: a.sigRotation,
     };
     if (pts.length >= 2) {
       const dx = pts[0].x - pts[1].x;
@@ -771,11 +898,12 @@ export default function CardEditor({
       const dx = (pts[0].x - g.px) / w;
       const dy = (pts[0].y - g.py) / h;
       if (sig) {
-        setSigX(Math.max(0, Math.min(1, g.sx + dx)));
-        setSigY(Math.max(0, Math.min(1, g.sy + dy)));
+        patchActiveSig({
+          sigX: Math.max(0, Math.min(1, g.sx + dx)),
+          sigY: Math.max(0, Math.min(1, g.sy + dy)),
+        });
       } else {
-        setTx(g.tx + dx);
-        setTy(g.ty + dy);
+        patchActiveCutout({ tx: g.tx + dx, ty: g.ty + dy });
       }
     } else if (pts.length >= 2 && g.dist) {
       const dx = pts[0].x - pts[1].x;
@@ -783,11 +911,15 @@ export default function CardEditor({
       const ratio = Math.hypot(dx, dy) / g.dist;
       const dDeg = ((Math.atan2(dy, dx) - (g.angle ?? 0)) * 180) / Math.PI;
       if (sig) {
-        setSigScale(Math.max(0.2, Math.min(5, g.sScale * ratio)));
-        setSigRotation(g.sRot + dDeg);
+        patchActiveSig({
+          sigScale: Math.max(0.2, Math.min(5, g.sScale * ratio)),
+          sigRotation: g.sRot + dDeg,
+        });
       } else {
-        setScale(Math.max(0.2, Math.min(3, g.pScale * ratio)));
-        setRotation(g.pRot + dDeg);
+        patchActiveCutout({
+          scale: Math.max(0.2, Math.min(3, g.pScale * ratio)),
+          rotation: g.pRot + dDeg,
+        });
       }
     }
   }
@@ -802,19 +934,24 @@ export default function CardEditor({
   // ── Signature pad result + headshot upload ─────────────────
 
   // Upload a rendered signature PNG and point sigUrl at it (for persistence).
+  // Upload a signature PNG to storage and return its public URL.
+  async function uploadSignatureData(dataUrl: string): Promise<string> {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = `${user.id}/cardgen-sig/${crypto.randomUUID()}.png`;
+    const { error: upErr } = await supabase.storage
+      .from("player-photos")
+      .upload(path, blob, { upsert: false, contentType: "image/png" });
+    if (upErr) throw upErr;
+    const { data: urlData } = supabase.storage.from("player-photos").getPublicUrl(path);
+    return urlData.publicUrl;
+  }
+
   async function uploadSignature(dataUrl: string) {
     try {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-      const blob = await (await fetch(dataUrl)).blob();
-      const path = `${user.id}/cardgen-sig/${crypto.randomUUID()}.png`;
-      const { error: upErr } = await supabase.storage
-        .from("player-photos")
-        .upload(path, blob, { upsert: false, contentType: "image/png" });
-      if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from("player-photos").getPublicUrl(path);
-      setSigUrl(urlData.publicUrl);
+      setSigUrl(await uploadSignatureData(dataUrl));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -822,12 +959,34 @@ export default function CardEditor({
 
   async function handleSignatureDrawn(sig: SignatureResult) {
     setShowSigPad(false);
+    const targetId = sigTargetId;
+    setSigTargetId(null);
+    track("card_signature_added");
+    logClientActivity("card_signature_added").catch(() => {});
+
+    // Route to an extra subject when one asked for the pad; else the primary.
+    if (targetId) {
+      setExtraData((p) => ({ ...p, [targetId]: { ...p[targetId], sig: sig.dataUrl } })); // instant render
+      setExtraSubjects((arr) =>
+        arr.map((e) =>
+          e.id === targetId
+            ? { ...e, sigStrokes: sig.strokes, sigColor: sig.color, sigThickness: sig.thickness }
+            : e
+        )
+      );
+      try {
+        const url = await uploadSignatureData(sig.dataUrl);
+        setExtraSubjects((arr) => arr.map((e) => (e.id === targetId ? { ...e, sigUrl: url } : e)));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+
     setSigStrokes(sig.strokes);
     setSigColor(sig.color);
     setSigThickness(sig.thickness);
     setSigDataUrl(sig.dataUrl); // instant render
-    track("card_signature_added");
-    logClientActivity("card_signature_added").catch(() => {});
     await uploadSignature(sig.dataUrl);
   }
 
@@ -892,48 +1051,45 @@ export default function CardEditor({
 
   // ── Photo upload + bg-removal ──────────────────────────────
 
+  // Upload a photo, remove its background, and return the cutout URL. Shared by
+  // the primary player and each extra (duo/trio) subject.
+  async function photoToCutout(file: File): Promise<string> {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+
+    const normalized = await normalizePhotoForUpload(file);
+    const path = `${user.id}/cardgen-src/${crypto.randomUUID()}.jpg`;
+    const { error: upErr } = await supabase.storage
+      .from("player-photos")
+      .upload(path, normalized, { upsert: false, contentType: "image/jpeg" });
+    if (upErr) throw upErr;
+    const { data: urlData } = supabase.storage.from("player-photos").getPublicUrl(path);
+
+    track("card_photo_uploaded", { bytes: normalized.size });
+    logClientActivity("card_photo_uploaded", { bytes: normalized.size }).catch(() => {});
+
+    const result = await removeBackground(urlData.publicUrl);
+    if (result.error) {
+      track("card_bg_removal_failed", { error: result.error });
+      logClientActivity("card_bg_removal_failed", { error: result.error }).catch(() => {});
+      throw new Error(result.error);
+    }
+    logClientActivity("card_bg_removed").catch(() => {});
+    return result.cutoutUrl!;
+  }
+
   async function handlePhotoSelected(file: File) {
     setStep("processing");
     setError(null);
     // Hold onto the untouched original so it can be saved to the device below;
     // everything downstream works off a downscaled copy.
     setOriginalPhoto(file);
-    const startedAt = Date.now();
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      const normalized = await normalizePhotoForUpload(file);
-      const path = `${user.id}/cardgen-src/${crypto.randomUUID()}.jpg`;
-      const { error: upErr } = await supabase.storage
-        .from("player-photos")
-        .upload(path, normalized, {
-          upsert: false,
-          contentType: "image/jpeg",
-        });
-      if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage
-        .from("player-photos")
-        .getPublicUrl(path);
-
-      track("card_photo_uploaded", { bytes: normalized.size });
-      logClientActivity("card_photo_uploaded", { bytes: normalized.size }).catch(() => {});
-
-      const result = await removeBackground(urlData.publicUrl);
-      const ms = Date.now() - startedAt;
-      if (result.error) {
-        track("card_bg_removal_failed", { error: result.error });
-        logClientActivity("card_bg_removal_failed", { error: result.error }).catch(() => {});
-        throw new Error(result.error);
-      }
-
-      track("card_bg_removed", { ms });
-      logClientActivity("card_bg_removed", { ms }).catch(() => {});
-
-      setCutoutUrl(result.cutoutUrl!);
+      const cutout = await photoToCutout(file);
+      setCutoutUrl(cutout);
       setTx(0);
       setTy(0);
       setScale(1);
@@ -946,6 +1102,96 @@ export default function CardEditor({
       setError(e instanceof Error ? e.message : String(e));
       setStep("upload");
     }
+  }
+
+  // ── Duo/trio: add / remove extra players ───────────────────
+
+  async function addPlayerPhoto(file: File) {
+    if (extraSubjects.length >= MAX_EXTRA) return;
+    setAddingPlayer(true);
+    setError(null);
+    try {
+      const cutout = await photoToCutout(file);
+      // Offset new players so they don't sit on top of the primary; alternate
+      // right/left. The coach then drags each into place.
+      const n = extraSubjects.length;
+      const tx = n === 0 ? 0.22 : -0.22;
+      const id = `s_${crypto.randomUUID()}`;
+      setExtraSubjects((arr) => [
+        ...arr,
+        {
+          id,
+          cutoutUrl: cutout,
+          tx,
+          ty: 0,
+          scale: 0.85,
+          rotation: 0,
+          name: "",
+          sigUrl: null,
+          sigX: Math.min(0.85, Math.max(0.15, 0.5 + tx)),
+          sigY: 0.8,
+          sigScale: 0.8,
+          sigRotation: 0,
+          sigStrokes: null,
+          sigColor: "#0a0a0a",
+          sigThickness: DEFAULT_SIG_THICKNESS,
+        },
+      ]);
+      setSelectedId(id);
+      track("card_player_added", { count: extraSubjects.length + 2 });
+      logClientActivity("card_player_added", { count: extraSubjects.length + 2 }).catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAddingPlayer(false);
+    }
+  }
+
+  function removeSubject(id: string) {
+    setExtraSubjects((arr) => arr.filter((e) => e.id !== id));
+    setExtraData((p) => {
+      const n = { ...p };
+      delete n[id];
+      return n;
+    });
+    if (selectedId === id) setSelectedId("main");
+  }
+
+  function patchSubject(id: string, p: Partial<ExtraSubjectState>) {
+    setExtraSubjects((arr) => arr.map((e) => (e.id === id ? { ...e, ...p } : e)));
+  }
+
+  // ── Duo/trio: shared back questions ────────────────────────
+  // Answers are keyed by question text; renaming migrates the answer so it isn't
+  // orphaned.
+  function renameDuoQuestion(i: number, text: string) {
+    const old = duoQuestions[i];
+    setDuoQuestions((qs) => qs.map((q, j) => (j === i ? text : q)));
+    if (old !== text) {
+      setDuoAnswers((a) => {
+        if (!(old in a)) return a;
+        const n = { ...a };
+        n[text] = n[old];
+        delete n[old];
+        return n;
+      });
+    }
+  }
+  function removeDuoQuestion(i: number) {
+    const q = duoQuestions[i];
+    setDuoQuestions((qs) => qs.filter((_, j) => j !== i));
+    setDuoAnswers((a) => {
+      const n = { ...a };
+      delete n[q];
+      return n;
+    });
+  }
+  function addDuoQuestion() {
+    const base = "New question";
+    let name = base;
+    let k = 2;
+    while (duoQuestions.includes(name)) name = `${base} ${k++}`;
+    setDuoQuestions((qs) => [...qs, name]);
   }
 
   // Hand the untouched original back to the device. On phones this opens the
@@ -1074,6 +1320,29 @@ export default function CardEditor({
 
   // Composite both card sides to true 2.5"×3.5" PNG blobs (canvas drawImage for
   // raster layers — reliable on iOS, unlike the foreignObject snapshot).
+  // Duo/trio derived values — the extra players' cutout/signature layers for the
+  // compositor, the joined plate names, and the answered duo questions.
+  const extraCutoutLayers = extraSubjects.map((s) => ({
+    src: extraData[s.id]?.cutout ?? s.cutoutUrl,
+    tx: s.tx,
+    ty: s.ty,
+    scale: s.scale,
+    rotation: s.rotation,
+  }));
+  const extraSigLayers = extraSubjects
+    .filter((s) => extraData[s.id]?.sig || s.sigUrl)
+    .map((s) => ({
+      src: (extraData[s.id]?.sig ?? s.sigUrl) as string,
+      x: s.sigX,
+      y: s.sigY,
+      rotation: s.sigRotation,
+      widthFrac: 0.38 * s.sigScale,
+    }));
+  const namesTitle = joinNames([nameL1, ...extraSubjects.map((s) => s.name)]);
+  const duoItems = duoQuestions
+    .map((q) => ({ q, a: (duoAnswers[q] ?? "").trim() }))
+    .filter((it) => it.a);
+
   async function renderSides(): Promise<{ frontBlob: Blob; backBlob: Blob }> {
     const frontBlob = await compositeFront({
       bgEl: bgLayerRef.current!,
@@ -1082,13 +1351,16 @@ export default function CardEditor({
       cutout: { tx, ty, scale, rotation },
       sigSrc: sigDataUrl ?? sigUrl,
       sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
+      extraCutouts: extraCutoutLayers,
+      extraSigs: extraSigLayers,
     });
     const backBlob = backStageRef.current
       ? await compositeBack({
           backEl: backStageRef.current,
-          headshotSrc: headshotDataUrl ?? headshotUrl,
+          // The duo back has no headshot / plays-like raster — capture DOM only.
+          headshotSrc: isDuo ? null : headshotDataUrl ?? headshotUrl,
           headshot: { posX: headshotPosX, posY: headshotPosY },
-          lookalikeSrc: lookAlikePhoto,
+          lookalikeSrc: isDuo ? null : lookAlikePhoto,
         })
       : frontBlob;
     return { frontBlob, backBlob };
@@ -1096,9 +1368,28 @@ export default function CardEditor({
 
   // The full design payload, shared by the save-to-player and draft paths.
   function buildDesign(): CardDesign {
+    const extra_subjects: CardSubject[] = extraSubjects.map((s) => ({
+      cutout_url: s.cutoutUrl,
+      transform: { x: s.tx, y: s.ty, scale: s.scale, rotation: s.rotation },
+      name: s.name,
+      signature: s.sigUrl
+        ? {
+            url: s.sigUrl,
+            x: s.sigX,
+            y: s.sigY,
+            scale: s.sigScale,
+            rotation: s.sigRotation,
+            ...(s.sigStrokes
+              ? { strokes: s.sigStrokes, color: s.sigColor, thickness: s.sigThickness }
+              : {}),
+          }
+        : null,
+    }));
     return {
       cutout_url: cutoutUrl ?? "",
       sport,
+      ...(extra_subjects.length ? { extra_subjects } : {}),
+      ...(isDuo ? { duo: { questions: duoQuestions, answers: duoAnswers } } : {}),
       background: bg,
       transform: { x: tx, y: ty, scale, rotation },
       text: {
@@ -1455,6 +1746,8 @@ export default function CardEditor({
           cutout: { tx, ty, scale, rotation },
           sigSrc: sigDataUrl ?? sigUrl,
           sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
+          extraCutouts: extraCutoutLayers,
+          extraSigs: extraSigLayers,
         });
         entries.push({
           name: `front-${String(i).padStart(width, "0")}-of-${total}.png`,
@@ -1467,9 +1760,9 @@ export default function CardEditor({
       if (backStageRef.current) {
         const backBlob = await compositeBack({
           backEl: backStageRef.current,
-          headshotSrc: headshotDataUrl ?? headshotUrl,
+          headshotSrc: isDuo ? null : headshotDataUrl ?? headshotUrl,
           headshot: { posX: headshotPosX, posY: headshotPosY },
-          lookalikeSrc: lookAlikePhoto,
+          lookalikeSrc: isDuo ? null : lookAlikePhoto,
         });
         entries.push({
           name: "back-(same-for-all).png",
@@ -1850,27 +2143,39 @@ export default function CardEditor({
               : { position: "absolute", left: -99999, top: 0, width: "100%" }
           }
         >
-          <CardBack
-            ref={backStageRef}
-            bgStyle={bgStyle}
-            sport={sport}
-            teamText={teamText}
-            ageText={ageText}
-            seasonText={seasonText}
-            playerName={fullName}
-            jersey={stats.jersey}
-            stats={stats}
-            scoutingReport={scoutingReport}
-            seasonQuote={seasonQuote}
-            lookAlike={lookAlike}
-            lookAlikePhoto={lookAlikePhoto}
-            lookAlikeBlurb={lookAlikeBlurb}
-            headshotUrl={headshotDataUrl ?? headshotUrl}
-            headshotPosition={`${headshotPosX}% ${headshotPosY}%`}
-            onHeadshotPointerDown={onHeadshotPointerDown}
-            onHeadshotPointerMove={onHeadshotPointerMove}
-            onHeadshotPointerUp={onHeadshotPointerUp}
-          />
+          {isDuo ? (
+            <CardBackDuo
+              ref={backStageRef}
+              bgStyle={bgStyle}
+              teamText={teamText}
+              ageText={ageText}
+              seasonText={seasonText}
+              namesTitle={namesTitle}
+              items={duoItems}
+            />
+          ) : (
+            <CardBack
+              ref={backStageRef}
+              bgStyle={bgStyle}
+              sport={sport}
+              teamText={teamText}
+              ageText={ageText}
+              seasonText={seasonText}
+              playerName={fullName}
+              jersey={stats.jersey}
+              stats={stats}
+              scoutingReport={scoutingReport}
+              seasonQuote={seasonQuote}
+              lookAlike={lookAlike}
+              lookAlikePhoto={lookAlikePhoto}
+              lookAlikeBlurb={lookAlikeBlurb}
+              headshotUrl={headshotDataUrl ?? headshotUrl}
+              headshotPosition={`${headshotPosX}% ${headshotPosY}%`}
+              onHeadshotPointerDown={onHeadshotPointerDown}
+              onHeadshotPointerMove={onHeadshotPointerMove}
+              onHeadshotPointerUp={onHeadshotPointerUp}
+            />
+          )}
         </div>
 
         {/* Front stage — wrapped so the captured node (stageRef) is never the
@@ -1918,6 +2223,28 @@ export default function CardEditor({
             }}
           />
         )}
+
+        {/* Extra players (duo/trio) — same contain-then-transform as the primary,
+            drawn on top; the export composites them the same way. */}
+        {extraSubjects.map((s) => {
+          const src = extraData[s.id]?.cutout ?? s.cutoutUrl;
+          return src ? (
+            <div
+              key={s.id}
+              style={{
+                position: "absolute",
+                inset: 0,
+                backgroundImage: `url(${src})`,
+                backgroundSize: "contain",
+                backgroundPosition: "center",
+                backgroundRepeat: "no-repeat",
+                transform: `translate(${s.tx * 100}%, ${s.ty * 100}%) rotate(${s.rotation}deg) scale(${s.scale})`,
+                transformOrigin: "center center",
+                pointerEvents: "none",
+              }}
+            />
+          ) : null;
+        })}
 
         {/* Overlay layer — jersey/plate/name; captured as one transparent layer
             and composited on top of the photo. */}
@@ -2019,10 +2346,19 @@ export default function CardEditor({
             letterSpacing: "0.01em",
           }}
         >
-          <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)` }}>{nameL1}</div>
-          <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)`, marginTop: "2%" }}>
-            {nameL2}
-          </div>
+          {isDuo ? (
+            // Shared name plate — all players on one line ("CJ & ALEX").
+            <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${8 * nameSize} / 100)` }}>
+              {namesTitle || nameL1}
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)` }}>{nameL1}</div>
+              <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)`, marginTop: "2%" }}>
+                {nameL2}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Circulation / limited-edition stamp — the classic serialized spot,
@@ -2068,10 +2404,11 @@ export default function CardEditor({
         </div>
 
         {/* Signature overlay — gestures handled at the stage level (pointerEvents
-            none); placed/scaled/rotated via stored fractions. */}
+            none); placed/scaled/rotated via stored fractions. The sigImgRef is
+            attached to whichever subject is selected so the gesture grabs it. */}
         {(sigDataUrl ?? sigUrl) && (
           <div
-            ref={sigImgRef}
+            ref={selectedId === "main" ? sigImgRef : undefined}
             style={{
               position: "absolute",
               left: `${sigX * 100}%`,
@@ -2088,6 +2425,31 @@ export default function CardEditor({
             }}
           />
         )}
+
+        {/* Extra players' signatures. */}
+        {extraSubjects.map((s) => {
+          const src = extraData[s.id]?.sig ?? s.sigUrl;
+          return src ? (
+            <div
+              key={s.id}
+              ref={selectedId === s.id ? sigImgRef : undefined}
+              style={{
+                position: "absolute",
+                left: `${s.sigX * 100}%`,
+                top: `${s.sigY * 100}%`,
+                width: `${38 * s.sigScale}%`,
+                aspectRatio: "3",
+                transform: `translate(-50%, -50%) rotate(${s.sigRotation}deg)`,
+                backgroundImage: `url(${src})`,
+                backgroundSize: "contain",
+                backgroundPosition: "center",
+                backgroundRepeat: "no-repeat",
+                pointerEvents: "none",
+                zIndex: 5,
+              }}
+            />
+          ) : null;
+        })}
         </div>
         </div>
       </div>
@@ -2117,6 +2479,119 @@ export default function CardEditor({
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Players — add up to two more for a duo/trio card. Tap a player to
+          select, then drag/pinch on the card to place them. */}
+      <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            Players
+          </p>
+          {cutoutUrl && extraSubjects.length < MAX_EXTRA && (
+            <button
+              type="button"
+              onClick={() => extraFileRef.current?.click()}
+              disabled={addingPlayer}
+              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+            >
+              {addingPlayer ? "Adding…" : "+ Add player"}
+            </button>
+          )}
+        </div>
+        <input
+          ref={extraFileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) addPlayerPhoto(f);
+            e.target.value = "";
+          }}
+        />
+
+        {/* Primary player */}
+        <button
+          type="button"
+          onClick={() => setSelectedId("main")}
+          className={`w-full text-left text-sm rounded-lg border px-3 py-2 transition-colors ${
+            selectedId === "main"
+              ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-medium"
+              : "border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          }`}
+        >
+          {isDuo ? (nameL1 || "Player 1") : "Primary player"}
+          {selectedId === "main" && isDuo ? " · selected" : ""}
+        </button>
+
+        {extraSubjects.map((s, i) => (
+          <div
+            key={s.id}
+            className={`rounded-lg border px-3 py-2 space-y-2 ${
+              selectedId === s.id
+                ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40"
+                : "border-gray-200 dark:border-gray-700"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedId(s.id)}
+                className={`text-sm font-medium ${
+                  selectedId === s.id ? "text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-gray-300"
+                }`}
+              >
+                Player {i + 2}
+                {selectedId === s.id ? " · selected" : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => removeSubject(s.id)}
+                className="ml-auto text-xs text-red-600 dark:text-red-400 hover:underline"
+              >
+                Remove
+              </button>
+            </div>
+            <input
+              value={s.name}
+              onChange={(e) => patchSubject(s.id, { name: e.target.value })}
+              placeholder="Name (for the plate)"
+              className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedId(s.id);
+                  setSigTargetId(s.id);
+                  setShowSigPad(true);
+                }}
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                {s.sigUrl ? "Redraw signature" : "Add signature"}
+              </button>
+              <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                Size
+                <input
+                  type="range"
+                  min={0.3}
+                  max={1.6}
+                  step={0.05}
+                  value={s.scale}
+                  onChange={(e) => patchSubject(s.id, { scale: Number(e.target.value) })}
+                  className="accent-blue-600"
+                />
+              </label>
+            </div>
+          </div>
+        ))}
+
+        {!isDuo && (
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            Add a player to make a duo or trio card — each gets their own name and signature.
+          </p>
+        )}
       </div>
 
       {/* Toolbar — different content for front vs back. */}
@@ -2631,7 +3106,47 @@ export default function CardEditor({
         </div>
         )}
 
-        {side === "back" && (
+        {side === "back" && isDuo && (
+          <div className="p-3 space-y-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Shared questions for {namesTitle || "the group"}. Only answered questions appear on the card.
+            </p>
+            {duoQuestions.map((q, i) => (
+              <div key={i} className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={q}
+                    onChange={(e) => renameDuoQuestion(i, e.target.value)}
+                    className="flex-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeDuoQuestion(i)}
+                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                    aria-label={`Remove question ${q}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <input
+                  value={duoAnswers[q] ?? ""}
+                  onChange={(e) => setDuoAnswers((p) => ({ ...p, [q]: e.target.value }))}
+                  placeholder="Answer"
+                  className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                />
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addDuoQuestion}
+              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              + Add question
+            </button>
+          </div>
+        )}
+
+        {side === "back" && !isDuo && (
           <div className="p-3 space-y-3">
             {/* Headshot (upper-right of the back) */}
             <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 p-2">
@@ -3331,7 +3846,13 @@ export default function CardEditor({
       {/* end preview / controls grid */}
 
       {showSigPad && (
-        <SignaturePad onCancel={() => setShowSigPad(false)} onDone={handleSignatureDrawn} />
+        <SignaturePad
+          onCancel={() => {
+            setShowSigPad(false);
+            setSigTargetId(null);
+          }}
+          onDone={handleSignatureDrawn}
+        />
       )}
 
       {/* Player-match picker — choose one of the AI's ~10 suggestions. */}
