@@ -1,7 +1,7 @@
 // Duo/trio card helpers. A card can hold up to MAX_SUBJECTS players: the primary
 // player on the top-level CardDesign fields plus MAX_EXTRA additional subjects.
 
-export const MAX_SUBJECTS = 3;
+export const MAX_SUBJECTS = 4;
 export const MAX_EXTRA = MAX_SUBJECTS - 1;
 
 // Sensible starting questions for the shared duo/trio back. Fully editable per

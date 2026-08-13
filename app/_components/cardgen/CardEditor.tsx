@@ -395,7 +395,9 @@ const SERIAL_CAP = 100;
 // is selected (see selectedId / activeState).
 type ExtraSubjectState = {
   id: string;
-  cutoutUrl: string;
+  // null = a "name + signature only" player that shares the group photo (no
+  // separately-uploaded cutout of their own).
+  cutoutUrl: string | null;
   tx: number;
   ty: number;
   scale: number;
@@ -414,7 +416,7 @@ type ExtraSubjectState = {
 function subjectFromDesign(s: CardSubject, i: number): ExtraSubjectState {
   return {
     id: `s_init_${i}`,
-    cutoutUrl: s.cutout_url,
+    cutoutUrl: s.cutout_url || null,
     tx: s.transform.x,
     ty: s.transform.y,
     scale: s.transform.scale,
@@ -853,6 +855,12 @@ export default function CardEditor({
     const s = extraSubjects.find((e) => e.id === selectedId);
     return s ? (extraData[s.id]?.sig ?? s.sigUrl) : null;
   }
+  // A name-only player (shares the group photo) has no cutout — dragging them
+  // only moves their signature.
+  function selectedHasCutout(): boolean {
+    if (selectedId === "main") return !!cutoutUrl;
+    return !!extraSubjects.find((e) => e.id === selectedId)?.cutoutUrl;
+  }
 
   function overSignature(x: number, y: number): boolean {
     if (!activeSigSrc() || !sigImgRef.current) return false;
@@ -891,7 +899,8 @@ export default function CardEditor({
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const pts = [...pointers.current.values()];
     if (pts.length === 1) {
-      gestureLayer.current = overSignature(e.clientX, e.clientY) ? "sig" : "photo";
+      gestureLayer.current =
+        overSignature(e.clientX, e.clientY) || !selectedHasCutout() ? "sig" : "photo";
     }
     gestureStart.current = gestureSnapshot(pts);
   }
@@ -1157,6 +1166,38 @@ export default function CardEditor({
     }
   }
 
+  // Add a "name + signature only" player that shares the group photo — no
+  // separate cutout. Signatures are staggered along the bottom so they don't
+  // stack; the coach drags each into place.
+  function addNameOnlyPlayer() {
+    if (extraSubjects.length >= MAX_EXTRA) return;
+    const n = extraSubjects.length;
+    const id = `s_${crypto.randomUUID()}`;
+    setExtraSubjects((arr) => [
+      ...arr,
+      {
+        id,
+        cutoutUrl: null,
+        tx: 0,
+        ty: 0,
+        scale: 1,
+        rotation: 0,
+        name: "",
+        sigUrl: null,
+        sigX: Math.min(0.85, Math.max(0.15, 0.28 + 0.22 * n)),
+        sigY: 0.82,
+        sigScale: 0.7,
+        sigRotation: 0,
+        sigStrokes: null,
+        sigColor: "#0a0a0a",
+        sigThickness: DEFAULT_SIG_THICKNESS,
+      },
+    ]);
+    setSelectedId(id);
+    track("card_player_added", { count: extraSubjects.length + 2, name_only: true });
+    logClientActivity("card_player_added", { count: extraSubjects.length + 2 }).catch(() => {});
+  }
+
   function removeSubject(id: string) {
     setExtraSubjects((arr) => arr.filter((e) => e.id !== id));
     setExtraData((p) => {
@@ -1381,7 +1422,7 @@ export default function CardEditor({
   // The full design payload, shared by the save-to-player and draft paths.
   function buildDesign(): CardDesign {
     const extra_subjects: CardSubject[] = extraSubjects.map((s) => ({
-      cutout_url: s.cutoutUrl,
+      cutout_url: s.cutoutUrl ?? "",
       transform: { x: s.tx, y: s.ty, scale: s.scale, rotation: s.rotation },
       name: s.name,
       signature: s.sigUrl
@@ -2526,19 +2567,30 @@ export default function CardEditor({
       {/* Players — add up to two more for a duo/trio card. Tap a player to
           select, then drag/pinch on the card to place them. */}
       <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
             Players
           </p>
           {cutoutUrl && extraSubjects.length < MAX_EXTRA && (
-            <button
-              type="button"
-              onClick={() => extraFileRef.current?.click()}
-              disabled={addingPlayer}
-              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
-            >
-              {addingPlayer ? "Adding…" : "+ Add player"}
-            </button>
+            <div className="ml-auto flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => extraFileRef.current?.click()}
+                disabled={addingPlayer}
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+              >
+                {addingPlayer ? "Adding…" : "+ Add player (photo)"}
+              </button>
+              <button
+                type="button"
+                onClick={addNameOnlyPlayer}
+                disabled={addingPlayer}
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                title="Shares the group photo — just a name and signature"
+              >
+                + Add name only
+              </button>
+            </div>
           )}
         </div>
         <input
@@ -2585,6 +2637,7 @@ export default function CardEditor({
                 }`}
               >
                 Player {i + 2}
+                {s.cutoutUrl ? "" : " · name only"}
                 {selectedId === s.id ? " · selected" : ""}
               </button>
               <button
@@ -2613,25 +2666,42 @@ export default function CardEditor({
               >
                 {s.sigUrl ? "Redraw signature" : "Add signature"}
               </button>
-              <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-                Size
-                <input
-                  type="range"
-                  min={0.3}
-                  max={1.6}
-                  step={0.05}
-                  value={s.scale}
-                  onChange={(e) => patchSubject(s.id, { scale: Number(e.target.value) })}
-                  className="accent-blue-600"
-                />
-              </label>
+              {s.cutoutUrl ? (
+                <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  Size
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={1.6}
+                    step={0.05}
+                    value={s.scale}
+                    onChange={(e) => patchSubject(s.id, { scale: Number(e.target.value) })}
+                    className="accent-blue-600"
+                  />
+                </label>
+              ) : (
+                <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  Sig size
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={1.6}
+                    step={0.05}
+                    value={s.sigScale}
+                    onChange={(e) => patchSubject(s.id, { sigScale: Number(e.target.value) })}
+                    className="accent-blue-600"
+                  />
+                </label>
+              )}
             </div>
           </div>
         ))}
 
         {!isDuo && (
           <p className="text-xs text-gray-400 dark:text-gray-500">
-            Add a player to make a duo or trio card — each gets their own name and signature.
+            Make a group card: <strong>Add player (photo)</strong> gives each their own cutout, or
+            upload one group photo and use <strong>Add name only</strong> to add each player&apos;s
+            name &amp; signature.
           </p>
         )}
       </div>
