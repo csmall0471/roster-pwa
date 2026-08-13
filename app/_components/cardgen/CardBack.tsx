@@ -21,6 +21,7 @@ export type BackStats = {
 type Props = {
   bgStyle: CSSProperties;
   sport?: CardSport;
+  landscape?: boolean;
   teamText: string;
   ageText: string;
   seasonText: string;
@@ -46,6 +47,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
   {
     bgStyle,
     sport,
+    landscape,
     teamText,
     ageText,
     seasonText,
@@ -77,7 +79,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     <div
       ref={ref}
       className="relative w-full mx-auto rounded-2xl overflow-hidden shadow-lg"
-      style={{ aspectRatio: "5 / 7", ...bgStyle }}
+      style={{ aspectRatio: landscape ? "7 / 5" : "5 / 7", ...bgStyle }}
     >
       {/* Header chevron chips — matches the front. Flush-left plate with the
           text inset so print trim can't clip it. */}

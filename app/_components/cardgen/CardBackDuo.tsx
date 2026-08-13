@@ -7,6 +7,7 @@ import { forwardRef, type CSSProperties } from "react";
 
 type Props = {
   bgStyle: CSSProperties;
+  landscape?: boolean;
   teamText: string;
   ageText: string;
   seasonText: string;
@@ -15,14 +16,14 @@ type Props = {
 };
 
 const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
-  { bgStyle, teamText, ageText, seasonText, namesTitle, items },
+  { bgStyle, landscape, teamText, ageText, seasonText, namesTitle, items },
   ref
 ) {
   return (
     <div
       ref={ref}
       className="relative w-full mx-auto rounded-2xl overflow-hidden shadow-lg"
-      style={{ aspectRatio: "5 / 7", ...bgStyle }}
+      style={{ aspectRatio: landscape ? "7 / 5" : "5 / 7", ...bgStyle }}
     >
       {/* Header chevron chips — matches the front + solo back. */}
       <div

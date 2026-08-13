@@ -38,9 +38,9 @@ import {
   compositeFoilMaskCanvas,
   compositeSticker,
 } from "./card-raster";
-import { addPrintBleed, EXPORT_TRIM_W } from "@/lib/cardgen/print-bleed";
+import { addPrintBleed, EXPORT_TRIM_W, EXPORT_TRIM_H } from "@/lib/cardgen/print-bleed";
 import { buildZip, type ZipEntry } from "./zip";
-import type { CardDesign, CardSubject } from "@/lib/types";
+import type { CardDesign, CardSubject, CardOrientation } from "@/lib/types";
 
 // Signature width on the sticker, as a fraction of the sticker's width, at
 // scale 1 (the resize slider multiplies it). Shared by the preview + export.
@@ -506,6 +506,12 @@ export default function CardEditor({
   const [sport, setSport] = useState<CardSport>(
     initialDesign ? initialDesign.sport ?? "basketball" : defaultSport ?? "basketball"
   );
+  // Card shape: portrait (2.5×3.5, default) or landscape (3.5×2.5).
+  const [orientation, setOrientation] = useState<CardOrientation>(
+    initialDesign?.orientation ?? "portrait"
+  );
+  const landscape = orientation === "landscape";
+  const cardAspect = landscape ? "7 / 5" : "5 / 7";
   const [bg, setBg] = useState<BgChoice>(
     initialDesign?.background ??
       (defaultSport && defaultSport !== "basketball"
@@ -744,15 +750,19 @@ export default function CardEditor({
   // 750×1050 card. (getComputedStyle resolves the calc to px, which html-to-image
   // captures reliably; container-query units don't survive its snapshot.) Both the
   // front stage and CardBack sit inside stageWrapRef and inherit the variable.
+  // Text is sized as a fraction of --cardw. To keep proportions identical in
+  // both shapes, base it on the card's SHORT side: the width in portrait, the
+  // height (= width × 5/7) in landscape.
   useEffect(() => {
     const el = stageWrapRef.current;
     if (!el) return;
-    const set = () => el.style.setProperty("--cardw", `${el.clientWidth}px`);
+    const set = () =>
+      el.style.setProperty("--cardw", `${landscape ? (el.clientWidth * 5) / 7 : el.clientWidth}px`);
     set();
     const ro = new ResizeObserver(set);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [step]);
+  }, [step, landscape]);
 
   // Same idea for the sticker preview: publish its rendered width as --stickerw
   // so the sticker's text scales as a fraction of the circle at any preview size.
@@ -1353,6 +1363,7 @@ export default function CardEditor({
       sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
       extraCutouts: extraCutoutLayers,
       extraSigs: extraSigLayers,
+      landscape,
     });
     const backBlob = backStageRef.current
       ? await compositeBack({
@@ -1361,6 +1372,7 @@ export default function CardEditor({
           headshotSrc: isDuo ? null : headshotDataUrl ?? headshotUrl,
           headshot: { posX: headshotPosX, posY: headshotPosY },
           lookalikeSrc: isDuo ? null : lookAlikePhoto,
+          landscape,
         })
       : frontBlob;
     return { frontBlob, backBlob };
@@ -1388,6 +1400,7 @@ export default function CardEditor({
     return {
       cutout_url: cutoutUrl ?? "",
       sport,
+      ...(landscape ? { orientation } : {}),
       ...(extra_subjects.length ? { extra_subjects } : {}),
       ...(isDuo ? { duo: { questions: duoQuestions, answers: duoAnswers } } : {}),
       background: bg,
@@ -1572,6 +1585,7 @@ export default function CardEditor({
       };
       // High-res trim (2.5×3.5) base art + foil mask, rendered from the same
       // layers so they line up pixel-for-pixel.
+      const trimW = landscape ? EXPORT_TRIM_H : EXPORT_TRIM_W;
       const baseCanvas = await compositeFrontCanvas(
         {
           bgEl: bgLayerRef.current!,
@@ -1580,8 +1594,11 @@ export default function CardEditor({
           cutout: { tx, ty, scale, rotation },
           sigSrc: sigDataUrl ?? sigUrl,
           sig,
+          extraCutouts: extraCutoutLayers,
+          extraSigs: extraSigLayers,
+          landscape,
         },
-        EXPORT_TRIM_W
+        trimW
       );
       const maskCanvas = await compositeFoilMaskCanvas(
         {
@@ -1589,8 +1606,9 @@ export default function CardEditor({
           selected: foilOn,
           sigSrc: sigDataUrl ?? sigUrl,
           sig,
+          landscape,
         },
-        EXPORT_TRIM_W
+        trimW
       );
       // Center each in the 2.6×3.6" (910×1260 @ 350 DPI) bleed canvas, edges
       // extended into the bleed so the two stay in register.
@@ -1748,6 +1766,7 @@ export default function CardEditor({
           sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
           extraCutouts: extraCutoutLayers,
           extraSigs: extraSigLayers,
+          landscape,
         });
         entries.push({
           name: `front-${String(i).padStart(width, "0")}-of-${total}.png`,
@@ -1763,6 +1782,7 @@ export default function CardEditor({
           headshotSrc: isDuo ? null : headshotDataUrl ?? headshotUrl,
           headshot: { posX: headshotPosX, posY: headshotPosY },
           lookalikeSrc: isDuo ? null : lookAlikePhoto,
+          landscape,
         });
         entries.push({
           name: "back-(same-for-all).png",
@@ -2147,6 +2167,7 @@ export default function CardEditor({
             <CardBackDuo
               ref={backStageRef}
               bgStyle={bgStyle}
+              landscape={landscape}
               teamText={teamText}
               ageText={ageText}
               seasonText={seasonText}
@@ -2158,6 +2179,7 @@ export default function CardEditor({
               ref={backStageRef}
               bgStyle={bgStyle}
               sport={sport}
+              landscape={landscape}
               teamText={teamText}
               ageText={ageText}
               seasonText={seasonText}
@@ -2194,7 +2216,7 @@ export default function CardEditor({
           onPointerUp={onStagePointerUp}
           onPointerCancel={onStagePointerUp}
           className="relative w-full mx-auto rounded-2xl overflow-hidden select-none touch-none shadow-lg"
-          style={{ aspectRatio: "5 / 7", cursor: "grab" }}
+          style={{ aspectRatio: cardAspect, cursor: "grab" }}
         >
         {/* Background layer — captured on its own so the cutout can be drawn
             between it and the text overlays when compositing. */}
@@ -2479,6 +2501,26 @@ export default function CardEditor({
             </option>
           ))}
         </select>
+
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 ml-2">
+          Shape
+        </span>
+        <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+          {(["portrait", "landscape"] as const).map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => setOrientation(o)}
+              className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                orientation === o
+                  ? "bg-blue-600 text-white"
+                  : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              }`}
+            >
+              {o === "portrait" ? "Portrait" : "Landscape"}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Players — add up to two more for a duo/trio card. Tap a player to

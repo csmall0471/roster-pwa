@@ -15,10 +15,15 @@ export const EXPORT_BLEED_H = Math.round(3.6 * EXPORT_DPI); // 1260
 
 // Center a trim-proportioned card image in the bleed canvas and extend its edge
 // pixels into the 0.05" margin. `trim` may be any card-aspect size; it's fit
-// into the 875×1225 trim area (older 750×1050 cards get upscaled to fit).
+// into the trim area (older 750×1050 cards get upscaled to fit). A landscape
+// trim (wider than tall) fits the bleed/trim rectangles rotated 90° so a
+// horizontal card exports as 3.6×2.6 with a 3.5×2.5 trim.
 export function addPrintBleed(trim: HTMLCanvasElement): HTMLCanvasElement {
-  const W = EXPORT_BLEED_W;
-  const H = EXPORT_BLEED_H;
+  const landscape = trim.width > trim.height;
+  const W = landscape ? EXPORT_BLEED_H : EXPORT_BLEED_W;
+  const H = landscape ? EXPORT_BLEED_W : EXPORT_BLEED_H;
+  const trimW = landscape ? EXPORT_TRIM_H : EXPORT_TRIM_W;
+  const trimH = landscape ? EXPORT_TRIM_W : EXPORT_TRIM_H;
   const out = document.createElement("canvas");
   out.width = W;
   out.height = H;
@@ -26,7 +31,7 @@ export function addPrintBleed(trim: HTMLCanvasElement): HTMLCanvasElement {
 
   const tw = trim.width;
   const th = trim.height;
-  const scale = Math.min(EXPORT_TRIM_W / tw, EXPORT_TRIM_H / th);
+  const scale = Math.min(trimW / tw, trimH / th);
   const dw = Math.round(tw * scale);
   const dh = Math.round(th * scale);
   const dx = Math.round((W - dw) / 2);

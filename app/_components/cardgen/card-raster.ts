@@ -1,6 +1,6 @@
 import { toCanvas } from "html-to-image";
 import { pngBlobWithDpi } from "./png-dpi";
-import { addPrintBleed, EXPORT_DPI, EXPORT_TRIM_W } from "@/lib/cardgen/print-bleed";
+import { addPrintBleed, EXPORT_DPI, EXPORT_TRIM_W, EXPORT_TRIM_H } from "@/lib/cardgen/print-bleed";
 
 // iOS Safari drops raster images (both <img> and CSS background images) inside
 // the SVG <foreignObject> that html-to-image renders through — only gradients
@@ -13,6 +13,17 @@ import { addPrintBleed, EXPORT_DPI, EXPORT_TRIM_W } from "@/lib/cardgen/print-bl
 
 const W = 750;
 const H = 1050;
+
+// Output height for a given output width. Portrait is 5:7 (H/W); landscape is
+// the same card rotated, 7:5 (W/H).
+function outHeight(outW: number, landscape?: boolean): number {
+  return Math.round(outW * (landscape ? W / H : H / W));
+}
+
+// The trim-area long/short edge in export pixels — used to pick the render width
+// so a landscape card renders at 3.5" wide (the long edge).
+const TRIM_LONG = EXPORT_TRIM_H; // 1225 (3.5")
+const TRIM_SHORT = EXPORT_TRIM_W; // 875 (2.5")
 
 async function loadImage(src: string): Promise<HTMLImageElement> {
   const img = new Image();
@@ -69,6 +80,7 @@ export type FrontLayers = {
   // primary cutout/signature. Empty/absent for a normal solo card.
   extraCutouts?: FrontCutout[];
   extraSigs?: FrontSig[];
+  landscape?: boolean; // horizontal (3.5×2.5) card
 };
 
 // Draw a cutout photo — object-fit: contain, then the CSS transform about center.
@@ -123,7 +135,7 @@ export async function compositeFrontCanvas(
   L: FrontLayers,
   outW: number = W
 ): Promise<HTMLCanvasElement> {
-  const outH = Math.round(outW * (H / W));
+  const outH = outHeight(outW, L.landscape);
   const canvas = document.createElement("canvas");
   canvas.width = outW;
   canvas.height = outH;
@@ -147,9 +159,10 @@ export async function compositeFrontCanvas(
 }
 
 export async function compositeFront(L: FrontLayers): Promise<Blob> {
-  // High-res trim render, centered in the 2.6×3.6" bleed canvas with the edges
-  // extended into the bleed (content keeps its safe margin). Stamped at 350 DPI.
-  const trim = await compositeFrontCanvas(L, EXPORT_TRIM_W);
+  // High-res trim render, centered in the bleed canvas with the edges extended
+  // into the bleed (content keeps its safe margin). Stamped at 350 DPI. Render
+  // width is the card's long edge so a landscape card renders at 3.5" wide.
+  const trim = await compositeFrontCanvas(L, L.landscape ? TRIM_LONG : TRIM_SHORT);
   return pngBlobWithDpi(addPrintBleed(trim).toDataURL("image/png"), EXPORT_DPI);
 }
 
@@ -254,6 +267,7 @@ export type FoilMaskInput = {
   selected: Set<string>; // which data-foil keys (+ "signature") are foiled
   sigSrc?: string | null;
   sig?: { x: number; y: number; rotation: number; widthFrac: number };
+  landscape?: boolean;
 };
 
 // Build the foil mask: white where the toggled elements paint, black elsewhere.
@@ -264,7 +278,7 @@ export async function compositeFoilMaskCanvas(
   M: FoilMaskInput,
   outW: number = W
 ): Promise<HTMLCanvasElement> {
-  const outH = Math.round(outW * (H / W));
+  const outH = outHeight(outW, M.landscape);
   const mask = document.createElement("canvas");
   mask.width = outW;
   mask.height = outH;
@@ -313,6 +327,7 @@ export type BackLayers = {
   headshotSrc: string | null;
   headshot: { posX: number; posY: number }; // object-position 0–100
   lookalikeSrc: string | null; // matched pro player photo
+  landscape?: boolean;
 };
 
 // Draw a cover-fit image clipped to a circle into the given box.
@@ -358,7 +373,7 @@ async function compositeBackCanvas(
   L: BackLayers,
   outW: number
 ): Promise<HTMLCanvasElement> {
-  const outH = Math.round(outW * (H / W));
+  const outH = outHeight(outW, L.landscape);
   const canvas = document.createElement("canvas");
   canvas.width = outW;
   canvas.height = outH;
@@ -430,6 +445,6 @@ async function compositeBackCanvas(
 
 export async function compositeBack(L: BackLayers): Promise<Blob> {
   // High-res trim render, centered in the bleed canvas with edges extended.
-  const trim = await compositeBackCanvas(L, EXPORT_TRIM_W);
+  const trim = await compositeBackCanvas(L, L.landscape ? TRIM_LONG : TRIM_SHORT);
   return pngBlobWithDpi(addPrintBleed(trim).toDataURL("image/png"), EXPORT_DPI);
 }

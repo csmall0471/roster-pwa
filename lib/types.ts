@@ -145,9 +145,13 @@ export interface CardDuo {
   answers: Record<string, string>; // keyed by question text
 }
 
+export type CardOrientation = "portrait" | "landscape";
+
 export interface CardDesign {
   cutout_url: string;
   sport?: CardSport;
+  // Card shape. Absent = portrait (2.5×3.5, the original). Landscape is 3.5×2.5.
+  orientation?: CardOrientation;
   // Additional players for a duo/trio card. Absent/empty = a normal solo card.
   extra_subjects?: CardSubject[];
   // Present on a duo/trio card: the shared back questions + answers.
