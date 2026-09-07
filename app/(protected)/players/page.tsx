@@ -94,6 +94,15 @@ export default async function PlayersPage() {
           >
             Import CSV
           </Link>
+          {/* Download endpoint (route handler), not a page — a plain anchor so
+              the browser downloads instead of client-navigating. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
+            href="/players/export-csv"
+            className="rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            Export CSV
+          </a>
           <Link
             href="/players/new"
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
