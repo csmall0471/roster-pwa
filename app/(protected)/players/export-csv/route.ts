@@ -1,14 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
 
-// Export every player the coach owns as a CSV in the league-registration format
-// — the same columns the /players/import-csv importer reads, so an export can be
-// edited in a spreadsheet and re-imported. RLS scopes the query to this user.
+// Export every player the coach owns as a CSV in the league-registration format.
+// Players are exported UNAFFILIATED — no season or team (team/season/sport blank,
+// season_id "0") — so they can be bulk-created in a fresh system. RLS scopes the
+// query to this user.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const HEADERS = [
-  "id", "team", "season_id", "season", "sport",
-  "player_first_name", "player_last_name", "gender", "birth_date", "age_group",
+  "team", "season_id", "season", "sport",
+  "player_first_name", "player_last_name", "gender", "birth_date",
   "position", "number", "Hand",
   "parent1_email", "parent1_first_name", "parent1_last_name", "parent1_mobile_number",
   "parent2_email", "parent2_first_name", "parent2_last_name", "parent2_mobile_number",
@@ -22,11 +23,6 @@ function esc(v: unknown): string {
 }
 
 type ParentRow = { first_name: string | null; last_name: string | null; email: string | null; phone: string | null };
-type RosterRow = {
-  status: string | null;
-  jersey_number: number | null;
-  teams: { name: string | null; season: string | null; sport: string | null; age_group: string | null } | null;
-};
 
 export async function GET() {
   const supabase = await createClient();
@@ -38,9 +34,8 @@ export async function GET() {
   const { data, error } = await supabase
     .from("players")
     .select(
-      `external_id, first_name, last_name, gender, date_of_birth, street, city, state, zip,
-       player_parents(parents(first_name, last_name, email, phone)),
-       roster(status, jersey_number, teams(name, season, sport, age_group))`
+      `first_name, last_name, gender, date_of_birth, street, city, state, zip,
+       player_parents(parents(first_name, last_name, email, phone))`
     )
     .order("last_name", { ascending: true })
     .order("first_name", { ascending: true });
@@ -52,19 +47,15 @@ export async function GET() {
     const parents = ((p.player_parents as Array<{ parents: ParentRow | null }> | null) ?? [])
       .map((pp) => pp.parents)
       .filter((x): x is ParentRow => !!x);
-
-    // One row per player: use their active team (else the first one they're on).
-    const roster = (p.roster as RosterRow[] | null) ?? [];
-    const chosen =
-      roster.find((r) => r.status === "active" && r.teams) ?? roster.find((r) => r.teams) ?? null;
-    const team = chosen?.teams ?? null;
-
     const [p1, p2] = parents;
+
     rows.push(
       [
-        p.external_id, team?.name, "", team?.season, team?.sport,
-        p.first_name, p.last_name, p.gender, p.date_of_birth, team?.age_group,
-        "", chosen?.jersey_number, "",
+        // team, season_id, season, sport — unaffiliated (season_id "0" per format)
+        "", "0", "", "",
+        p.first_name, p.last_name, p.gender, p.date_of_birth,
+        // position, number, Hand — not tracked
+        "", "", "",
         p1?.email, p1?.first_name, p1?.last_name, p1?.phone,
         p2?.email, p2?.first_name, p2?.last_name, p2?.phone,
         p.street, p.city, p.state, p.zip,
