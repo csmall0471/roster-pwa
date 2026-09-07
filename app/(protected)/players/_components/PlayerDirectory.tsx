@@ -10,6 +10,7 @@ import {
   bulkDeletePlayers,
   bulkAddToTeam,
   bulkRemoveFromTeam,
+  setPlayerGender,
 } from "../actions";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -69,6 +70,13 @@ export default function PlayerDirectory({
   const [filterTeam,  setFilterTeam]  = useState("");
   const [filterSize,  setFilterSize]  = useState("");
   const [photoOnly,   setPhotoOnly]   = useState(false);
+  const [needsGender, setNeedsGender] = useState(false);
+
+  // Local overlay of gender edits (the quick M/F picker), seeded from the server
+  // data. Kept client-side so setting a gender updates instantly.
+  const [genders, setGenders] = useState<Record<string, string | null>>(() =>
+    Object.fromEntries(players.map((p) => [p.id, p.gender ?? null]))
+  );
 
   // Selection state
   const [selected,    setSelected]    = useState<Set<string>>(new Set());
@@ -97,8 +105,18 @@ export default function PlayerDirectory({
 
   const sort = SORT_OPTIONS[sortIndex];
 
+  const missingGender = players.filter((p) => !genders[p.id]).length;
+
   const activeFilters =
-    (filterTeam ? 1 : 0) + (filterSize ? 1 : 0) + (photoOnly ? 1 : 0);
+    (filterTeam ? 1 : 0) + (filterSize ? 1 : 0) + (photoOnly ? 1 : 0) + (needsGender ? 1 : 0);
+
+  function changeGender(id: string, gender: "M" | "F" | null) {
+    setGenders((prev) => ({ ...prev, [id]: gender }));
+    startTransition(async () => {
+      const res = await setPlayerGender(id, gender);
+      if (res.error) setBulkError(res.error);
+    });
+  }
 
   // ── Filtered + sorted list ───────────────────────────────────
 
@@ -124,6 +142,7 @@ export default function PlayerDirectory({
     if (filterTeam) list = list.filter((p) => p.roster?.some((r) => r.teams.name === filterTeam));
     if (filterSize) list = list.filter((p) => p.shirt_size === filterSize);
     if (photoOnly)   list = list.filter((p) => !!primaryPhotos[p.id]);
+    if (needsGender) list = list.filter((p) => !genders[p.id]);
 
     list.sort((a, b) => {
       const av = sortValue(a, sort.key);
@@ -133,7 +152,7 @@ export default function PlayerDirectory({
     });
 
     return list;
-  }, [players, query, filterTeam, filterSize, photoOnly, sort, primaryPhotos]);
+  }, [players, query, filterTeam, filterSize, photoOnly, needsGender, genders, sort, primaryPhotos]);
 
   // ── Selection helpers ────────────────────────────────────────
 
@@ -284,9 +303,22 @@ export default function PlayerDirectory({
           Has photo
         </button>
 
+        {missingGender > 0 && (
+          <button
+            onClick={() => setNeedsGender((v) => !v)}
+            className={`rounded-lg border px-2.5 py-1.5 text-sm transition-colors ${
+              needsGender
+                ? "border-amber-500 bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium"
+                : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+            }`}
+          >
+            Needs gender ({missingGender})
+          </button>
+        )}
+
         {activeFilters > 0 && (
           <button
-            onClick={() => { setFilterTeam(""); setFilterSize(""); setPhotoOnly(false); }}
+            onClick={() => { setFilterTeam(""); setFilterSize(""); setPhotoOnly(false); setNeedsGender(false); }}
             className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline"
           >
             Clear {activeFilters} filter{activeFilters !== 1 ? "s" : ""}
@@ -373,6 +405,31 @@ export default function PlayerDirectory({
                           Age {calcAge(player.date_of_birth)}
                         </span>
                       )}
+                      {/* Quick gender picker — amber ring when unset so the
+                          missing ones are easy to spot and fill for export. */}
+                      <span
+                        className={`inline-flex overflow-hidden rounded-md border text-[11px] font-semibold ${
+                          genders[player.id] ? "border-gray-300 dark:border-gray-600" : "border-amber-400 dark:border-amber-600"
+                        }`}
+                        title={genders[player.id] ? "Gender" : "No gender set — click M or F"}
+                      >
+                        {(["M", "F"] as const).map((g) => (
+                          <button
+                            key={g}
+                            type="button"
+                            onClick={() =>
+                              changeGender(player.id, genders[player.id] === g ? null : g)
+                            }
+                            className={`px-1.5 py-0.5 leading-none transition-colors ${
+                              genders[player.id] === g
+                                ? "bg-blue-600 text-white"
+                                : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            }`}
+                          >
+                            {g}
+                          </button>
+                        ))}
+                      </span>
                       {player.shirt_size && (
                         <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded px-1.5 py-0.5 font-mono">
                           {player.shirt_size}

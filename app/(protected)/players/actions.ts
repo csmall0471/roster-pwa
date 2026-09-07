@@ -257,6 +257,29 @@ export async function bulkAddToTeam(
   return {};
 }
 
+// Set (or clear) a player's gender. Used by the quick inline picker in the
+// directory so the CSV export has a gender for every player.
+export async function setPlayerGender(
+  id: string,
+  gender: "M" | "F" | null
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("players")
+    .update({ gender })
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) return { error: error.message };
+  revalidatePath("/players");
+  return {};
+}
+
 // Save the coach's 1–10 ratings for one player (upsert on the coach+player pair).
 // Called from the Ranking tab as each slider is released.
 export async function savePlayerRating(
