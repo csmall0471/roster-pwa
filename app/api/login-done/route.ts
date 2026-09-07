@@ -16,8 +16,32 @@ export async function GET(request: NextRequest) {
         .select("parent_id")
         .eq("auth_user_id", user.id)
         .maybeSingle()
-      if (link) {
-        await logActivity(link.parent_id, "login", { phone: user.phone ?? null })
+
+      // First sign-in: auto-link this phone/email to a matching parent record so
+      // deep links (e.g. a shared snack-signup link) work immediately — without
+      // this, a first-time parent who lands straight on a /parent page never
+      // passes through the coach layout where linking otherwise happens.
+      let parentId = link?.parent_id ?? null
+      if (!parentId) {
+        let matchedId: string | null = null
+        if (user.email) {
+          const { data } = await supabase.from("parents").select("id").eq("email", user.email).maybeSingle()
+          matchedId = data?.id ?? null
+        }
+        if (!matchedId && user.phone) {
+          const { data } = await supabase.rpc("match_parent_by_phone", { input_phone: user.phone })
+          matchedId = (data as string | null) ?? null
+        }
+        if (matchedId) {
+          await supabase
+            .from("parent_auth")
+            .upsert({ auth_user_id: user.id, parent_id: matchedId }, { onConflict: "auth_user_id", ignoreDuplicates: true })
+          parentId = matchedId
+        }
+      }
+
+      if (parentId) {
+        await logActivity(parentId, "login", { phone: user.phone ?? null })
         track("login").catch(() => {})
       }
     }

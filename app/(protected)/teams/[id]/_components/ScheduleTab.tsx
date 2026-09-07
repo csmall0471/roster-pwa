@@ -5,6 +5,7 @@ import {
   createGame, updateGame, deleteGame, updateTeamSnackSettings, importEvents,
 } from "../../schedule-actions";
 import { parseIcs, type ParsedEvent } from "@/lib/ics-parser";
+import SnackShareButton from "./SnackShareButton";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -73,12 +74,14 @@ const inputCls = "w-full rounded-lg border border-gray-300 dark:border-gray-600 
 
 export default function ScheduleTab({
   teamId,
+  teamName,
   initialGames,
   snackEnabled: initialSnackEnabled,
   slotsPerGame: initialSlots,
   rosterCount,
 }: {
   teamId: string;
+  teamName: string;
   initialGames: GameRow[];
   snackEnabled: boolean;
   slotsPerGame: number;
@@ -241,6 +244,8 @@ export default function ScheduleTab({
             </button>
           </div>
         </div>
+
+        {snackEnabled && <SnackShareButton teamId={teamId} teamName={teamName} />}
       </div>
 
       {/* Header with action buttons */}

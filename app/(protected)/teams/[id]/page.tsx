@@ -261,6 +261,7 @@ export default async function TeamDetailPage({
       {tab === "schedule" && (
         <ScheduleTab
           teamId={id}
+          teamName={t.name}
           initialGames={(gamesRaw ?? []).map((g) => ({
             ...g,
             event_type: (g as any).event_type ?? "game",
