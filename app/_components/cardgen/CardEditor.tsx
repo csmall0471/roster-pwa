@@ -516,6 +516,7 @@ export default function CardEditor({
   const [originalPhoto, setOriginalPhoto] = useState<File | null>(null);
   const [savingOriginal, setSavingOriginal] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [uploadingBg, setUploadingBg] = useState(false);
   // "Share all backgrounds" contact sheet: rendering flag + progress counter.
   const [exportingAll, setExportingAll] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -1417,6 +1418,8 @@ export default function CardEditor({
   }
 
   async function handleBgImageSelected(file: File) {
+    setUploadingBg(true);
+    setError(null);
     try {
       const supabase = createClient();
       const {
@@ -1437,6 +1440,8 @@ export default function CardEditor({
       logClientActivity("card_bg_image_uploaded").catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploadingBg(false);
     }
   }
 
@@ -3383,9 +3388,10 @@ export default function CardEditor({
               })}
               <button
                 onClick={() => bgFileRef.current?.click()}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                disabled={uploadingBg}
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
               >
-                Upload your own background
+                {uploadingBg ? "Uploading…" : "Upload your own background"}
               </button>
               <input
                 ref={bgFileRef}
@@ -4683,6 +4689,27 @@ export default function CardEditor({
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {exportProgress} of {TEMPLATES.length}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Saving / exporting / downloading a card — covers the wait (renders both
+          sides + uploads) and stays up through the navigation that follows a
+          successful save, so there's no blank flash before the next screen. */}
+      {(step === "saving" || step === "saved" || downloading) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+            <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              {downloading
+                ? "Preparing your card…"
+                : standalone && !assignTargetKey
+                  ? "Exporting your card…"
+                  : "Saving your card…"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Rendering both sides…
             </p>
           </div>
         </div>
