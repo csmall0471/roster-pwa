@@ -1,9 +1,9 @@
 import type { AssignTarget } from "./CardEditor";
 
 // Builds the Card Creator's "assign to a player" targets from raw player +
-// roster rows. A kid on multiple teams gets one target per team (so all their
-// teams appear in the picker); a kid with no roster row still gets a teamless
-// target. Each carries the details the editor auto-fills from.
+// roster rows. A kid on multiple ACTIVE teams gets one target per team (so all
+// their current teams appear in the picker). Players not on any active team are
+// omitted entirely. Each carries the details the editor auto-fills from.
 
 type PlayerRow = {
   id: string;
@@ -71,20 +71,9 @@ export function toAssignTargets(players: PlayerRow[], rosterRows: RosterRow[]): 
       playerAge: ageFromDob(p.date_of_birth),
     };
     const teams = byPlayer.get(p.id);
-    if (!teams || teams.size === 0) {
-      // On no active team — offer the kid teamless so they can still be picked,
-      // but don't surface a finished/inactive team in the picker.
-      targets.push({
-        ...base,
-        key: `${p.id}::none`,
-        teamId: null,
-        teamName: null,
-        season: null,
-        ageGroup: null,
-        jersey: null,
-      });
-      continue;
-    }
+    // Only players on an active team belong in the picker — skip everyone else
+    // (no active-status roster row on an in-progress team).
+    if (!teams || teams.size === 0) continue;
     for (const r of teams.values()) {
       targets.push({
         ...base,
