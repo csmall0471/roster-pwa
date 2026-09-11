@@ -2718,8 +2718,15 @@ export default function CardEditor({
           }}
         >
           {isDuo ? (
-            // Shared name plate — all players on one line ("CJ & ALEX").
-            <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${8 * nameSize} / 100)` }}>
+            // Shared name plate — all players on one line ("CJ & ALEX"). Force
+            // uppercase so every name matches the (already-uppercased) primary,
+            // however the teammate names were entered.
+            <div
+              style={{
+                fontSize: `calc(var(--cardw, 22rem) * ${8 * nameSize} / 100)`,
+                textTransform: "uppercase",
+              }}
+            >
               {namesTitle || nameL1}
             </div>
           ) : (
@@ -2993,7 +3000,10 @@ export default function CardEditor({
                   onChange={(e) => {
                     const pid = e.target.value || null;
                     const mate = pid ? teamRoster.find((t) => t.id === pid) : null;
-                    patchSubject(s.id, { playerId: pid, ...(mate ? { name: mate.firstName } : {}) });
+                    patchSubject(s.id, {
+                      playerId: pid,
+                      ...(mate ? { name: mate.firstName.toUpperCase() } : {}),
+                    });
                   }}
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 >

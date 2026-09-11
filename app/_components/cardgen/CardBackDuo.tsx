@@ -118,6 +118,7 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
             letterSpacing: "0.03em",
             lineHeight: 1.05,
             color: "#fff",
+            textTransform: "uppercase",
           }}
         >
           {namesTitle || "THE DUO"}
