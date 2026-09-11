@@ -114,6 +114,9 @@ export type AssignTarget = {
   ageGroup: string | null;
   jersey: string | null;
   playerAge: string | null;
+  // The team's assistant coaches (resolved to names), pre-filled when this
+  // target is picked. Null/absent = leave the current value alone.
+  assistantCoaches?: string | null;
 };
 
 const EMPTY_STATS: BackStats = {
@@ -649,17 +652,22 @@ export default function CardEditor({
 
   // Back-side state — pre-seeded from any saved design, then from roster defaults.
   const initBack = initialDesign?.back;
-  const [stats, setStats] = useState<BackStats>(() => ({
-    ...EMPTY_STATS,
-    // Default the owner as head coach + the team's assistant coaches on new
-    // cards; a reopened card's saved stats (spread below) win, so these never
-    // override an existing value.
-    coach: DEFAULT_HEAD_COACH,
-    assistant_coaches: defaultAssistantCoaches ?? "",
-    jersey: jersey ?? "",
-    age: playerAge ?? "",
-    ...initBack?.stats,
-  }));
+  const [stats, setStats] = useState<BackStats>(() => {
+    const s: BackStats = {
+      ...EMPTY_STATS,
+      jersey: jersey ?? "",
+      age: playerAge ?? "",
+      ...initBack?.stats,
+    };
+    // Fill coaching whenever the card doesn't already have it — so the owner is
+    // head coach and the team's assistant coaches appear, on new cards AND on
+    // existing cards that never had them. A card's own non-empty value wins.
+    if (!s.coach) s.coach = DEFAULT_HEAD_COACH;
+    if (!s.assistant_coaches && defaultAssistantCoaches) {
+      s.assistant_coaches = defaultAssistantCoaches;
+    }
+    return s;
+  });
   const [scoutingReport, setScoutingReport] = useState(
     initBack?.scouting_report ?? ""
   );
@@ -2258,7 +2266,14 @@ export default function CardEditor({
     setTeamText((t.teamName || "").toUpperCase());
     setAgeText(t.ageGroup || "");
     setSeasonText(t.season || "");
-    setStats((s) => ({ ...s, jersey: t.jersey || "", age: t.playerAge || "" }));
+    setStats((s) => ({
+      ...s,
+      jersey: t.jersey || "",
+      age: t.playerAge || "",
+      // Pull in the team's assistant coaches; keep the current value if the team
+      // has none assigned.
+      assistant_coaches: t.assistantCoaches ?? s.assistant_coaches,
+    }));
   }
 
   // Player picker — shown just below the preview in standalone mode when there

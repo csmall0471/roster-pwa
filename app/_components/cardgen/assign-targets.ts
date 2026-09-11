@@ -16,7 +16,14 @@ type RosterRow = {
   player_id: string;
   status: string;
   jersey_number: number | null;
-  teams: { id: string; name: string; season: string | null; age_group: string | null } | null;
+  teams: {
+    id: string;
+    name: string;
+    season: string | null;
+    age_group: string | null;
+    season_start: string | null;
+    season_end: string | null;
+  } | null;
 };
 
 function ageFromDob(dob: string | null): string {
@@ -29,16 +36,25 @@ function ageFromDob(dob: string | null): string {
   return age >= 0 ? String(age) : "";
 }
 
+// An "active" team = its season is currently in progress (started, not ended) —
+// the same rule the Teams / Card Creator pages use. Teams without dates are
+// treated as active so they're never hidden.
+function isActiveTeam(start: string | null, end: string | null): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  if (end && end < today) return false;
+  if (start && start > today) return false;
+  return true;
+}
+
 export function toAssignTargets(players: PlayerRow[], rosterRows: RosterRow[]): AssignTarget[] {
   // Each player's CURRENT teams (one target per active team). De-duped by team.
   // Callers order rows by created_at desc, so the first row per team wins and
   // `mostRecent` holds the newest overall (used as a fallback below).
   const byPlayer = new Map<string, Map<string, RosterRow>>();
-  const mostRecent = new Map<string, RosterRow>();
   for (const r of rosterRows) {
     if (!r.teams) continue;
-    if (!mostRecent.has(r.player_id)) mostRecent.set(r.player_id, r);
     if (r.status !== "active") continue;
+    if (!isActiveTeam(r.teams.season_start, r.teams.season_end)) continue; // active teams only
     let teams = byPlayer.get(r.player_id);
     if (!teams) byPlayer.set(r.player_id, (teams = new Map()));
     if (!teams.has(r.teams.id)) teams.set(r.teams.id, r);
@@ -56,17 +72,16 @@ export function toAssignTargets(players: PlayerRow[], rosterRows: RosterRow[]): 
     };
     const teams = byPlayer.get(p.id);
     if (!teams || teams.size === 0) {
-      // Not active on any team — fall back to their most recent team if any,
-      // else offer the kid teamless so they can still be picked.
-      const r = mostRecent.get(p.id);
+      // On no active team — offer the kid teamless so they can still be picked,
+      // but don't surface a finished/inactive team in the picker.
       targets.push({
         ...base,
-        key: `${p.id}::${r?.teams?.id ?? "none"}`,
-        teamId: r?.teams?.id ?? null,
-        teamName: r?.teams?.name ?? null,
-        season: r?.teams?.season ?? null,
-        ageGroup: r?.teams?.age_group ?? null,
-        jersey: r?.jersey_number != null ? String(r.jersey_number) : null,
+        key: `${p.id}::none`,
+        teamId: null,
+        teamName: null,
+        season: null,
+        ageGroup: null,
+        jersey: null,
       });
       continue;
     }

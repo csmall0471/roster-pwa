@@ -42,13 +42,47 @@ export default async function CardCreatorPage({
   if (ids.length > 0) {
     const { data: rosterRows } = await supabase
       .from("roster")
-      .select("player_id, status, jersey_number, teams(id, name, season, age_group)")
+      .select(
+        "player_id, status, jersey_number, teams(id, name, season, age_group, season_start, season_end, assistant_coach_parent_ids)"
+      )
       .in("player_id", ids)
       .order("created_at", { ascending: false });
+
+    // Resolve each team's assistant-coach parent ids to names, so picking a
+    // player pre-fills the card's coaching from their team.
+    const rows = (rosterRows ?? []) as unknown as Array<{
+      teams: { id: string; assistant_coach_parent_ids: string[] | null } | null;
+    }>;
+    const coachIds = [
+      ...new Set(rows.flatMap((r) => r.teams?.assistant_coach_parent_ids ?? [])),
+    ];
+    const nameByParent = new Map<string, string>();
+    if (coachIds.length) {
+      const { data: coachRows } = await supabase
+        .from("parents")
+        .select("id, first_name, last_name")
+        .in("id", coachIds);
+      for (const c of coachRows ?? []) {
+        nameByParent.set(c.id as string, `${c.first_name} ${c.last_name}`.trim());
+      }
+    }
+    const assistantByTeam = new Map<string, string>();
+    for (const r of rows) {
+      const t = r.teams;
+      if (!t) continue;
+      const names = (t.assistant_coach_parent_ids ?? [])
+        .map((cid) => nameByParent.get(cid))
+        .filter(Boolean) as string[];
+      if (names.length) assistantByTeam.set(t.id, names.join(", "));
+    }
+
     assignTargets = toAssignTargets(
       players ?? [],
       (rosterRows ?? []) as unknown as Parameters<typeof toAssignTargets>[1]
-    );
+    ).map((t) => ({
+      ...t,
+      assistantCoaches: t.teamId ? assistantByTeam.get(t.teamId) ?? null : null,
+    }));
   }
 
   // Names for earmarked drafts, keyed by player id (owner's own players).
