@@ -103,7 +103,7 @@ export default async function TeamDetailPage({
       .order("season_start", { ascending: false }),
     supabase
       .from("player_photos")
-      .select("*, players(id, first_name, last_name)")
+      .select("*, card_group_id, players(id, first_name, last_name)")
       .eq("team_id", id)
       .order("created_at", { ascending: false }),
     supabase
@@ -133,6 +133,17 @@ export default async function TeamDetailPage({
   const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
   const dateRange = formatDateRange(t.season_start, t.season_end);
   const teamPhotoUrl = (teamMedia ?? []).find((m) => m.is_team_photo)?.public_url ?? null;
+
+  // Collapse shared group cards to a single tile: keep every card without a
+  // group id, but only the first row seen for each non-null card_group_id.
+  const seenGroupIds = new Set<string>();
+  const dedupedTeamPhotos = (teamPhotos ?? []).filter((row) => {
+    const gid = (row as { card_group_id?: string | null }).card_group_id ?? null;
+    if (!gid) return true;
+    if (seenGroupIds.has(gid)) return false;
+    seenGroupIds.add(gid);
+    return true;
+  });
 
   return (
     <div>
@@ -200,7 +211,7 @@ export default async function TeamDetailPage({
           Schedule {gamesRaw?.length ? `(${gamesRaw.length})` : ""}
         </TabLink>
         <TabLink href={`/teams/${id}?tab=cards`} active={tab === "cards"}>
-          Cards {teamPhotos?.length ? `(${teamPhotos.length})` : ""}
+          Cards {dedupedTeamPhotos.length ? `(${dedupedTeamPhotos.length})` : ""}
         </TabLink>
         <TabLink href={`/teams/${id}?tab=media`} active={tab === "media"}>
           Media {teamMedia?.length ? `(${teamMedia.length})` : ""}
@@ -278,7 +289,7 @@ export default async function TeamDetailPage({
         <>
           <TeamCards
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            photos={(teamPhotos ?? []) as any}
+            photos={dedupedTeamPhotos as any}
             teamId={id}
           />
           <div className="mt-4">

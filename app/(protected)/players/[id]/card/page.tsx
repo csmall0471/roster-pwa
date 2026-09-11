@@ -84,6 +84,20 @@ export default async function PlayerCardPage({
     }
   }
 
+  // Teammates on the selected team, so the editor can offer group-card members.
+  let teammatesByTeam: Record<string, { id: string; firstName: string; lastName: string }[]> = {};
+  if (teamId) {
+    const { data: teammateRows } = await supabase
+      .from("roster")
+      .select("players(id, first_name, last_name)")
+      .eq("team_id", teamId);
+    const teammates = (teammateRows ?? [])
+      .map((r) => r.players as unknown as { id: string; first_name: string; last_name: string } | null)
+      .filter((p): p is { id: string; first_name: string; last_name: string } => p != null)
+      .map((p) => ({ id: p.id, firstName: p.first_name, lastName: p.last_name }));
+    teammatesByTeam = { [teamId]: teammates };
+  }
+
   // Resolve the team's assistant-coach parent ids to display names, to pre-fill
   // the card's coaching staff on a new card.
   let assistantCoaches: string | null = null;
@@ -112,10 +126,11 @@ export default async function PlayerCardPage({
   // saving edits that card in place instead of adding a duplicate.
   let initialDesign: CardDesign | null = null;
   let initialPhotoId: string | null = null;
+  let initialCardGroupId: string | null = null;
   if (photoParam) {
     const { data: existing } = await supabase
       .from("player_photos")
-      .select("id, card_design")
+      .select("id, card_design, card_group_id")
       .eq("id", photoParam)
       .eq("player_id", id)
       .eq("user_id", user.id)
@@ -123,12 +138,13 @@ export default async function PlayerCardPage({
     if (existing?.card_design) {
       initialDesign = existing.card_design as CardDesign;
       initialPhotoId = existing.id as string;
+      initialCardGroupId = (existing.card_group_id as string | null) ?? null;
     }
   }
   if (!initialDesign && teamId) {
     const { data: existing } = await supabase
       .from("player_photos")
-      .select("id, card_design")
+      .select("id, card_design, card_group_id")
       .eq("player_id", id)
       .eq("team_id", teamId)
       .eq("user_id", user.id)
@@ -139,6 +155,7 @@ export default async function PlayerCardPage({
     if (existing) {
       initialDesign = (existing.card_design as CardDesign | null) ?? null;
       initialPhotoId = initialDesign ? (existing.id as string) : null;
+      initialCardGroupId = initialDesign ? ((existing.card_group_id as string | null) ?? null) : null;
     }
   }
 
@@ -183,6 +200,8 @@ export default async function PlayerCardPage({
           returnHref={returnHref}
           initialDesign={initialDesign}
           initialPhotoId={initialPhotoId}
+          initialCardGroupId={initialCardGroupId}
+          teammatesByTeam={teammatesByTeam}
           defaultSport={sportFromTeam(teamSport)}
           defaultAssistantCoaches={assistantCoaches}
         />

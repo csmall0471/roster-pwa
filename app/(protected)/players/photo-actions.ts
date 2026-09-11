@@ -210,6 +210,143 @@ export async function savePlayerPhoto({
   return { photoId: data?.id };
 }
 
+// ── Persist a group card to every featured player ─────────────
+// A duo/trio card is saved as one row per featured player, all tied together by
+// a shared card_group_id, so a later edit or delete reaches every copy. Unlike
+// savePlayerPhoto these rows are always is_primary:false — a group card lives in
+// the gallery, never as a player's profile/primary card.
+
+export async function saveCardForPlayers(input: {
+  playerIds: string[]; // all featured players, unique (primary + linked extras)
+  primaryPlayerId: string; // the card's primary player
+  primaryPhotoId?: string; // an existing single-card row to fold into the group (solo→group conversion)
+  cardGroupId?: string; // reuse when editing an existing group; else a new one is generated
+  storagePath: string;
+  publicUrl: string;
+  backStoragePath?: string;
+  backPublicUrl?: string;
+  teamName?: string;
+  season?: string;
+  teamId?: string;
+  cardDesign?: CardDesign;
+}): Promise<{ error?: string; cardGroupId?: string }> {
+  const {
+    playerIds,
+    primaryPlayerId,
+    primaryPhotoId,
+    cardGroupId,
+    storagePath,
+    publicUrl,
+    backStoragePath,
+    backPublicUrl,
+    teamName,
+    season,
+    teamId,
+    cardDesign,
+  } = input;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // The card is owned by the coach (players.user_id), not whoever creates it —
+  // same reasoning as savePlayerPhoto. Resolve the owner from the primary player
+  // and write every row under that owner via the service client.
+  const service = createServiceClient();
+  const { data: player } = await service
+    .from("players")
+    .select("user_id")
+    .eq("id", primaryPlayerId)
+    .single();
+  if (!player) return { error: "Player not found" };
+  const ownerId = player.user_id as string;
+
+  // Authorize the featured players. The coach owns them all; a granted parent
+  // can only save to their own kids, so intersect with get_my_player_ids.
+  let authorizedIds: string[];
+  if (user.id === ownerId) {
+    authorizedIds = [...new Set(playerIds)];
+  } else {
+    const { data: hasTool } = await supabase.rpc("has_tool_access", { tool: "card-creator" });
+    if (!hasTool) return { error: "You don't have access to save a card to these players." };
+    const { data: kidRows } = await supabase.rpc("get_my_player_ids");
+    const kidIds = new Set(((kidRows ?? []) as { player_id: string }[]).map((r) => r.player_id));
+    authorizedIds = [...new Set(playerIds)].filter((pid) => kidIds.has(pid));
+  }
+  if (!authorizedIds.length) {
+    return { error: "You don't have access to save a card to these players." };
+  }
+
+  const groupId = cardGroupId ?? crypto.randomUUID();
+
+  // Existing rows already in this group (empty for a brand-new group).
+  const { data: groupRows } = await service
+    .from("player_photos")
+    .select("id, player_id")
+    .eq("card_group_id", groupId)
+    .eq("user_id", ownerId);
+  const rowByPlayer = new Map(
+    ((groupRows ?? []) as { id: string; player_id: string }[]).map((r) => [r.player_id, r.id])
+  );
+
+  // Shared fields written to every row. is_primary is always false: group cards
+  // are gallery-only, never a player's profile/primary card.
+  const fields = {
+    storage_path: storagePath,
+    public_url: publicUrl,
+    back_storage_path: backStoragePath ?? null,
+    back_public_url: backPublicUrl ?? null,
+    team_name: teamName ?? null,
+    season: season ?? null,
+    is_primary: false,
+    team_id: teamId ?? null,
+    card_design: cardDesign ?? null,
+    card_group_id: groupId,
+  };
+
+  // Upsert one row per authorized featured player.
+  for (const pid of authorizedIds) {
+    let rowId = rowByPlayer.get(pid);
+    // On a solo→group conversion the primary's pre-group single row has no
+    // card_group_id yet, so it isn't in groupRows — adopt it explicitly.
+    if (!rowId && pid === primaryPlayerId && primaryPhotoId) rowId = primaryPhotoId;
+
+    const { error } = rowId
+      ? await service
+          .from("player_photos")
+          .update(fields)
+          .eq("id", rowId)
+          .eq("user_id", ownerId)
+      : await service
+          .from("player_photos")
+          .insert({ user_id: ownerId, player_id: pid, ...fields });
+    if (error) return { error: error.message };
+  }
+
+  // Players removed from the card on this edit: drop their now-stale rows. Keyed
+  // off the FEATURED set (not just the authorized ones) so a co-player the caller
+  // can't write to is never silently deleted. Storage is shared, so leave files.
+  const featuredSet = new Set(playerIds);
+  for (const [pid, rowId] of rowByPlayer) {
+    if (!featuredSet.has(pid)) {
+      await service.from("player_photos").delete().eq("id", rowId).eq("user_id", ownerId);
+    }
+  }
+
+  for (const pid of authorizedIds) {
+    revalidatePath(`/players/${pid}`);
+    revalidatePath(`/parent/player/${pid}`);
+  }
+  revalidatePath("/players");
+  if (teamId) {
+    revalidatePath(`/teams/${teamId}`);
+    revalidatePath(`/parent/team/${teamId}`);
+  }
+  return { cardGroupId: groupId };
+}
+
 // ── Assign a photo to a team ─────────────────────────────────
 
 export async function assignPhotoToTeam(
@@ -310,17 +447,39 @@ export async function deletePlayerPhoto(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  // Pull team_id before deletion so we can revalidate the right team page.
+  // Pull team_id (+ group/back path) before deletion so we can revalidate the
+  // right team page and know whether this is one copy of a group card.
   const { data: photoRow } = await supabase
     .from("player_photos")
-    .select("team_id, is_primary")
+    .select("team_id, is_primary, card_group_id, back_storage_path")
     .eq("id", photoId)
     .maybeSingle();
 
   // Best-effort storage cleanup — bucket policy is user-prefix-based, so cross-
   // owner deletes silently no-op. The DB row removal below is what hides the
-  // card from the UI; orphan files can be swept later.
-  await supabase.storage.from("player-photos").remove([storagePath]);
+  // card from the UI; orphan files can be swept later. The image files are
+  // shared across a group's rows, so a single remove covers the whole group.
+  const toRemove = [storagePath];
+  if (photoRow?.back_storage_path) toRemove.push(photoRow.back_storage_path);
+  await supabase.storage.from("player-photos").remove(toRemove);
+
+  if (photoRow?.card_group_id) {
+    // Group card: deleting any copy removes every per-player row in the group.
+    const { error: delErr } = await supabase
+      .from("player_photos")
+      .delete()
+      .eq("card_group_id", photoRow.card_group_id);
+    if (delErr) return { error: delErr.message };
+
+    revalidatePath(`/players/${playerId}`);
+    revalidatePath(`/parent/player/${playerId}`);
+    revalidatePath("/players");
+    if (photoRow.team_id) {
+      revalidatePath(`/teams/${photoRow.team_id}`);
+      revalidatePath(`/parent/team/${photoRow.team_id}`);
+    }
+    return {};
+  }
 
   // RLS gates this: owner / parent of kid / team owner can delete.
   const { error: delErr } = await supabase

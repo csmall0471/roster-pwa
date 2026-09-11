@@ -106,6 +106,8 @@ export interface PlayerPhoto {
   season: string | null;
   is_primary: boolean;
   card_design: CardDesign | null;
+  // Shared id across a group card's per-player rows (null = single-player card).
+  card_group_id?: string | null;
   created_at: string;
 }
 
@@ -138,6 +140,9 @@ export interface CardSubject {
   transform: { x: number; y: number; scale: number; rotation?: number };
   name: string; // first name shown on the shared name plate
   signature?: CardSignature | null;
+  // Links this extra subject to a real player so a group card can be saved to
+  // all featured players. Absent = a free-text/guest name (no player row).
+  player_id?: string | null;
 }
 
 // The duo/trio back: a shared set of fun questions (no per-player stat columns).

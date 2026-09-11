@@ -38,6 +38,10 @@ export default async function CardCreatorPage({
     .eq("user_id", user.id);
 
   let assignTargets: AssignTarget[] = [];
+  // Teammates per team (for group cards), built from the roster rows already
+  // loaded below — no extra query. Only the owner's own players are available
+  // here, so each team lists the owner's players who are active on it.
+  const teammatesByTeam: Record<string, { id: string; firstName: string; lastName: string }[]> = {};
   const ids = (players ?? []).map((p) => p.id as string);
   if (ids.length > 0) {
     const { data: rosterRows } = await supabase
@@ -47,6 +51,28 @@ export default async function CardCreatorPage({
       )
       .in("player_id", ids)
       .order("created_at", { ascending: false });
+
+    // Build the teammates-per-team map from the roster rows just loaded.
+    const teammateNameById = new Map(
+      (players ?? []).map((p) => [
+        p.id as string,
+        { firstName: p.first_name as string, lastName: p.last_name as string },
+      ])
+    );
+    const teammateRows = (rosterRows ?? []) as unknown as Array<{
+      player_id: string | null;
+      status: string | null;
+      teams: { id: string } | null;
+    }>;
+    for (const r of teammateRows) {
+      const tId = r.teams?.id;
+      if (!tId || r.status !== "active" || !r.player_id) continue;
+      const name = teammateNameById.get(r.player_id);
+      if (!name) continue;
+      const list = (teammatesByTeam[tId] ??= []);
+      if (list.some((m) => m.id === r.player_id)) continue;
+      list.push({ id: r.player_id, firstName: name.firstName, lastName: name.lastName });
+    }
 
     // Resolve each team's assistant-coach parent ids to names, so picking a
     // player pre-fills the card's coaching from their team.
@@ -209,6 +235,7 @@ export default async function CardCreatorPage({
         playerAge={null}
         returnHref="/teams"
         assignTargets={assignTargets}
+        teammatesByTeam={teammatesByTeam}
         allowDrafts={isOwner}
         draftId={draftId}
         initialDesign={initialDesign}

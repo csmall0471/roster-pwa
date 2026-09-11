@@ -19,7 +19,7 @@ import {
   type LookalikeOption,
   type DuoLookalikeOption,
 } from "@/app/actions/cardgen";
-import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
+import { savePlayerPhoto, saveCardForPlayers } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
 import { SPORTS, getSport, CARD_SPORTS, type CardSport } from "./sports";
@@ -99,7 +99,15 @@ type Props = {
   // Assistant coaches assigned to the team (resolved to names), pre-filled on a
   // NEW card's back. A reopened card's saved value wins.
   defaultAssistantCoaches?: string | null;
+  // Teammates available to add to a group card, keyed by teamId. The editor
+  // filters out the primary player and anyone already on the card.
+  teammatesByTeam?: Record<string, Teammate[]>;
+  // When reopening a saved group card, its shared id — so editing updates every
+  // featured player's copy instead of forking a new set.
+  initialCardGroupId?: string | null;
 };
+
+export type Teammate = { id: string; firstName: string; lastName: string };
 
 export type AssignTarget = {
   // Unique per player+team, so a kid on multiple teams shows once per team.
@@ -414,6 +422,9 @@ type ExtraSubjectState = {
   scale: number;
   rotation: number;
   name: string;
+  // Real player this subject is linked to (picked from the team roster). null =
+  // a free-text/guest name. Drives saving the card to every featured player.
+  playerId: string | null;
   sigUrl: string | null;
   sigX: number;
   sigY: number;
@@ -433,6 +444,7 @@ function subjectFromDesign(s: CardSubject, i: number): ExtraSubjectState {
     scale: s.transform.scale,
     rotation: s.transform.rotation ?? 0,
     name: s.name ?? "",
+    playerId: s.player_id ?? null,
     sigUrl: s.signature?.url ?? null,
     sigX: s.signature?.x ?? 0.5,
     sigY: s.signature?.y ?? 0.72,
@@ -466,6 +478,8 @@ export default function CardEditor({
   initialAssignKey,
   defaultSport,
   defaultAssistantCoaches,
+  teammatesByTeam,
+  initialCardGroupId,
 }: Props) {
   const router = useRouter();
 
@@ -574,6 +588,10 @@ export default function CardEditor({
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoImgRef = useRef<HTMLDivElement>(null);
   const logoFileRef = useRef<HTMLInputElement>(null);
+
+  // Shared id across a group card's per-player rows. Set when reopening a group
+  // card; assigned by the server on first group save.
+  const [cardGroupId, setCardGroupId] = useState<string | null>(initialCardGroupId ?? null);
 
   // Back logo — the SAME image as the front logo (logoUrl), with its own
   // independent placement on the back. Toggled on/off; dragged on the back stage.
@@ -1267,6 +1285,7 @@ export default function CardEditor({
           scale: 0.85,
           rotation: 0,
           name: "",
+          playerId: null,
           sigUrl: null,
           sigX: Math.min(0.85, Math.max(0.15, 0.5 + tx)),
           sigY: 0.8,
@@ -1304,6 +1323,7 @@ export default function CardEditor({
         scale: 1,
         rotation: 0,
         name: "",
+        playerId: null,
         sigUrl: null,
         sigX: Math.min(0.85, Math.max(0.15, 0.28 + 0.22 * n)),
         sigY: 0.82,
@@ -1641,6 +1661,23 @@ export default function CardEditor({
     .map((q) => ({ q, a: (duoAnswers[q] ?? "").trim() }))
     .filter((it) => it.a);
 
+  // ── Group cards: who the card belongs to + teammates to add ──
+  // In standalone mode the primary player/team come from the picked target; on a
+  // player card page they're the props. Teammates are the roster of that team,
+  // minus the primary and anyone already on the card.
+  const currentTarget = standalone
+    ? assignTargets.find((t) => t.key === assignTargetKey)
+    : undefined;
+  const primaryPlayerId = standalone ? currentTarget?.id ?? null : playerId;
+  const currentTeamId = standalone ? currentTarget?.teamId ?? null : teamId;
+  const teamRoster: Teammate[] = (currentTeamId && teammatesByTeam?.[currentTeamId]) || [];
+  // Featured players a save should write a card row to (primary + linked extras).
+  const featuredPlayerIds = [
+    ...new Set(
+      [primaryPlayerId, ...extraSubjects.map((s) => s.playerId)].filter(Boolean) as string[]
+    ),
+  ];
+
   async function renderSides(): Promise<{ frontBlob: Blob; backBlob: Blob }> {
     const frontBlob = await compositeFront({
       bgEl: bgLayerRef.current!,
@@ -1676,6 +1713,7 @@ export default function CardEditor({
       cutout_url: s.cutoutUrl ?? "",
       transform: { x: s.tx, y: s.ty, scale: s.scale, rotation: s.rotation },
       name: s.name,
+      player_id: s.playerId,
       signature: s.sigUrl
         ? {
             url: s.sigUrl,
@@ -2175,21 +2213,50 @@ export default function CardEditor({
         .from("player-photos")
         .getPublicUrl(backStoragePath).data.publicUrl;
 
-      const res = await savePlayerPhoto({
-        playerId: targetPlayerId,
-        // Only edit in place when saving back to the same card the editor opened
-        // (no assign target picked). Assigning to a chosen player always inserts.
-        photoId: !targetKey ? initialPhotoId ?? undefined : undefined,
-        storagePath: frontPath,
-        publicUrl: frontUrlData.publicUrl,
-        backStoragePath,
-        backPublicUrl,
-        teamName: teamText,
-        season: seasonText || season || undefined,
-        teamId: (target ? target.teamId : teamId) ?? undefined,
-        cardDesign: buildDesign(),
-      });
-      if (res.error) throw new Error(res.error);
+      // Players the card is saved to: the primary plus any extra subjects linked
+      // to a real teammate. Two or more → a shared "group card" (one gallery-only
+      // row per player, kept in sync by card_group_id). One → the normal path.
+      const extraLinkedIds = extraSubjects
+        .map((s) => s.playerId)
+        .filter(Boolean) as string[];
+      const featured = [...new Set([targetPlayerId, ...extraLinkedIds])];
+
+      if (featured.length >= 2) {
+        const res = await saveCardForPlayers({
+          playerIds: featured,
+          primaryPlayerId: targetPlayerId,
+          // Fold the primary's existing single card into the group (solo→group)
+          // when editing in place; when assigning to a chosen player, insert.
+          primaryPhotoId: !targetKey ? initialPhotoId ?? undefined : undefined,
+          cardGroupId: cardGroupId ?? undefined,
+          storagePath: frontPath,
+          publicUrl: frontUrlData.publicUrl,
+          backStoragePath,
+          backPublicUrl,
+          teamName: teamText,
+          season: seasonText || season || undefined,
+          teamId: (target ? target.teamId : teamId) ?? undefined,
+          cardDesign: buildDesign(),
+        });
+        if (res.error) throw new Error(res.error);
+        if (res.cardGroupId) setCardGroupId(res.cardGroupId);
+      } else {
+        const res = await savePlayerPhoto({
+          playerId: targetPlayerId,
+          // Only edit in place when saving back to the same card the editor
+          // opened (no assign target picked). Assigning to a chosen player inserts.
+          photoId: !targetKey ? initialPhotoId ?? undefined : undefined,
+          storagePath: frontPath,
+          publicUrl: frontUrlData.publicUrl,
+          backStoragePath,
+          backPublicUrl,
+          teamName: teamText,
+          season: seasonText || season || undefined,
+          teamId: (target ? target.teamId : teamId) ?? undefined,
+          cardDesign: buildDesign(),
+        });
+        if (res.error) throw new Error(res.error);
+      }
 
       // A draft that's now a real card → remove it from the drafts list.
       if (draftId) await deleteCardDraft(draftId).catch(() => {});
@@ -2906,6 +2973,34 @@ export default function CardEditor({
                 Remove
               </button>
             </div>
+            {/* Pick a teammate (links the card to that player) or type a name.
+                Options exclude the primary + other subjects, but keep this one's
+                own pick so it stays selected. */}
+            {teamRoster.length > 0 && (() => {
+              const taken = new Set(
+                [primaryPlayerId, ...extraSubjects.filter((e) => e.id !== s.id).map((e) => e.playerId)]
+                  .filter(Boolean) as string[]
+              );
+              const opts = teamRoster.filter((t) => !taken.has(t.id));
+              return (
+                <select
+                  value={s.playerId ?? ""}
+                  onChange={(e) => {
+                    const pid = e.target.value || null;
+                    const mate = pid ? teamRoster.find((t) => t.id === pid) : null;
+                    patchSubject(s.id, { playerId: pid, ...(mate ? { name: mate.firstName } : {}) });
+                  }}
+                  className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                >
+                  <option value="">— Teammate (or type a name) —</option>
+                  {opts.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.firstName} {t.lastName}
+                    </option>
+                  ))}
+                </select>
+              );
+            })()}
             <input
               value={s.name}
               onChange={(e) => patchSubject(s.id, { name: e.target.value })}
@@ -2959,7 +3054,12 @@ export default function CardEditor({
           <p className="text-xs text-gray-400 dark:text-gray-500">
             Make a group card: <strong>Add player (photo)</strong> gives each their own cutout, or
             upload one group photo and use <strong>Add name only</strong> to add each player&apos;s
-            name &amp; signature.
+            name &amp; signature. Pick teammates from the dropdown to save the card to all of them.
+          </p>
+        )}
+        {featuredPlayerIds.length >= 2 && (
+          <p className="text-xs text-green-600 dark:text-green-400">
+            This card will be saved to {featuredPlayerIds.length} players&apos; galleries.
           </p>
         )}
       </div>
