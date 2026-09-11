@@ -12,6 +12,7 @@ export interface Team {
   snack_signup_url: string | null;
   snack_signup_enabled: boolean;
   snack_slots_per_game: number;
+  assistant_coach_parent_ids?: string[];
   created_at: string;
 }
 
@@ -201,6 +202,9 @@ export interface CardDesign {
   signature?: CardSignature | null;
   // Optional team logo placed on the front. Absent = no logo.
   logo?: CardLogo | null;
+  // Optional team logo placed on the BACK — reuses the front logo's image, but
+  // carries its own independent placement. Absent = no back logo.
+  back_logo?: CardLogo | null;
 }
 
 export interface CardBackDesign {

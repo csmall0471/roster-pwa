@@ -241,93 +241,6 @@ export async function compositeSticker(L: StickerLayers): Promise<Blob> {
   return pngBlobWithDpi(canvas.toDataURL("image/png"), STICKER_DPI);
 }
 
-// ── Raised Foil export (separate from the normal PNG path) ─────────────────
-
-// OR a captured layer's alpha silhouette onto the (white-on-black) mask: every
-// pixel the source actually paints becomes solid foil ink. A 0.5 alpha cut-off
-// keeps hard letterform/plate edges and drops soft drop-shadows.
-function stampSilhouette(
-  mctx: CanvasRenderingContext2D,
-  src: CanvasImageSource,
-  outW: number,
-  outH: number
-) {
-  const off = document.createElement("canvas");
-  off.width = outW;
-  off.height = outH;
-  off.getContext("2d")!.drawImage(src, 0, 0, outW, outH);
-  const paint = off.getContext("2d")!.getImageData(0, 0, outW, outH).data;
-  const cur = mctx.getImageData(0, 0, outW, outH);
-  const d = cur.data;
-  for (let i = 0; i < paint.length; i += 4) {
-    if (paint[i + 3] > 128) {
-      d[i] = d[i + 1] = d[i + 2] = 255;
-      d[i + 3] = 255;
-    }
-  }
-  mctx.putImageData(cur, 0, 0);
-}
-
-export type FoilMaskInput = {
-  overlayEl: HTMLElement; // the front overlay layer (name/plate/jersey/stamp)
-  selected: Set<string>; // which data-foil keys (+ "signature") are foiled
-  sigSrc?: string | null;
-  sig?: { x: number; y: number; rotation: number; widthFrac: number };
-  landscape?: boolean;
-};
-
-// Build the foil mask: white where the toggled elements paint, black elsewhere.
-// The overlay foil elements are captured in one pass, filtered by data-foil so
-// only the selected ones survive; the signature (its own raster) is stamped
-// with the same transform the front compositor uses, to stay in register.
-export async function compositeFoilMaskCanvas(
-  M: FoilMaskInput,
-  outW: number = W
-): Promise<HTMLCanvasElement> {
-  const outH = outHeight(outW, M.landscape);
-  const mask = document.createElement("canvas");
-  mask.width = outW;
-  mask.height = outH;
-  const mctx = mask.getContext("2d")!;
-  mctx.fillStyle = "#000";
-  mctx.fillRect(0, 0, outW, outH);
-
-  if ([...M.selected].some((k) => k !== "signature")) {
-    const rect = M.overlayEl.getBoundingClientRect();
-    const cap = await toCanvas(M.overlayEl, {
-      pixelRatio: outW / (rect.width || outW),
-      filter: (node) => {
-        const foil = (node as HTMLElement).dataset?.foil;
-        return !foil || M.selected.has(foil);
-      },
-    });
-    stampSilhouette(mctx, cap, outW, outH);
-  }
-
-  if (M.selected.has("signature") && M.sigSrc && M.sig) {
-    const img = await loadImage(M.sigSrc);
-    if (img.naturalWidth) {
-      const tmp = document.createElement("canvas");
-      tmp.width = outW;
-      tmp.height = outH;
-      const tctx = tmp.getContext("2d")!;
-      const boxW = M.sig.widthFrac * outW;
-      const boxH = boxW * (img.naturalHeight / img.naturalWidth);
-      const r = Math.min(boxW / img.naturalWidth, boxH / img.naturalHeight);
-      const dw = img.naturalWidth * r;
-      const dh = img.naturalHeight * r;
-      tctx.save();
-      tctx.translate(M.sig.x * outW, M.sig.y * outH);
-      tctx.rotate((M.sig.rotation * Math.PI) / 180);
-      tctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-      tctx.restore();
-      stampSilhouette(mctx, tmp, outW, outH);
-    }
-  }
-
-  return mask;
-}
-
 export type BackLayers = {
   backEl: HTMLElement; // CardBack root (captured whole; raster layers redrawn on top)
   headshotSrc: string | null;
@@ -336,6 +249,9 @@ export type BackLayers = {
   // Duo/trio "duo match" pro photos, index-aligned with the [data-duo-photo]
   // boxes on the duo back. Empty/absent for a solo card.
   duoPhotos?: string[];
+  // Optional team logo on the back — same centered/contained/rotated draw as the
+  // front logo (drawn from stored fractions, not the captured DOM).
+  logo?: FrontSig | null;
   landscape?: boolean;
 };
 
@@ -477,6 +393,9 @@ async function compositeBackCanvas(
       );
     }
   }
+
+  // 5. Team logo on the back — drawn last (on top), from stored fractions.
+  if (L.logo) await drawSig(ctx, L.logo, outW, outH);
 
   return canvas;
 }

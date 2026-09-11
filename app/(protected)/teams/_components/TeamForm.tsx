@@ -8,13 +8,16 @@ import type { Team } from "@/lib/types";
 interface Props {
   team?: Team;
   action: (prev: TeamFormState, formData: FormData) => Promise<TeamFormState>;
+  /** Parents on this team's roster, available to pick as assistant coaches. */
+  teamParents?: Array<{ id: string; first_name: string; last_name: string }>;
 }
 
 const SPORTS = ["Basketball", "Soccer", "Baseball", "Softball", "Volleyball", "Flag Football", "Lacrosse", "Other"];
 const ORGS   = ["CCV", "I9", "Jr. Suns", "Wholistic"];
 
-export default function TeamForm({ team, action }: Props) {
+export default function TeamForm({ team, action, teamParents = [] }: Props) {
   const [state, formAction, pending] = useActionState(action, null);
+  const selectedCoaches = new Set(team?.assistant_coach_parent_ids ?? []);
 
   return (
     <form action={formAction} className="space-y-5">
@@ -156,6 +159,39 @@ export default function TeamForm({ team, action }: Props) {
           className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
+
+      {/* Assistant coaches — picked from the parents on this team's roster */}
+      {team && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Assistant coaches
+          </label>
+          {teamParents.length === 0 ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              No parents on this team yet. Add players (and their parents) to the
+              roster, then come back to pick assistant coaches.
+            </p>
+          ) : (
+            <div className="space-y-1.5 rounded-lg border border-gray-300 dark:border-gray-600 p-3 max-h-56 overflow-y-auto">
+              {teamParents.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                  <input
+                    type="checkbox"
+                    name="assistant_coach_parent_ids"
+                    value={p.id}
+                    defaultChecked={selectedCoaches.has(p.id)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  {p.first_name} {p.last_name}
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+            Chosen from parents with a kid on this team.
+          </p>
+        </div>
+      )}
 
       {state?.error && (
         <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950 dark:text-red-400 rounded-lg px-3 py-2">

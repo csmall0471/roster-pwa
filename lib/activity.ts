@@ -29,7 +29,6 @@ export type ActivityEvent =
   | "card_save_failed"
   | "card_downloaded"
   | "card_sticker_downloaded"
-  | "card_foil_exported"
   | "player_photo_updated"
   | "card_signature_added"
   | "card_headshot_added"

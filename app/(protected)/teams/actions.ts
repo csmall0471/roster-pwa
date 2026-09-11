@@ -19,6 +19,7 @@ function parseTeamFields(formData: FormData) {
     season_end:   (formData.get("season_end") as string) || null,
     mojo_code:        (formData.get("mojo_code") as string)?.trim() || null,
     snack_signup_url: (formData.get("snack_signup_url") as string)?.trim() || null,
+    assistant_coach_parent_ids: formData.getAll("assistant_coach_parent_ids") as string[],
   };
 }
 

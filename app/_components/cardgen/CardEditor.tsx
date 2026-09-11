@@ -38,10 +38,8 @@ import {
 import {
   compositeFront,
   compositeBack,
-  compositeFoilMaskCanvas,
   compositeSticker,
 } from "./card-raster";
-import { addPrintBleed, EXPORT_TRIM_W, EXPORT_TRIM_H } from "@/lib/cardgen/print-bleed";
 import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign, CardSubject, CardOrientation } from "@/lib/types";
 
@@ -53,6 +51,10 @@ const STICKER_SIG_BASE_WIDTH = 0.38;
 // 1 (the resize slider/pinch multiplies it). Shared by the preview + export so
 // the placement carries over pixel-for-pixel.
 const LOGO_BASE_WIDTH = 0.28;
+
+// The head coach pre-filled on a NEW card (the owner). Reopened cards keep their
+// saved value; clear the field on the card to drop it.
+const DEFAULT_HEAD_COACH = "Connor Small";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -94,6 +96,9 @@ type Props = {
   // Which sport the card starts styled for (usually the team's sport). A saved
   // design's own `sport` wins; falls back to this, then basketball.
   defaultSport?: CardSport;
+  // Assistant coaches assigned to the team (resolved to names), pre-filled on a
+  // NEW card's back. A reopened card's saved value wins.
+  defaultAssistantCoaches?: string | null;
 };
 
 export type AssignTarget = {
@@ -232,7 +237,7 @@ function downloadFile(file: File) {
 //
 // IMPORTANT: navigator.share() only works while the click that triggered it
 // still holds "transient activation" (~5s). Exports that render first — the
-// all-backgrounds sheet, serialized sets, the foil PDF — blow past that window,
+// all-backgrounds sheet, serialized sets — blow past that window,
 // so share() rejects with NotAllowedError ("not allowed by the user agent…").
 // We must not surface that: fall back to a download instead. A genuine user
 // cancel (AbortError) is respected — no download, no error.
@@ -263,14 +268,6 @@ async function shareFile(blob: Blob, name: string) {
   await deliverFiles([new File([blob], name, { type: blob.type || "image/png" })]);
 }
 
-function canvasToPngBlob(c: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) =>
-    c.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error("canvas toBlob failed"))),
-      "image/png"
-    )
-  );
-}
 
 // One tile of the background contact sheet.
 type SheetTile = {
@@ -462,6 +459,7 @@ export default function CardEditor({
   draftId,
   initialAssignKey,
   defaultSport,
+  defaultAssistantCoaches,
 }: Props) {
   const router = useRouter();
 
@@ -571,6 +569,16 @@ export default function CardEditor({
   const logoImgRef = useRef<HTMLDivElement>(null);
   const logoFileRef = useRef<HTMLInputElement>(null);
 
+  // Back logo — the SAME image as the front logo (logoUrl), with its own
+  // independent placement on the back. Toggled on/off; dragged on the back stage.
+  const [showLogoBack, setShowLogoBack] = useState(!!initialDesign?.back_logo);
+  const [logoBackX, setLogoBackX] = useState(initialDesign?.back_logo?.x ?? 0.5);
+  const [logoBackY, setLogoBackY] = useState(initialDesign?.back_logo?.y ?? 0.5);
+  const [logoBackScale, setLogoBackScale] = useState(initialDesign?.back_logo?.scale ?? 1);
+  const [logoBackRotation, setLogoBackRotation] = useState(initialDesign?.back_logo?.rotation ?? 0);
+  const backLogoRef = useRef<HTMLDivElement>(null);
+  const backLogoDrag = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+
   // ── Duo/trio: additional players ────────────────────────────
   // Extra subjects beyond the primary player. Placement/gestures route to
   // whichever subject is selected ("main" = the primary). Empty = a solo card,
@@ -636,18 +644,6 @@ export default function CardEditor({
   const [exportingSerials, setExportingSerials] = useState(false);
   const [serialProgress, setSerialProgress] = useState(0);
 
-  // Raised Foil export — which front elements get the RUVgold spot channel.
-  // Empty set = nothing foiled (the export button stays disabled).
-  const [foilOn, setFoilOn] = useState<Set<string>>(() => new Set());
-  const [foilPending, setFoilPending] = useState(false);
-  const toggleFoil = (key: string) =>
-    setFoilOn((s) => {
-      const next = new Set(s);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-
   const [tab, setTab] = useState<"photo" | "bg" | "text">("photo");
   const [side, setSide] = useState<"front" | "back">("front");
 
@@ -655,6 +651,11 @@ export default function CardEditor({
   const initBack = initialDesign?.back;
   const [stats, setStats] = useState<BackStats>(() => ({
     ...EMPTY_STATS,
+    // Default the owner as head coach + the team's assistant coaches on new
+    // cards; a reopened card's saved stats (spread below) win, so these never
+    // override an existing value.
+    coach: DEFAULT_HEAD_COACH,
+    assistant_coaches: defaultAssistantCoaches ?? "",
     jersey: jersey ?? "",
     age: playerAge ?? "",
     ...initBack?.stats,
@@ -1058,16 +1059,22 @@ export default function CardEditor({
 
     // Route to an extra subject when one asked for the pad; else the primary.
     if (targetId) {
-      setExtraData((p) => ({ ...p, [targetId]: { ...p[targetId], sig: sig.dataUrl } })); // instant render
+      // Group cards keep one shared signature color (the primary's) — render the
+      // drawn strokes in that color instead of whatever the pad returned.
+      const shared = sigColor;
+      const dataUrl = sig.strokes.length
+        ? renderSignaturePng(sig.strokes, shared, sig.thickness)
+        : sig.dataUrl;
+      setExtraData((p) => ({ ...p, [targetId]: { ...p[targetId], sig: dataUrl } })); // instant render
       setExtraSubjects((arr) =>
         arr.map((e) =>
           e.id === targetId
-            ? { ...e, sigStrokes: sig.strokes, sigColor: sig.color, sigThickness: sig.thickness }
+            ? { ...e, sigStrokes: sig.strokes, sigColor: shared, sigThickness: sig.thickness }
             : e
         )
       );
       try {
-        const url = await uploadSignatureData(sig.dataUrl);
+        const url = await uploadSignatureData(dataUrl);
         setExtraSubjects((arr) => arr.map((e) => (e.id === targetId ? { ...e, sigUrl: url } : e)));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -1079,18 +1086,48 @@ export default function CardEditor({
     setSigColor(sig.color);
     setSigThickness(sig.thickness);
     setSigDataUrl(sig.dataUrl); // instant render
+    // Bring every group-card signature to the primary's (new) color.
+    recolorExtraSignatures(sig.color);
     await uploadSignature(sig.dataUrl);
   }
 
   // Recolor / re-thicken the existing signature from its retained strokes — no
   // redraw. Preview updates instantly; the re-upload (for persistence) is
   // debounced so dragging a slider doesn't spam storage.
+  // On a group card, every player's signature shares ONE color (the primary's).
+  // Re-render each extra player's signature at the new color (keeping their own
+  // thickness), update the preview mirror, and re-upload for persistence.
+  function recolorExtraSignatures(color: string) {
+    const updates = extraSubjects
+      .filter((e) => e.sigStrokes)
+      .map((e) => ({ id: e.id, dataUrl: renderSignaturePng(e.sigStrokes!, color, e.sigThickness) }));
+    if (!updates.length) return;
+    setExtraData((p) => {
+      const next = { ...p };
+      for (const u of updates) next[u.id] = { ...next[u.id], sig: u.dataUrl };
+      return next;
+    });
+    setExtraSubjects((arr) =>
+      arr.map((e) => (updates.some((u) => u.id === e.id) ? { ...e, sigColor: color } : e))
+    );
+    for (const u of updates) {
+      uploadSignatureData(u.dataUrl)
+        .then((url) =>
+          setExtraSubjects((arr) => arr.map((e) => (e.id === u.id ? { ...e, sigUrl: url } : e)))
+        )
+        .catch(() => {});
+    }
+  }
+
   function restyleSignature(color: string, thickness: number) {
     if (!sigStrokes) return;
+    const colorChanged = color !== sigColor;
     setSigColor(color);
     setSigThickness(thickness);
     const dataUrl = renderSignaturePng(sigStrokes, color, thickness);
     setSigDataUrl(dataUrl);
+    // Keep every group-card signature the same color as the primary.
+    if (colorChanged) recolorExtraSignatures(color);
     if (sigUploadTimer.current) clearTimeout(sigUploadTimer.current);
     sigUploadTimer.current = setTimeout(() => {
       uploadSignature(dataUrl).catch(() => {});
@@ -1424,6 +1461,25 @@ export default function CardEditor({
     setLogoDataUrl(null);
   }
 
+  // Back-logo drag — one finger moves it within the back card; size/rotation are
+  // set by sliders. Fractions are relative to the back card box (backStageRef).
+  function onBackLogoPointerDown(e: React.PointerEvent) {
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    backLogoDrag.current = { px: e.clientX, py: e.clientY, x: logoBackX, y: logoBackY };
+  }
+  function onBackLogoPointerMove(e: React.PointerEvent) {
+    const d = backLogoDrag.current;
+    if (!d) return;
+    const rect = backStageRef.current?.getBoundingClientRect();
+    const w = rect?.width ?? 1;
+    const h = rect?.height ?? 1;
+    setLogoBackX(Math.max(0, Math.min(1, d.x + (e.clientX - d.px) / w)));
+    setLogoBackY(Math.max(0, Math.min(1, d.y + (e.clientY - d.py) / h)));
+  }
+  function onBackLogoPointerUp() {
+    backLogoDrag.current = null;
+  }
+
   // ── AI helpers (back side) ──────────────────────────────────
 
   async function handleGenerateScouting() {
@@ -1559,6 +1615,17 @@ export default function CardEditor({
         widthFrac: LOGO_BASE_WIDTH * logoScale,
       }
     : null;
+  // Back logo — same image as the front, its own placement. Null when off.
+  const backLogoLayer =
+    showLogoBack && (logoDataUrl ?? logoUrl)
+      ? {
+          src: (logoDataUrl ?? logoUrl) as string,
+          x: logoBackX,
+          y: logoBackY,
+          rotation: logoBackRotation,
+          widthFrac: LOGO_BASE_WIDTH * logoBackScale,
+        }
+      : null;
   const duoItems = duoQuestions
     .map((q) => ({ q, a: (duoAnswers[q] ?? "").trim() }))
     .filter((it) => it.a);
@@ -1585,6 +1652,7 @@ export default function CardEditor({
           headshot: { posX: headshotPosX, posY: headshotPosY },
           lookalikeSrc: isDuo ? null : lookAlikePhoto,
           duoPhotos: isDuo ? duoMatchPhotos : undefined,
+          logo: backLogoLayer,
           landscape,
         })
       : frontBlob;
@@ -1675,6 +1743,10 @@ export default function CardEditor({
       logo: logoUrl
         ? { url: logoUrl, x: logoX, y: logoY, scale: logoScale, rotation: logoRotation }
         : null,
+      back_logo:
+        showLogoBack && logoUrl
+          ? { url: logoUrl, x: logoBackX, y: logoBackY, scale: logoBackScale, rotation: logoBackRotation }
+          : null,
     };
   }
 
@@ -1791,92 +1863,6 @@ export default function CardEditor({
   function resetStickerLayer() {
     if (stkActive === "sig") setStkSig({ x: 0.5, y: 0.59, scale: 1 });
     else setStkPhoto(null); // back to following the card photo
-  }
-
-  // Export a print-ready Raised Foil PDF: the card art in CMYK plus a RUVgold
-  // spot channel masking the toggled front elements. The server assembles it
-  // (sharp + pdf-lib); here we just render the base art and the foil mask in
-  // register, add bleed, and POST them. Separate from the normal PNG download.
-  async function handleFoilPdf() {
-    if (!stageRef.current || !cutoutUrl || foilPending || foilOn.size === 0)
-      return;
-    setFoilPending(true);
-    setError(null);
-    setNotice(null);
-    try {
-      if ("fonts" in document) await (document as Document).fonts.ready;
-      await Promise.all([
-        preloadImage(cutoutDataUrl),
-        preloadImage(sigDataUrl ?? sigUrl),
-      ]);
-      const sig = {
-        x: sigX,
-        y: sigY,
-        rotation: sigRotation,
-        widthFrac: 0.38 * sigScale,
-      };
-      // High-res trim (2.5×3.5) base art + foil mask, rendered from the same
-      // layers so they line up pixel-for-pixel.
-      const trimW = landscape ? EXPORT_TRIM_H : EXPORT_TRIM_W;
-      const baseCanvas = await compositeFrontCanvas(
-        {
-          bgEl: bgLayerRef.current!,
-          overlayEl: overlayLayerRef.current!,
-          cutoutSrc: cutoutDataUrl,
-          cutout: { tx, ty, scale, rotation },
-          sigSrc: sigDataUrl ?? sigUrl,
-          sig,
-          extraCutouts: extraCutoutLayers,
-          extraSigs: extraSigLayers,
-          logo: logoLayer,
-          landscape,
-        },
-        trimW
-      );
-      const maskCanvas = await compositeFoilMaskCanvas(
-        {
-          overlayEl: overlayLayerRef.current!,
-          selected: foilOn,
-          sigSrc: sigDataUrl ?? sigUrl,
-          sig,
-          landscape,
-        },
-        trimW
-      );
-      // Center each in the 2.6×3.6" (910×1260 @ 350 DPI) bleed canvas, edges
-      // extended into the bleed so the two stay in register.
-      const base = addPrintBleed(baseCanvas);
-      const mask = addPrintBleed(maskCanvas);
-      const [baseBlob, maskBlob] = await Promise.all([
-        canvasToPngBlob(base),
-        canvasToPngBlob(mask),
-      ]);
-      const nameBase =
-        (firstName || nameL1 || "card").toLowerCase().replace(/\s+/g, "-") ||
-        "card";
-      const form = new FormData();
-      form.append("base", baseBlob, "base.png");
-      form.append("mask", maskBlob, "mask.png");
-      form.append("widthIn", "2.6");
-      form.append("heightIn", "3.6");
-      form.append("spot", "RUVgold");
-      form.append("filename", nameBase);
-      const res = await fetch("/tools/card-creator/foil-pdf", {
-        method: "POST",
-        body: form,
-      });
-      if (!res.ok)
-        throw new Error((await res.text()) || `Export failed (${res.status})`);
-      await shareFile(await res.blob(), `${nameBase}-RUVgold.pdf`);
-      const elements = [...foilOn].sort().join(",");
-      track("card_foil_exported", { elements });
-      logClientActivity("card_foil_exported", { elements }).catch(() => {});
-      setNotice("Raised Foil PDF exported (RUVgold spot channel).");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setFoilPending(false);
-    }
   }
 
   // Render the front on EVERY background template and tile them into one
@@ -2018,6 +2004,7 @@ export default function CardEditor({
           headshot: { posX: headshotPosX, posY: headshotPosY },
           lookalikeSrc: isDuo ? null : lookAlikePhoto,
           duoPhotos: isDuo ? duoMatchPhotos : undefined,
+          logo: backLogoLayer,
           landscape,
         });
         entries.push({
@@ -2391,11 +2378,12 @@ export default function CardEditor({
           rasterizable. overflow-hidden contains the offscreen stage so the page
           can't scroll sideways. scroll-mt offsets the sticky header on auto-scroll. */}
       <div ref={stageWrapRef} className="relative w-full overflow-hidden scroll-mt-20">
-        {/* Back stage (offscreen when not active) */}
+        {/* Back stage (offscreen when not active). Relative when active so the
+            back-logo overlay can position over the card. */}
         <div
           style={
             side === "back"
-              ? undefined
+              ? { position: "relative" }
               : { position: "absolute", left: -99999, top: 0, width: "100%" }
           }
         >
@@ -2413,6 +2401,8 @@ export default function CardEditor({
               matchBlurb={duoMatchBlurb}
               matchPhotos={duoMatchPhotos}
               matchLabel={extraSubjects.length >= 2 ? "SQUAD MATCH" : "DUO MATCH"}
+              coach={stats.coach}
+              assistantCoaches={stats.assistant_coaches}
             />
           ) : (
             <CardBack
@@ -2437,6 +2427,36 @@ export default function CardEditor({
               onHeadshotPointerMove={onHeadshotPointerMove}
               onHeadshotPointerUp={onHeadshotPointerUp}
             />
+          )}
+          {/* Back logo overlay — reuses the front logo image, dragged into its
+              own spot on the back. Drawn onto the canvas at export via
+              backLogoLayer (from fractions, not captured from the DOM). */}
+          {showLogoBack && (logoDataUrl ?? logoUrl) && (
+            <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+              <div
+                ref={backLogoRef}
+                onPointerDown={onBackLogoPointerDown}
+                onPointerMove={onBackLogoPointerMove}
+                onPointerUp={onBackLogoPointerUp}
+                onPointerCancel={onBackLogoPointerUp}
+                style={{
+                  position: "absolute",
+                  left: `${logoBackX * 100}%`,
+                  top: `${logoBackY * 100}%`,
+                  width: `${LOGO_BASE_WIDTH * logoBackScale * 100}%`,
+                  aspectRatio: `${logoAspect}`,
+                  transform: `translate(-50%, -50%) rotate(${logoBackRotation}deg)`,
+                  backgroundImage: `url(${logoDataUrl ?? logoUrl})`,
+                  backgroundSize: "contain",
+                  backgroundPosition: "center",
+                  backgroundRepeat: "no-repeat",
+                  pointerEvents: "auto",
+                  touchAction: "none",
+                  cursor: "grab",
+                  zIndex: 6,
+                }}
+              />
+            </div>
           )}
         </div>
 
@@ -2514,7 +2534,6 @@ export default function CardEditor({
         {/* Jersey number badge — top right. */}
         {stats.jersey && (
           <div
-            data-foil="jersey"
             style={{
               position: "absolute",
               top: "6%",
@@ -2544,7 +2563,6 @@ export default function CardEditor({
             left edge (full-bleed), but the text is inset so print trim can't
             clip it. */}
         <div
-          data-foil="team"
           style={{
             position: "absolute",
             top: "6.5%",
@@ -2593,7 +2611,6 @@ export default function CardEditor({
 
         {/* Player name */}
         <div
-          data-foil="name"
           style={{
             position: "absolute",
             left: "8%",
@@ -2628,7 +2645,6 @@ export default function CardEditor({
             no jersey). Part of the overlay layer, so it exports automatically. */}
         {circulation.trim() && (
           <div
-            data-foil="stamp"
             style={{
               position: "absolute",
               top: stats.jersey ? "18.5%" : "6.5%",
@@ -3632,6 +3648,31 @@ export default function CardEditor({
                 </p>
               </Field>
             </div>
+
+            {/* Coaching staff — shown on the group card back too. */}
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1.5">
+                Coaching staff <span className="font-normal normal-case">(optional)</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Coach">
+                  <input
+                    value={stats.coach}
+                    onChange={(e) => patchStats({ coach: e.target.value })}
+                    placeholder="Coach Dave"
+                    className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                </Field>
+                <Field label="Assistant coaches">
+                  <input
+                    value={stats.assistant_coaches}
+                    onChange={(e) => patchStats({ assistant_coaches: e.target.value })}
+                    placeholder="Mike, Sarah"
+                    className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                </Field>
+              </div>
+            </div>
           </div>
         )}
 
@@ -3895,6 +3936,81 @@ export default function CardEditor({
             </Field>
           </div>
         )}
+
+        {/* Back logo — reuse the front logo image, placed independently on the
+            back. Available on both solo and group cards. */}
+        {side === "back" && (
+          <div className="p-3">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                  Logo on back
+                </span>
+                {(logoDataUrl ?? logoUrl) ? (
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={showLogoBack}
+                      onChange={(e) => setShowLogoBack(e.target.checked)}
+                      className="accent-blue-600"
+                    />
+                    Show
+                  </label>
+                ) : (
+                  <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                    Add a logo first (Background tab)
+                  </span>
+                )}
+              </div>
+              {(logoDataUrl ?? logoUrl) && showLogoBack && (
+                <>
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                    Same logo as the front. Drag it on the card to move.
+                  </p>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-gray-400">
+                      Size: {Math.round(logoBackScale * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min={0.3}
+                      max={2.5}
+                      step={0.02}
+                      value={logoBackScale}
+                      onChange={(e) => setLogoBackScale(parseFloat(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-gray-400">
+                      Rotation: {Math.round(logoBackRotation)}°
+                    </label>
+                    <input
+                      type="range"
+                      min={-180}
+                      max={180}
+                      step={1}
+                      value={logoBackRotation}
+                      onChange={(e) => setLogoBackRotation(parseFloat(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      setLogoBackX(0.5);
+                      setLogoBackY(0.5);
+                      setLogoBackScale(1);
+                      setLogoBackRotation(0);
+                    }}
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Reset logo position
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Assign / Save */}
@@ -3938,7 +4054,9 @@ export default function CardEditor({
         {/* 2" round die-cut sticker — the photo + name (and signature / team ·
             season if present) on the card's background. Exported as a 2.325"
             square with bleed at 350 DPI; the printer cuts the 2" circle out. The
-            preview's corners show what the die-cut removes. */}
+            preview's corners show what the die-cut removes. Single-subject only,
+            so it's hidden on group (duo/trio) cards. */}
+        {!isDuo && (
         <div className="w-full space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
@@ -4251,69 +4369,7 @@ export default function CardEditor({
             {stickerBusy ? "Preparing…" : '⬇︎ Export 2" sticker'}
           </button>
         </div>
-
-        {/* Raised Foil export — a print-ready CMYK PDF with a RUVgold spot
-            channel over the toggled front elements. Separate from the PNG path. */}
-        <div className="w-full space-y-2 rounded-lg border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
-              Raised Foil PDF{" "}
-              <span className="font-normal normal-case text-amber-700/80 dark:text-amber-400/80">
-                — print-ready RUVgold spot channel
-              </span>
-            </p>
-            <p className="mt-0.5 text-[11px] text-amber-700/80 dark:text-amber-400/70">
-              Pick which front elements get raised foil.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {[
-              { key: "name", label: "Name", show: Boolean(nameL1 || nameL2) },
-              { key: "team", label: "Team plate", show: true },
-              { key: "jersey", label: "Jersey #", show: Boolean(stats.jersey) },
-              {
-                key: "stamp",
-                label: "Limited edition",
-                show: Boolean(circulation.trim()),
-              },
-              {
-                key: "signature",
-                label: "Signature",
-                show: Boolean(sigDataUrl ?? sigUrl),
-              },
-            ]
-              .filter((f) => f.show)
-              .map((f) => {
-                const on = foilOn.has(f.key);
-                return (
-                  <button
-                    key={f.key}
-                    type="button"
-                    onClick={() => toggleFoil(f.key)}
-                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                      on
-                        ? "border-amber-500 bg-amber-500 text-white"
-                        : "border-amber-300 bg-white text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-gray-900 dark:text-amber-300 dark:hover:bg-amber-950/50"
-                    }`}
-                  >
-                    {on ? "✓ " : ""}
-                    {f.label}
-                  </button>
-                );
-              })}
-          </div>
-          <button
-            onClick={handleFoilPdf}
-            disabled={!cutoutUrl || foilPending || foilOn.size === 0}
-            className="w-full rounded-lg border border-amber-400 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-950/70"
-          >
-            {foilPending
-              ? "Building PDF…"
-              : foilOn.size === 0
-                ? "Select foil elements above"
-                : "✨ Export Raised Foil PDF (RUVgold)"}
-          </button>
-        </div>
+        )}
 
         {allowDrafts && (
           <button

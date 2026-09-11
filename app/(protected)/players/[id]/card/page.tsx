@@ -14,6 +14,7 @@ type SeasonRow = {
     age_group: string | null;
     season_start: string | null;
     sport: string | null;
+    assistant_coach_parent_ids: string[] | null;
   } | null;
 };
 
@@ -42,7 +43,7 @@ export default async function PlayerCardPage({
 
   const { data: seasonsRaw } = await supabase
     .from("roster")
-    .select("status, team_id, jersey_number, teams(id, name, season, age_group, season_start, sport)")
+    .select("status, team_id, jersey_number, teams(id, name, season, age_group, season_start, sport, assistant_coach_parent_ids)")
     .eq("player_id", id)
     .order("created_at", { ascending: false });
   const seasons = (seasonsRaw ?? []) as unknown as (SeasonRow & {
@@ -56,6 +57,7 @@ export default async function PlayerCardPage({
   let ageGroup: string | null = null;
   let jersey: string | null = null;
   let teamSport: string | null = null;
+  let assistantCoachIds: string[] = [];
   if (teamIdParam) {
     const match = seasons.find((s) => s.teams?.id === teamIdParam);
     if (match?.teams) {
@@ -64,6 +66,7 @@ export default async function PlayerCardPage({
       season = match.teams.season ?? null;
       ageGroup = match.teams.age_group ?? null;
       teamSport = match.teams.sport ?? null;
+      assistantCoachIds = match.teams.assistant_coach_parent_ids ?? [];
       jersey = match.jersey_number != null ? String(match.jersey_number) : null;
     }
   }
@@ -76,8 +79,22 @@ export default async function PlayerCardPage({
       season = active.teams.season ?? null;
       ageGroup = active.teams.age_group ?? null;
       teamSport = active.teams.sport ?? null;
+      assistantCoachIds = active.teams.assistant_coach_parent_ids ?? [];
       jersey = active.jersey_number != null ? String(active.jersey_number) : null;
     }
+  }
+
+  // Resolve the team's assistant-coach parent ids to display names, to pre-fill
+  // the card's coaching staff on a new card.
+  let assistantCoaches: string | null = null;
+  if (assistantCoachIds.length) {
+    const { data: coachRows } = await supabase
+      .from("parents")
+      .select("id, first_name, last_name")
+      .in("id", assistantCoachIds);
+    const byId = new Map((coachRows ?? []).map((p) => [p.id, `${p.first_name} ${p.last_name}`.trim()]));
+    const names = assistantCoachIds.map((cid) => byId.get(cid)).filter(Boolean) as string[];
+    if (names.length) assistantCoaches = names.join(", ");
   }
 
   let playerAge: string | null = null;
@@ -167,6 +184,7 @@ export default async function PlayerCardPage({
           initialDesign={initialDesign}
           initialPhotoId={initialPhotoId}
           defaultSport={sportFromTeam(teamSport)}
+          defaultAssistantCoaches={assistantCoaches}
         />
       )}
     </div>

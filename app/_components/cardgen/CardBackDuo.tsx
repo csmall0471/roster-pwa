@@ -18,6 +18,9 @@ type Props = {
   matchBlurb?: string;
   matchPhotos?: string[]; // up to 2 pro photos (drawn on the canvas at export)
   matchLabel?: string; // section header, e.g. "DUO MATCH" / "SQUAD MATCH"
+  // Coaching staff (optional) — shown on the group card too.
+  coach?: string;
+  assistantCoaches?: string;
 };
 
 const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
@@ -33,6 +36,8 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
     matchBlurb,
     matchPhotos,
     matchLabel = "DUO MATCH",
+    coach,
+    assistantCoaches,
   },
   ref
 ) {
@@ -157,6 +162,22 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
           ))}
         </div>
 
+        {/* Coaching staff — a compact footer above the match banner. */}
+        {(coach || assistantCoaches) && (
+          <div
+            style={{
+              flex: "0 0 auto",
+              display: "flex",
+              gap: "7%",
+              borderTop: "1px solid rgba(255,255,255,0.18)",
+              paddingTop: "3%",
+            }}
+          >
+            {coach && <DuoCoachCell label="HEAD COACH" value={coach} />}
+            {assistantCoaches && <DuoCoachCell label="ASSISTANTS" value={assistantCoaches} />}
+          </div>
+        )}
+
         {/* Duo match — a famous pro pairing, mirroring the solo back's Player
             Match banner. Photos are drawn onto the canvas at export (iOS drops
             raster images from the html-to-image snapshot) via [data-duo-photo]. */}
@@ -236,5 +257,34 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
     </div>
   );
 });
+
+function DuoCoachCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div
+        style={{
+          fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
+          letterSpacing: "0.16em",
+          color: "#fbbf24",
+          fontWeight: 700,
+          marginBottom: "0.2em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontFamily: "var(--font-anton), Impact, sans-serif",
+          fontSize: "calc(var(--cardw, 22rem) * 3.4 / 100)",
+          lineHeight: 1.05,
+          letterSpacing: "0.02em",
+          color: "#fff",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
 
 export default CardBackDuo;
