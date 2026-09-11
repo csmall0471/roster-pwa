@@ -29,7 +29,7 @@ export default async function ParentCardCreatorPage() {
       supabase.from("players").select("id, first_name, last_name, date_of_birth").in("id", playerIds),
       supabase
         .from("roster")
-        .select("player_id, status, jersey_number, teams(id, name, season, age_group, season_start, season_end)")
+        .select("player_id, status, jersey_number, teams(id, name, season, age_group, season_start, season_end, sport)")
         .in("player_id", playerIds)
         .order("created_at", { ascending: false }),
     ]);

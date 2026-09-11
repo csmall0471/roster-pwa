@@ -1,4 +1,5 @@
 import type { AssignTarget } from "./CardEditor";
+import { sportFromTeam } from "./sports";
 
 // Builds the Card Creator's "assign to a player" targets from raw player +
 // roster rows. A kid on multiple ACTIVE teams gets one target per team (so all
@@ -23,6 +24,7 @@ type RosterRow = {
     age_group: string | null;
     season_start: string | null;
     season_end: string | null;
+    sport: string | null;
   } | null;
 };
 
@@ -83,6 +85,7 @@ export function toAssignTargets(players: PlayerRow[], rosterRows: RosterRow[]): 
         season: r.teams!.season ?? null,
         ageGroup: r.teams!.age_group ?? null,
         jersey: r.jersey_number != null ? String(r.jersey_number) : null,
+        sport: sportFromTeam(r.teams!.sport),
       });
     }
   }

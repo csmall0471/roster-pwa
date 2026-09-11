@@ -117,6 +117,9 @@ export type AssignTarget = {
   // The team's assistant coaches (resolved to names), pre-filled when this
   // target is picked. Null/absent = leave the current value alone.
   assistantCoaches?: string | null;
+  // The team's sport (basketball/football) — the card restyles to it when this
+  // target is picked.
+  sport?: CardSport;
 };
 
 const EMPTY_STATS: BackStats = {
@@ -2266,6 +2269,8 @@ export default function CardEditor({
     setTeamText((t.teamName || "").toUpperCase());
     setAgeText(t.ageGroup || "");
     setSeasonText(t.season || "");
+    // Restyle the card to the team's sport (backgrounds, positions, questions).
+    if (t.sport) changeSport(t.sport);
     setStats((s) => ({
       ...s,
       jersey: t.jersey || "",

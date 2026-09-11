@@ -43,7 +43,7 @@ export default async function CardCreatorPage({
     const { data: rosterRows } = await supabase
       .from("roster")
       .select(
-        "player_id, status, jersey_number, teams(id, name, season, age_group, season_start, season_end, assistant_coach_parent_ids)"
+        "player_id, status, jersey_number, teams(id, name, season, age_group, season_start, season_end, sport, assistant_coach_parent_ids)"
       )
       .in("player_id", ids)
       .order("created_at", { ascending: false });
