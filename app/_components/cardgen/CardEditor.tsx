@@ -15,7 +15,9 @@ import {
   removeBackground,
   generateScoutingReport,
   findLookalike,
+  findDuoLookalike,
   type LookalikeOption,
+  type DuoLookalikeOption,
 } from "@/app/actions/cardgen";
 import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
@@ -671,6 +673,18 @@ export default function CardEditor({
   const [lookAlikeOptions, setLookAlikeOptions] = useState<
     LookalikeOption[] | null
   >(null);
+  // Duo/trio "duo match" — the pair's famous-pairing match (analog of lookAlike),
+  // stored on CardDesign.duo.match. Photos are drawn on the canvas at export.
+  const [duoMatch, setDuoMatch] = useState(initialDesign?.duo?.match?.name ?? "");
+  const [duoMatchBlurb, setDuoMatchBlurb] = useState(
+    initialDesign?.duo?.match?.blurb ?? ""
+  );
+  const [duoMatchPhotos, setDuoMatchPhotos] = useState<string[]>(
+    initialDesign?.duo?.match?.photos ?? []
+  );
+  const [duoMatchOptions, setDuoMatchOptions] = useState<
+    DuoLookalikeOption[] | null
+  >(null);
   const [headshotUrl, setHeadshotUrl] = useState<string | null>(
     initBack?.headshot_url ?? null
   );
@@ -678,9 +692,9 @@ export default function CardEditor({
   // Object-position (0–100) so the headshot can be panned within its circle.
   const [headshotPosX, setHeadshotPosX] = useState(initBack?.headshot_x ?? 50);
   const [headshotPosY, setHeadshotPosY] = useState(initBack?.headshot_y ?? 50);
-  const [aiPending, setAiPending] = useState<null | "scouting" | "lookalike">(
-    null
-  );
+  const [aiPending, setAiPending] = useState<
+    null | "scouting" | "lookalike" | "duomatch"
+  >(null);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const stageWrapRef = useRef<HTMLDivElement>(null);
@@ -1465,6 +1479,39 @@ export default function CardEditor({
     logClientActivity("card_lookalike_generated", { name: opt.name }).catch(() => {});
   }
 
+  // Duo/trio "duo match" — the same idea as the solo look-alike but the AI
+  // suggests famous PAIRINGS (teammates/brothers) tailored to a duo. Uses the
+  // card's group/primary photo for the vibe reference.
+  async function handleFindDuoMatch() {
+    if (!cutoutUrl) return;
+    setAiPending("duomatch");
+    setError(null);
+    try {
+      const res = await findDuoLookalike(cutoutUrl, {
+        names: [nameL1, ...extraSubjects.map((s) => s.name)].filter(Boolean),
+        sport,
+        scoutingReport,
+      });
+      if (res.error) throw new Error(res.error);
+      if (res.options && res.options.length) {
+        setDuoMatchOptions(res.options);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiPending(null);
+    }
+  }
+
+  function applyDuoMatch(opt: DuoLookalikeOption) {
+    setDuoMatch(opt.name);
+    setDuoMatchBlurb(opt.blurb ?? "");
+    setDuoMatchPhotos(opt.photos ?? []);
+    setDuoMatchOptions(null);
+    track("card_lookalike_generated", { name: opt.name });
+    logClientActivity("card_lookalike_generated", { name: opt.name }).catch(() => {});
+  }
+
   // ── Save ────────────────────────────────────────────────────
 
   // Composite both card sides to true 2.5"×3.5" PNG blobs (canvas drawImage for
@@ -1519,10 +1566,12 @@ export default function CardEditor({
     const backBlob = backStageRef.current
       ? await compositeBack({
           backEl: backStageRef.current,
-          // The duo back has no headshot / plays-like raster — capture DOM only.
+          // Solo back: headshot + single plays-like photo. Duo back: no headshot
+          // and the duo-match pro photos instead of the single look-alike.
           headshotSrc: isDuo ? null : headshotDataUrl ?? headshotUrl,
           headshot: { posX: headshotPosX, posY: headshotPosY },
           lookalikeSrc: isDuo ? null : lookAlikePhoto,
+          duoPhotos: isDuo ? duoMatchPhotos : undefined,
           landscape,
         })
       : frontBlob;
@@ -1553,7 +1602,23 @@ export default function CardEditor({
       sport,
       ...(landscape ? { orientation } : {}),
       ...(extra_subjects.length ? { extra_subjects } : {}),
-      ...(isDuo ? { duo: { questions: duoQuestions, answers: duoAnswers } } : {}),
+      ...(isDuo
+        ? {
+            duo: {
+              questions: duoQuestions,
+              answers: duoAnswers,
+              ...(duoMatch.trim()
+                ? {
+                    match: {
+                      name: duoMatch,
+                      blurb: duoMatchBlurb || undefined,
+                      photos: duoMatchPhotos,
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
       background: bg,
       transform: { x: tx, y: ty, scale, rotation },
       text: {
@@ -1939,6 +2004,7 @@ export default function CardEditor({
           headshotSrc: isDuo ? null : headshotDataUrl ?? headshotUrl,
           headshot: { posX: headshotPosX, posY: headshotPosY },
           lookalikeSrc: isDuo ? null : lookAlikePhoto,
+          duoPhotos: isDuo ? duoMatchPhotos : undefined,
           landscape,
         });
         entries.push({
@@ -2330,6 +2396,10 @@ export default function CardEditor({
               seasonText={seasonText}
               namesTitle={namesTitle}
               items={duoItems}
+              matchName={duoMatch}
+              matchBlurb={duoMatchBlurb}
+              matchPhotos={duoMatchPhotos}
+              matchLabel={extraSubjects.length >= 2 ? "SQUAD MATCH" : "DUO MATCH"}
             />
           ) : (
             <CardBack
@@ -3488,6 +3558,34 @@ export default function CardEditor({
             >
               + Add question
             </button>
+
+            {/* Duo match — the pair's famous-pairing "plays like". */}
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+              <Field label={extraSubjects.length >= 2 ? "Squad match" : "Duo match"}>
+                <input
+                  value={duoMatch}
+                  onChange={(e) => {
+                    setDuoMatch(e.target.value);
+                    setDuoMatchPhotos([]); // typed name → drop AI photos
+                    setDuoMatchBlurb("");
+                  }}
+                  placeholder="Curry & Thompson"
+                  className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                />
+                <button
+                  onClick={handleFindDuoMatch}
+                  disabled={aiPending !== null || !cutoutUrl}
+                  className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                >
+                  {aiPending === "duomatch"
+                    ? "Finding…"
+                    : "✨ Find a duo match (pick from 8)"}
+                </button>
+                <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+                  Suggests famous pro pairings — teammates or brothers — that match your {extraSubjects.length >= 2 ? "group" : "duo"}.
+                </p>
+              </Field>
+            </div>
           </div>
         )}
 
@@ -4258,6 +4356,79 @@ export default function CardEditor({
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
               >
                 {aiPending === "lookalike" ? "Finding…" : "🔄 Show 10 different players"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duo-match picker — like the solo one, but each option is a PAIR with up
+          to two pro photos. */}
+      {duoMatchOptions && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                  Pick a duo match
+                </h3>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Tap a famous pairing to add it to the card.
+                </p>
+              </div>
+              <button
+                onClick={() => setDuoMatchOptions(null)}
+                className="text-xs font-medium text-gray-400 hover:text-gray-600"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-2 overflow-y-auto p-4">
+              {duoMatchOptions.map((o) => (
+                <button
+                  key={o.name}
+                  onClick={() => applyDuoMatch(o)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-700 p-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                >
+                  <div className="flex shrink-0 -space-x-3">
+                    {(o.photos && o.photos.length
+                      ? o.photos.slice(0, 2)
+                      : [null, null]
+                    ).map((p, i) => (
+                      <div
+                        key={i}
+                        className="h-11 w-11 rounded-full border-2 border-white dark:border-gray-900 bg-gray-100 dark:bg-gray-800 bg-cover ring-1 ring-gray-200 dark:ring-gray-700"
+                        style={
+                          p
+                            ? {
+                                backgroundImage: `url(${p})`,
+                                backgroundPosition: "center 22%",
+                              }
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                      {o.name}
+                    </div>
+                    {o.blurb && (
+                      <div className="line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
+                        {o.blurb}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="border-t border-gray-200 dark:border-gray-700 p-3">
+              <button
+                onClick={handleFindDuoMatch}
+                disabled={aiPending !== null}
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                {aiPending === "duomatch" ? "Finding…" : "🔄 Show 8 different duos"}
               </button>
             </div>
           </div>

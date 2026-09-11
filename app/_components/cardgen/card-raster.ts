@@ -333,6 +333,9 @@ export type BackLayers = {
   headshotSrc: string | null;
   headshot: { posX: number; posY: number }; // object-position 0–100
   lookalikeSrc: string | null; // matched pro player photo
+  // Duo/trio "duo match" pro photos, index-aligned with the [data-duo-photo]
+  // boxes on the duo back. Empty/absent for a solo card.
+  duoPhotos?: string[];
   landscape?: boolean;
 };
 
@@ -448,6 +451,29 @@ async function compositeBackCanvas(
         er.height * s,
         { width: 0.006 * outW, color: "rgba(10,10,10,0.55)" },
         0.3 // bias toward the face
+      );
+    }
+  }
+
+  // 4. Duo "duo match" photos — one per [data-duo-photo] box, index-aligned with
+  // duoPhotos. Same circular cover-fit as the lookalike, drawn from each box.
+  if (L.duoPhotos && L.duoPhotos.length) {
+    const els = L.backEl.querySelectorAll<HTMLElement>("[data-duo-photo]");
+    const br = L.backEl.getBoundingClientRect();
+    const s = outW / (br.width || outW);
+    for (let i = 0; i < els.length && i < L.duoPhotos.length; i++) {
+      const src = L.duoPhotos[i];
+      if (!src) continue;
+      const er = els[i].getBoundingClientRect();
+      await drawCircle(
+        ctx,
+        src,
+        (er.left - br.left) * s,
+        (er.top - br.top) * s,
+        er.width * s,
+        er.height * s,
+        { width: 0.006 * outW, color: "rgba(10,10,10,0.55)" },
+        0.28 // bias toward the face
       );
     }
   }

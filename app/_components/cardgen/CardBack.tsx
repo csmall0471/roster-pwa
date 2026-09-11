@@ -484,19 +484,26 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           }}
         >
           {/* Left column — name, stats, coaching */}
-          <div style={{ flex: "0 0 33%", display: "flex", flexDirection: "column", gap: "5%", minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "4%" }}>
+          <div style={{ flex: "0 0 36%", display: "flex", flexDirection: "column", gap: "5%", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "4%" }}>
               <span
                 style={{
                   fontFamily: "var(--font-anton), Impact, sans-serif",
-                  fontSize: "calc(var(--cardw, 22rem) * 6.5 / 100)",
-                  letterSpacing: "0.03em",
-                  lineHeight: 1,
+                  // The name shares a narrow column with the jersey number, so a
+                  // long name would clip on one line — let it wrap to two lines and
+                  // step the size down as it gets longer.
+                  fontSize: `calc(var(--cardw, 22rem) * ${
+                    (playerName || "PLAYER").length > 12 ? 4.4 : (playerName || "PLAYER").length > 8 ? 5.3 : 6.5
+                  } / 100)`,
+                  letterSpacing: "0.02em",
+                  lineHeight: 1.02,
                   flex: "1 1 auto",
                   minWidth: 0,
+                  display: "-webkit-box",
+                  WebkitBoxOrient: "vertical",
+                  WebkitLineClamp: 2,
                   overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  overflowWrap: "anywhere",
                 }}
               >
                 {playerName || "PLAYER"}

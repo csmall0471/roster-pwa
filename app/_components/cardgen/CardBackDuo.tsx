@@ -13,10 +13,27 @@ type Props = {
   seasonText: string;
   namesTitle: string; // "CJ & ALEX"
   items: { q: string; a: string }[]; // already filtered to answered questions
+  // Optional "duo match" — a famous pro pairing this duo plays like.
+  matchName?: string;
+  matchBlurb?: string;
+  matchPhotos?: string[]; // up to 2 pro photos (drawn on the canvas at export)
+  matchLabel?: string; // section header, e.g. "DUO MATCH" / "SQUAD MATCH"
 };
 
 const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
-  { bgStyle, landscape, teamText, ageText, seasonText, namesTitle, items },
+  {
+    bgStyle,
+    landscape,
+    teamText,
+    ageText,
+    seasonText,
+    namesTitle,
+    items,
+    matchName,
+    matchBlurb,
+    matchPhotos,
+    matchLabel = "DUO MATCH",
+  },
   ref
 ) {
   return (
@@ -86,6 +103,7 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
           flexDirection: "column",
           gap: "3.5%",
           fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+          overflow: "hidden",
         }}
       >
         <div
@@ -108,6 +126,8 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
             rowGap: landscape ? "4%" : "3%",
             alignContent: "start",
             flex: "1 1 auto",
+            minHeight: 0,
+            overflow: "hidden",
           }}
         >
           {items.map(({ q, a }, i) => (
@@ -136,6 +156,82 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
             </div>
           ))}
         </div>
+
+        {/* Duo match — a famous pro pairing, mirroring the solo back's Player
+            Match banner. Photos are drawn onto the canvas at export (iOS drops
+            raster images from the html-to-image snapshot) via [data-duo-photo]. */}
+        {matchName && (
+          <div
+            style={{
+              flex: "0 0 auto",
+              background:
+                "linear-gradient(90deg, rgba(251,191,36,0.95) 0%, rgba(251,146,60,0.95) 100%)",
+              color: "#0a0a0a",
+              borderRadius: "10px",
+              padding: "0.7em 0.9em",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.7em",
+            }}
+          >
+            {matchPhotos && matchPhotos.length > 0 && (
+              <div style={{ display: "flex", gap: "0.35em", flexShrink: 0 }}>
+                {matchPhotos.slice(0, 2).map((p, i) => (
+                  <div
+                    key={i}
+                    data-duo-photo
+                    style={{
+                      width: "calc(var(--cardw, 22rem) * 11 / 100)",
+                      aspectRatio: "1 / 1",
+                      borderRadius: "9999px",
+                      backgroundImage: `url(${p})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center 22%",
+                      border: "2px solid rgba(10,10,10,0.55)",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
+                  letterSpacing: "0.22em",
+                  fontWeight: 800,
+                  color: "rgba(10,10,10,0.6)",
+                  marginBottom: "0.15em",
+                }}
+              >
+                {matchLabel}
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-anton), Impact, sans-serif",
+                  fontSize: "calc(var(--cardw, 22rem) * 4.4 / 100)",
+                  lineHeight: 1.02,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {matchName.toUpperCase()}
+              </div>
+              {matchBlurb && (
+                <p
+                  style={{
+                    margin: "0.3em 0 0",
+                    fontSize: "calc(var(--cardw, 22rem) * 2.5 / 100)",
+                    lineHeight: 1.25,
+                    fontWeight: 600,
+                    fontStyle: "italic",
+                    color: "rgba(10,10,10,0.82)",
+                  }}
+                >
+                  {matchBlurb}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -143,6 +143,16 @@ export interface CardSubject {
 export interface CardDuo {
   questions: string[];
   answers: Record<string, string>; // keyed by question text
+  // Optional "duo match" — a famous pro pairing (teammates or brothers) this
+  // pair plays like. The duo analog of the solo card's look_alike.
+  match?: CardDuoMatch | null;
+}
+
+// A famous pro duo the pair is matched to (shown on the duo/trio back).
+export interface CardDuoMatch {
+  name: string; // "Stephen Curry & Klay Thompson"
+  blurb?: string; // one line on what makes them a great duo / how they match
+  photos?: string[]; // up to 2 pro photos (Wikipedia), one per member, in order
 }
 
 export type CardOrientation = "portrait" | "landscape";
