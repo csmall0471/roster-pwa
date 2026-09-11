@@ -23,6 +23,7 @@ import { savePlayerPhoto } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
 import { SPORTS, getSport, CARD_SPORTS, type CardSport } from "./sports";
+import { LOGO_PRESETS } from "./logos";
 import CardBackDuo from "./CardBackDuo";
 import { MAX_EXTRA, DEFAULT_DUO_QUESTIONS, joinNames } from "./card-duo";
 import { compositeFrontCanvas } from "./card-raster";
@@ -1404,6 +1405,18 @@ export default function CardEditor({
     } finally {
       setUploadingLogo(false);
     }
+  }
+
+  // Pick a built-in logo preset — a static /public asset, so no upload needed.
+  function chooseLogoPreset(url: string) {
+    setLogoUrl(url);
+    setLogoX(0.5);
+    setLogoY(0.3);
+    setLogoScale(1);
+    setLogoRotation(0);
+    scrollToPreview();
+    track("card_logo_uploaded", { preset: true });
+    logClientActivity("card_logo_uploaded").catch(() => {});
   }
 
   function removeLogo() {
@@ -3326,6 +3339,39 @@ export default function CardEditor({
                     e.currentTarget.value = "";
                   }}
                 />
+
+                {/* Built-in logo presets — tap to use, no upload. */}
+                <div className="grid grid-cols-3 gap-2">
+                  {LOGO_PRESETS.map((p) => {
+                    const selected = logoUrl === p.url;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => chooseLogoPreset(p.url)}
+                        aria-label={p.name}
+                        title={p.name}
+                        className={`aspect-square rounded-lg border p-1.5 bg-gray-100 dark:bg-gray-800 transition-all ${
+                          selected
+                            ? "ring-2 ring-blue-500 border-transparent"
+                            : "border-gray-200 dark:border-gray-700 hover:border-blue-300"
+                        }`}
+                      >
+                        <div
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            backgroundImage: `url(${p.url})`,
+                            backgroundSize: "contain",
+                            backgroundPosition: "center",
+                            backgroundRepeat: "no-repeat",
+                          }}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+
                 {(logoDataUrl ?? logoUrl) ? (
                   <>
                     <div>
