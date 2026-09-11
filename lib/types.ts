@@ -147,6 +147,18 @@ export interface CardDuo {
 
 export type CardOrientation = "portrait" | "landscape";
 
+// A team logo placed on the front of the card. Position/size stored as fractions
+// of the stage (same convention as CardSignature) so it scales across screens.
+// The image is used as-is (expected to be a transparent PNG) — no background
+// removal, unlike a player photo.
+export interface CardLogo {
+  url: string;
+  x: number; // center X, fraction of stage width
+  y: number; // center Y, fraction of stage height
+  scale: number; // multiplier against the base on-card width
+  rotation?: number;
+}
+
 export interface CardDesign {
   cutout_url: string;
   sport?: CardSport;
@@ -177,6 +189,8 @@ export interface CardDesign {
   circulation?: number | null;
   // Hand-drawn signature placed on the front (the primary player's).
   signature?: CardSignature | null;
+  // Optional team logo placed on the front. Absent = no logo.
+  logo?: CardLogo | null;
 }
 
 export interface CardBackDesign {

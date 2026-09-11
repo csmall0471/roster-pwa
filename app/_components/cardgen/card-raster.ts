@@ -80,6 +80,9 @@ export type FrontLayers = {
   // primary cutout/signature. Empty/absent for a normal solo card.
   extraCutouts?: FrontCutout[];
   extraSigs?: FrontSig[];
+  // Optional team logo — same centered/contained/rotated draw as a signature,
+  // layered above the name/plate overlay and below the signatures.
+  logo?: FrontSig | null;
   landscape?: boolean; // horizontal (3.5×2.5) card
 };
 
@@ -151,7 +154,10 @@ export async function compositeFrontCanvas(
   // 3. Overlays (jersey badge, team plate, player name) — on top of the photos.
   ctx.drawImage(await layerCanvas(L.overlayEl, outW), 0, 0, outW, outH);
 
-  // 4. Signature(s) — primary first, then each extra player's.
+  // 4. Team logo — above the overlay so it reads as a foreground badge.
+  if (L.logo) await drawSig(ctx, L.logo, outW, outH);
+
+  // 5. Signature(s) — primary first, then each extra player's.
   await drawSig(ctx, { src: L.sigSrc, ...L.sig }, outW, outH);
   for (const s of L.extraSigs ?? []) await drawSig(ctx, s, outW, outH);
 

@@ -26,6 +26,10 @@ export type SportConfig = {
   // Lower-cased full position → short badge shown on the card back ("POS").
   positionAbbrev: Record<string, string>;
   qLabels: {
+    // The favorite team/player fields keep the same data but read "NBA" vs "NFL"
+    // in the editor (and carry a sport-appropriate example).
+    favorite_team: QLabel;
+    favorite_player: QLabel;
     signature_move: QLabel;
     favorite_drill: QLabel;
   };
@@ -58,6 +62,8 @@ export const SPORTS: Record<CardSport, SportConfig> = {
       utility: "UTIL",
     },
     qLabels: {
+      favorite_team: { editor: "Fav NBA team", back: "FAV TEAM", placeholder: "Suns" },
+      favorite_player: { editor: "Fav NBA player", back: "FAV PLAYER", placeholder: "Curry" },
       signature_move: { editor: "Signature move", back: "SIG MOVE", placeholder: "Step-back" },
       favorite_drill: { editor: "Fav practice drill", back: "FAV DRILL", placeholder: "Suicides" },
     },
@@ -65,13 +71,14 @@ export const SPORTS: Record<CardSport, SportConfig> = {
   football: {
     id: "football",
     label: "Football",
-    backgroundCategories: ["football", "solid", "gradient"],
+    backgroundCategories: ["football", "stripes", "solid", "gradient"],
     defaultBackgroundId: "fb-gridiron",
     positions: [
       { value: "QUARTERBACK", label: "Quarterback" },
       { value: "RUNNING BACK", label: "Running back" },
       { value: "WIDE RECEIVER", label: "Wide receiver" },
       { value: "TIGHT END", label: "Tight end" },
+      { value: "CENTER", label: "Center / Snapper" },
       { value: "OFFENSIVE LINE", label: "Offensive line" },
       { value: "DEFENSIVE LINE", label: "Defensive line" },
       { value: "LINEBACKER", label: "Linebacker" },
@@ -86,6 +93,10 @@ export const SPORTS: Record<CardSport, SportConfig> = {
       "running back": "RB",
       "wide receiver": "WR",
       "tight end": "TE",
+      center: "C",
+      "center / snapper": "C",
+      snapper: "LS",
+      "long snapper": "LS",
       "offensive line": "OL",
       "offensive lineman": "OL",
       "defensive line": "DL",
@@ -101,6 +112,8 @@ export const SPORTS: Record<CardSport, SportConfig> = {
       athlete: "ATH",
     },
     qLabels: {
+      favorite_team: { editor: "Fav NFL team", back: "FAV TEAM", placeholder: "Chiefs" },
+      favorite_player: { editor: "Fav NFL player", back: "FAV PLAYER", placeholder: "Mahomes" },
       signature_move: { editor: "TD celebration", back: "TD CELEB", placeholder: "Griddy, spike, Lambeau leap…" },
       favorite_drill: { editor: "Favorite play", back: "FAV PLAY", placeholder: "Hail Mary" },
     },

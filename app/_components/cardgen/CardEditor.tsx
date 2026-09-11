@@ -46,6 +46,11 @@ import type { CardDesign, CardSubject, CardOrientation } from "@/lib/types";
 // scale 1 (the resize slider multiplies it). Shared by the preview + export.
 const STICKER_SIG_BASE_WIDTH = 0.38;
 
+// Team logo width on the card front, as a fraction of the card's width at scale
+// 1 (the resize slider/pinch multiplies it). Shared by the preview + export so
+// the placement carries over pixel-for-pixel.
+const LOGO_BASE_WIDTH = 0.28;
+
 // ── Types ────────────────────────────────────────────────────
 
 type Step = "upload" | "processing" | "edit" | "saving" | "saved";
@@ -547,6 +552,22 @@ export default function CardEditor({
   );
   const sigUploadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Team logo (front overlay) ───────────────────────────────
+  // A separately-uploaded transparent PNG placed on the front. Position stored
+  // as center fractions of the stage (same convention as the signature) so it
+  // scales across screen sizes and orientations. Absent = no logo (identical to
+  // the original card).
+  const [logoUrl, setLogoUrl] = useState<string | null>(initialDesign?.logo?.url ?? null);
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const [logoX, setLogoX] = useState(initialDesign?.logo?.x ?? 0.5);
+  const [logoY, setLogoY] = useState(initialDesign?.logo?.y ?? 0.3);
+  const [logoScale, setLogoScale] = useState(initialDesign?.logo?.scale ?? 1);
+  const [logoRotation, setLogoRotation] = useState(initialDesign?.logo?.rotation ?? 0);
+  const [logoAspect, setLogoAspect] = useState(1); // width/height of the logo image
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoImgRef = useRef<HTMLDivElement>(null);
+  const logoFileRef = useRef<HTMLInputElement>(null);
+
   // ── Duo/trio: additional players ────────────────────────────
   // Extra subjects beyond the primary player. Placement/gestures route to
   // whichever subject is selected ("main" = the primary). Empty = a solo card,
@@ -726,6 +747,7 @@ export default function CardEditor({
   useEffect(() => mirrorToDataUrl(cutoutUrl, setCutoutDataUrl), [cutoutUrl]);
   useEffect(() => mirrorToDataUrl(sigUrl, setSigDataUrl), [sigUrl]);
   useEffect(() => mirrorToDataUrl(headshotUrl, setHeadshotDataUrl), [headshotUrl]);
+  useEffect(() => mirrorToDataUrl(logoUrl, setLogoDataUrl), [logoUrl]);
 
   // Mirror each extra subject's cutout + signature to a data URL (once each).
   useEffect(() => {
@@ -790,6 +812,17 @@ export default function CardEditor({
     img.src = src;
   }, [sigDataUrl, sigUrl]);
 
+  // Same for the logo, so its box matches the image's natural aspect ratio.
+  useEffect(() => {
+    const src = logoDataUrl ?? logoUrl;
+    if (!src) return;
+    const img = new window.Image();
+    img.onload = () => {
+      if (img.naturalHeight > 0) setLogoAspect(img.naturalWidth / img.naturalHeight);
+    };
+    img.src = src;
+  }, [logoDataUrl, logoUrl]);
+
   // ── Gestures (front stage) ──────────────────────────────────
   // One finger drags; two fingers pinch-scale + rotate. The layer is chosen by
   // the FIRST finger: on the signature → the signature, otherwise the main
@@ -798,7 +831,7 @@ export default function CardEditor({
 
   const sigImgRef = useRef<HTMLDivElement>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
-  const gestureLayer = useRef<"photo" | "sig">("photo");
+  const gestureLayer = useRef<"photo" | "sig" | "logo">("photo");
   const gestureStart = useRef<{
     px: number;
     py: number;
@@ -812,6 +845,11 @@ export default function CardEditor({
     sy: number;
     sScale: number;
     sRot: number;
+    // Team logo base (global — one logo per card, not per subject).
+    lx: number;
+    ly: number;
+    lScale: number;
+    lRot: number;
   } | null>(null);
 
   function stageSize() {
@@ -868,6 +906,12 @@ export default function CardEditor({
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   }
 
+  function overLogo(x: number, y: number): boolean {
+    if (!logoUrl || !logoImgRef.current) return false;
+    const r = logoImgRef.current.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
   function gestureSnapshot(pts: { x: number; y: number }[]) {
     const a = activeState();
     const base = {
@@ -879,6 +923,10 @@ export default function CardEditor({
       sy: a.sigY,
       sScale: a.sigScale,
       sRot: a.sigRotation,
+      lx: logoX,
+      ly: logoY,
+      lScale: logoScale,
+      lRot: logoRotation,
     };
     if (pts.length >= 2) {
       const dx = pts[0].x - pts[1].x;
@@ -899,8 +947,12 @@ export default function CardEditor({
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const pts = [...pointers.current.values()];
     if (pts.length === 1) {
-      gestureLayer.current =
-        overSignature(e.clientX, e.clientY) || !selectedHasCutout() ? "sig" : "photo";
+      // Logo is topmost, so grab it first; then the signature; then the photo.
+      gestureLayer.current = overLogo(e.clientX, e.clientY)
+        ? "logo"
+        : overSignature(e.clientX, e.clientY) || !selectedHasCutout()
+          ? "sig"
+          : "photo";
     }
     gestureStart.current = gestureSnapshot(pts);
   }
@@ -912,11 +964,14 @@ export default function CardEditor({
     if (!g) return;
     const pts = [...pointers.current.values()];
     const { w, h } = stageSize();
-    const sig = gestureLayer.current === "sig";
+    const layer = gestureLayer.current;
     if (pts.length === 1) {
       const dx = (pts[0].x - g.px) / w;
       const dy = (pts[0].y - g.py) / h;
-      if (sig) {
+      if (layer === "logo") {
+        setLogoX(Math.max(0, Math.min(1, g.lx + dx)));
+        setLogoY(Math.max(0, Math.min(1, g.ly + dy)));
+      } else if (layer === "sig") {
         patchActiveSig({
           sigX: Math.max(0, Math.min(1, g.sx + dx)),
           sigY: Math.max(0, Math.min(1, g.sy + dy)),
@@ -929,7 +984,10 @@ export default function CardEditor({
       const dy = pts[0].y - pts[1].y;
       const ratio = Math.hypot(dx, dy) / g.dist;
       const dDeg = ((Math.atan2(dy, dx) - (g.angle ?? 0)) * 180) / Math.PI;
-      if (sig) {
+      if (layer === "logo") {
+        setLogoScale(Math.max(0.2, Math.min(5, g.lScale * ratio)));
+        setLogoRotation(g.lRot + dDeg);
+      } else if (layer === "sig") {
         patchActiveSig({
           sigScale: Math.max(0.2, Math.min(5, g.sScale * ratio)),
           sigRotation: g.sRot + dDeg,
@@ -1299,6 +1357,46 @@ export default function CardEditor({
     }
   }
 
+  // Upload a team logo (transparent PNG expected) and place it on the front. No
+  // normalization / background removal — the image is used as-is to preserve its
+  // alpha. The coach then drags/pinches it into place on the card.
+  async function handleLogoSelected(file: File) {
+    setUploadingLogo(true);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const path = `${user.id}/cardgen-logo/${crypto.randomUUID()}.${fileExt(file.name)}`;
+      const { error: upErr } = await supabase.storage
+        .from("player-photos")
+        .upload(path, file, { upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage
+        .from("player-photos")
+        .getPublicUrl(path);
+      setLogoUrl(urlData.publicUrl);
+      setLogoX(0.5);
+      setLogoY(0.3);
+      setLogoScale(1);
+      setLogoRotation(0);
+      scrollToPreview();
+      track("card_logo_uploaded");
+      logClientActivity("card_logo_uploaded").catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  function removeLogo() {
+    setLogoUrl(null);
+    setLogoDataUrl(null);
+  }
+
   // ── AI helpers (back side) ──────────────────────────────────
 
   async function handleGenerateScouting() {
@@ -1390,6 +1488,17 @@ export default function CardEditor({
       widthFrac: 0.38 * s.sigScale,
     }));
   const namesTitle = joinNames([nameL1, ...extraSubjects.map((s) => s.name)]);
+  // Team logo layer for the compositor — same centered/contained/rotated draw as
+  // a signature. Null when there's no logo.
+  const logoLayer = logoUrl
+    ? {
+        src: logoDataUrl ?? logoUrl,
+        x: logoX,
+        y: logoY,
+        rotation: logoRotation,
+        widthFrac: LOGO_BASE_WIDTH * logoScale,
+      }
+    : null;
   const duoItems = duoQuestions
     .map((q) => ({ q, a: (duoAnswers[q] ?? "").trim() }))
     .filter((it) => it.a);
@@ -1404,6 +1513,7 @@ export default function CardEditor({
       sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
       extraCutouts: extraCutoutLayers,
       extraSigs: extraSigLayers,
+      logo: logoLayer,
       landscape,
     });
     const backBlob = backStageRef.current
@@ -1483,6 +1593,9 @@ export default function CardEditor({
               ? { strokes: sigStrokes, color: sigColor, thickness: sigThickness }
               : {}),
           }
+        : null,
+      logo: logoUrl
+        ? { url: logoUrl, x: logoX, y: logoY, scale: logoScale, rotation: logoRotation }
         : null,
     };
   }
@@ -1637,6 +1750,7 @@ export default function CardEditor({
           sig,
           extraCutouts: extraCutoutLayers,
           extraSigs: extraSigLayers,
+          logo: logoLayer,
           landscape,
         },
         trimW
@@ -1726,6 +1840,7 @@ export default function CardEditor({
             cutout: { tx, ty, scale, rotation },
             sigSrc: sigDataUrl ?? sigUrl,
             sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
+            logo: logoLayer,
           },
           300
         );
@@ -1807,6 +1922,7 @@ export default function CardEditor({
           sig: { x: sigX, y: sigY, rotation: sigRotation, widthFrac: 0.38 * sigScale },
           extraCutouts: extraCutoutLayers,
           extraSigs: extraSigLayers,
+          logo: logoLayer,
           landscape,
         });
         entries.push({
@@ -2466,6 +2582,29 @@ export default function CardEditor({
         )}
         </div>
 
+        {/* Team logo — a foreground badge above the name/plate overlay. Gestures
+            handled at the stage level (drag/pinch); placed via stored fractions.
+            Drawn straight onto the canvas at export (like the cutout/signature). */}
+        {(logoDataUrl ?? logoUrl) && (
+          <div
+            ref={logoImgRef}
+            style={{
+              position: "absolute",
+              left: `${logoX * 100}%`,
+              top: `${logoY * 100}%`,
+              width: `${LOGO_BASE_WIDTH * logoScale * 100}%`,
+              aspectRatio: `${logoAspect}`,
+              transform: `translate(-50%, -50%) rotate(${logoRotation}deg)`,
+              backgroundImage: `url(${logoDataUrl ?? logoUrl})`,
+              backgroundSize: "contain",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
+              pointerEvents: "none",
+              zIndex: 4,
+            }}
+          />
+        )}
+
         {/* Signature overlay — gestures handled at the stage level (pointerEvents
             none); placed/scaled/rotated via stored fractions. The sigImgRef is
             attached to whichever subject is selected so the gesture grabs it. */}
@@ -3076,6 +3215,100 @@ export default function CardEditor({
                   </select>
                 </div>
               )}
+
+              {/* Team logo — a transparent PNG placed on top of the card and
+                  dragged into position. */}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                    Team logo
+                  </span>
+                  <div className="flex gap-2">
+                    {(logoDataUrl ?? logoUrl) && (
+                      <button
+                        onClick={removeLogo}
+                        className="text-xs font-medium text-gray-400 hover:text-red-600"
+                      >
+                        Remove
+                      </button>
+                    )}
+                    <button
+                      onClick={() => logoFileRef.current?.click()}
+                      disabled={uploadingLogo}
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                    >
+                      {uploadingLogo
+                        ? "Uploading…"
+                        : (logoDataUrl ?? logoUrl)
+                          ? "Replace"
+                          : "🏈 Add logo"}
+                    </button>
+                  </div>
+                </div>
+                <input
+                  ref={logoFileRef}
+                  type="file"
+                  accept="image/png,image/webp,image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleLogoSelected(f);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                {(logoDataUrl ?? logoUrl) ? (
+                  <>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400">
+                        Logo size: {Math.round(logoScale * 100)}%
+                      </label>
+                      <input
+                        type="range"
+                        min={0.3}
+                        max={2.5}
+                        step={0.02}
+                        value={logoScale}
+                        onChange={(e) => setLogoScale(parseFloat(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400">
+                        Logo rotation: {Math.round(logoRotation)}°
+                      </label>
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        step={1}
+                        value={logoRotation}
+                        onChange={(e) => setLogoRotation(parseFloat(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        setLogoX(0.5);
+                        setLogoY(0.3);
+                        setLogoScale(1);
+                        setLogoRotation(0);
+                      }}
+                      className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      Reset logo position
+                    </button>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                      On the card: drag to move, pinch to resize, twist two fingers to rotate.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                    Add a team logo (a transparent PNG works best) and drag it
+                    anywhere on the card. Pair it with a matching team-color
+                    background above.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -3370,23 +3603,23 @@ export default function CardEditor({
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
-              <Field label="Fav NBA team">
+              <Field label={getSport(sport).qLabels.favorite_team.editor}>
                 <input
                   value={stats.favorite_team}
                   onChange={(e) =>
                     patchStats({ favorite_team: e.target.value })
                   }
-                  placeholder="Suns"
+                  placeholder={getSport(sport).qLabels.favorite_team.placeholder}
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>
-              <Field label="Fav NBA player">
+              <Field label={getSport(sport).qLabels.favorite_player.editor}>
                 <input
                   value={stats.favorite_player}
                   onChange={(e) =>
                     patchStats({ favorite_player: e.target.value })
                   }
-                  placeholder="Curry"
+                  placeholder={getSport(sport).qLabels.favorite_player.placeholder}
                   className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
                 />
               </Field>

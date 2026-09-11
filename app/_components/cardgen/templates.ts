@@ -718,6 +718,70 @@ export const TEMPLATES: Template[] = [
     },
     textColor: "light",
   },
+
+  // Team-color football grounds — palettes to match common uniform/logo colors
+  // (purple & gold, crimson/maroon, forest green) so an uploaded team logo sits
+  // on a background in the same family.
+  {
+    id: "fb-purple-gold",
+    name: "Purple & Gold",
+    category: "football",
+    style: {
+      background:
+        "radial-gradient(ellipse at 50% 12%, rgba(214,164,32,0.55) 0%, transparent 45%), linear-gradient(180deg, #4a2596 0%, #34176b 50%, #1f0d44 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-gold-rush",
+    name: "Gold Rush",
+    category: "football",
+    style: {
+      background:
+        "linear-gradient(160deg, #e7bd3e 0%, #c39412 28%, #4a2596 78%, #240f4d 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-crimson",
+    name: "Crimson",
+    category: "football",
+    style: {
+      background:
+        "radial-gradient(ellipse at 50% 22%, #d61f3a 0%, #a01528 42%, #5c0c17 78%, #2b0509 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-cardinal-carbon",
+    name: "Cardinal Carbon",
+    category: "football",
+    style: {
+      background:
+        "radial-gradient(circle at 30% 18%, rgba(193,30,58,0.55) 0%, transparent 48%), repeating-linear-gradient(45deg, #1a1a1a 0px, #1a1a1a 4px, #0f0f0f 4px, #0f0f0f 8px)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-forest",
+    name: "Forest Green",
+    category: "football",
+    style: {
+      background:
+        "linear-gradient(180deg, #2e8b4e 0%, #14622f 45%, #0a3a1c 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "fb-forest-lines",
+    name: "Forest Field",
+    category: "football",
+    style: {
+      background:
+        "repeating-linear-gradient(90deg, rgba(255,255,255,0.32) 0px, rgba(255,255,255,0.32) 2px, transparent 2px, transparent 40px), linear-gradient(180deg, #0d3b1e 0%, #12522a 50%, #0d3b1e 100%)",
+    },
+    textColor: "light",
+  },
 ];
 
 export function getTemplate(id: string): Template {
