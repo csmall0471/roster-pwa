@@ -145,6 +145,7 @@ export default async function ParentPlayerCardPage({
         </p>
       ) : (
         <CardEditor
+          audience="parent"
           playerId={id}
           teamId={teamId}
           teamName={teamName}

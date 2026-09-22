@@ -78,6 +78,11 @@ type Props = {
   // The player_photos row `initialDesign` came from. When set, saving edits that
   // card in place rather than adding a new one to the player.
   initialPhotoId?: string | null;
+  // Who's using the editor. "parent" strips the coach-only power tools (duo/trio
+  // group cards, the 2" sticker, save-original-photo, download front & back, and
+  // the AI scouting report) and floats the player picker to the top. Defaults to
+  // "admin" so every existing coach route keeps the full toolset.
+  audience?: "admin" | "parent";
   // Standalone mode (Tools → Card Creator): no player to attach to, so the
   // finished card is exported to the photo library / downloaded instead of
   // saved against a player record.
@@ -471,6 +476,7 @@ export default function CardEditor({
   returnHref,
   initialDesign,
   initialPhotoId,
+  audience = "admin",
   standalone = false,
   assignTargets = [],
   allowDrafts = false,
@@ -482,6 +488,9 @@ export default function CardEditor({
   initialCardGroupId,
 }: Props) {
   const router = useRouter();
+
+  // Parent-facing view: hide the coach-only power tools throughout the editor.
+  const isParent = audience === "parent";
 
   // Fire once on mount so we know how often the editor is opened.
   useEffect(() => {
@@ -2353,11 +2362,13 @@ export default function CardEditor({
     }));
   }
 
-  // Player picker — shown just below the preview in standalone mode when there
-  // are targets; choosing a player auto-fills the card.
+  // Player picker — floated to the very top of the editor in standalone mode
+  // when there are targets; choosing a player auto-fills the card. Deep-linked
+  // parent cards arrive non-standalone (the kid is already known), so the picker
+  // simply doesn't render there.
   const playerPicker =
     standalone && assignTargets.length > 0 ? (
-      <label className="block mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+      <label className="block mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           Whose card is this?
         </span>
@@ -2435,6 +2446,9 @@ export default function CardEditor({
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
       )}
+
+      {/* Whose card is this? — pinned to the top so it's the first choice made. */}
+      {playerPicker}
 
       {/* On wide screens the preview pins to the left and the controls scroll on
           the right; it stacks back to a single column on phones. The preview
@@ -2858,9 +2872,6 @@ export default function CardEditor({
 
         {/* Controls column */}
         <div className="min-w-0">
-      {/* Player picker — first thing below the preview (auto-fills the card). */}
-      {playerPicker}
-
       {/* Sport — governs backgrounds, positions, the questionnaire wording, and
           the "plays like" match for the whole card. */}
       <div className="mt-4 flex items-center gap-2">
@@ -2902,7 +2913,9 @@ export default function CardEditor({
       </div>
 
       {/* Players — add up to two more for a duo/trio card. Tap a player to
-          select, then drag/pinch on the card to place them. */}
+          select, then drag/pinch on the card to place them. Coach-only: parents
+          make single-player cards, so the group tools are hidden for them. */}
+      {!isParent && (
       <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2">
         <div className="flex items-center gap-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
@@ -3078,6 +3091,7 @@ export default function CardEditor({
           </p>
         )}
       </div>
+      )}
 
       {/* Toolbar — different content for front vs back. */}
       <div className="mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -3163,7 +3177,7 @@ export default function CardEditor({
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
                 Drag the player to move. Pinch to scale on phones. Use sliders for rotation.
               </p>
-              {originalPhoto && (
+              {originalPhoto && !isParent && (
                 <button
                   onClick={saveOriginalToDevice}
                   disabled={savingOriginal}
@@ -4030,6 +4044,7 @@ export default function CardEditor({
               />
             </Field>
 
+            {!isParent && (
             <Field label="Scouting report">
               <textarea
                 value={scoutingReport}
@@ -4048,6 +4063,7 @@ export default function CardEditor({
                   : "✨ Generate with AI"}
               </button>
             </Field>
+            )}
 
             <Field label="Plays like">
               <input
@@ -4179,20 +4195,22 @@ export default function CardEditor({
           </button>
         </div>
 
-        <button
-          onClick={handleDownloadCard}
-          disabled={!cutoutUrl || step === "saving" || downloading}
-          className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-        >
-          {downloading ? "Preparing…" : "⬇︎ Download front & back"}
-        </button>
+        {!isParent && (
+          <button
+            onClick={handleDownloadCard}
+            disabled={!cutoutUrl || step === "saving" || downloading}
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+          >
+            {downloading ? "Preparing…" : "⬇︎ Download front & back"}
+          </button>
+        )}
 
         {/* 2" round die-cut sticker — the photo + name (and signature / team ·
             season if present) on the card's background. Exported as a 2.325"
             square with bleed at 350 DPI; the printer cuts the 2" circle out. The
             preview's corners show what the die-cut removes. Single-subject only,
-            so it's hidden on group (duo/trio) cards. */}
-        {!isDuo && (
+            so it's hidden on group (duo/trio) cards. Coach-only tool. */}
+        {!isDuo && !isParent && (
         <div className="w-full space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">

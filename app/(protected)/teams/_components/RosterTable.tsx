@@ -12,6 +12,7 @@ import {
   deleteRosterTagType,
 } from "../roster-tag-actions";
 import MessageComposer from "../../players/_components/MessageComposer";
+import CardLinkButton from "@/app/_components/CardLinkButton";
 import type { RosterTagType } from "@/lib/types";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -447,6 +448,14 @@ function RosterRow({
           ) : (
             savedTick && <span className="text-xs text-green-600 dark:text-green-400">Saved ✓</span>
           )}
+
+          <CardLinkButton
+            playerId={entry.players.id}
+            teamId={teamId}
+            playerName={`${entry.players.first_name} ${entry.players.last_name}`.trim()}
+            label="Card link"
+            className="text-blue-600 dark:text-blue-400 hover:underline"
+          />
 
           <button onClick={handleRemove} className="text-red-500 hover:underline">
             Remove

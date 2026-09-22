@@ -53,6 +53,7 @@ export default async function ParentCardCreatorPage() {
       </div>
 
       <CardEditor
+        audience="parent"
         standalone
         playerId={null}
         teamId={null}

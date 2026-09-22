@@ -4,6 +4,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import type { PlayerPhoto } from "@/lib/types";
 import PhotoGallery from "./_components/PhotoGallery";
+import CardLinkButton from "@/app/_components/CardLinkButton";
 import EligibilityBar from "@/app/parent/_components/EligibilityBar";
 import SiblingsSection from "@/app/_components/SiblingsSection";
 import { dedupeSiblings } from "@/app/_components/dedupe-siblings";
@@ -57,6 +58,16 @@ export default async function PlayerDetailPage({
   const primary = (photos ?? []).find((p: PlayerPhoto) => p.is_primary);
   // A card built in the Card Creator carries a design that can be reopened.
   const hasCard = (photos ?? []).some((p: PlayerPhoto) => p.card_design);
+
+  // Team to prefill on a parent's deep-linked card: their current active team,
+  // else the most-recent team on file. Null → the parent route picks for itself.
+  const deepLinkTeamId: string | null = (() => {
+    type TeamRef = { id: string } | { id: string }[] | null | undefined;
+    const rows = (seasons ?? []) as unknown as { status: string; teams: TeamRef }[];
+    const t = (rows.find((s) => s.status === "active") ?? rows[0])?.teams;
+    const team = Array.isArray(t) ? t[0] : t;
+    return team?.id ?? null;
+  })();
 
   type SeasonRow = {
     jersey_number: number | null;
@@ -153,6 +164,12 @@ export default async function PlayerDetailPage({
             >
               Edit
             </Link>
+            <CardLinkButton
+              playerId={id}
+              teamId={deepLinkTeamId}
+              playerName={`${player.first_name} ${player.last_name}`.trim()}
+              label="Copy parent link"
+            />
           </div>
         </div>
       </div>
