@@ -47,7 +47,7 @@ export default async function ParentTeamPage({
     supabase
       .from("games")
       .select(`id, game_date, game_time, opponent, location, is_home, notes, event_type, title,
-               snack_signups(id, parent_id, slot_number, reminder_email, reminder_sms,
+               snack_signups(id, parent_id, slot_number, reminder_email, reminder_sms, signer_name,
                              parents(first_name, last_name))`)
       .eq("team_id", id)
       .order("game_date", { ascending: true }),

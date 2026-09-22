@@ -21,6 +21,9 @@ export type SnackGameRow = {
     slot_number: number;
     reminder_email: boolean;
     reminder_sms: boolean;
+    // Signer's display name, stored on the row so fellow parents can see it
+    // (they can't read other families' parent records via RLS).
+    signer_name?: string | null;
     parents: { first_name: string; last_name: string } | null;
   }>;
 };
@@ -229,9 +232,11 @@ function GameRow({
           {game.signups.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {game.signups.map((s) => {
-                const name = s.parents
-                  ? `${s.parents.first_name} ${s.parents.last_name}`
-                  : "Someone";
+                // Prefer the name stored on the row (visible to all parents);
+                // fall back to the joined record (own family) then a placeholder.
+                const name =
+                  s.signer_name?.trim() ||
+                  (s.parents ? `${s.parents.first_name} ${s.parents.last_name}` : "Someone");
                 const isMe = s.parent_id === parentId;
                 return (
                   <span

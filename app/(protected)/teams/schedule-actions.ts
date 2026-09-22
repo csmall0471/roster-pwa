@@ -109,12 +109,19 @@ export async function claimSnackSlot(
 
   const nextSlot = (existing?.[0]?.slot_number ?? 0) + 1;
 
+  // Store the signer's display name on the row so fellow parents can see who's
+  // bringing snacks (they can't read other families' parent records).
+  const parentRec = parentLink.parents as { first_name?: string; last_name?: string } | null;
+  const signerName =
+    `${parentRec?.first_name ?? ""} ${parentRec?.last_name ?? ""}`.trim() || null;
+
   const { error } = await supabase.from("snack_signups").insert({
     game_id: gameId,
     parent_id: parentLink.parent_id,
     slot_number: nextSlot,
     reminder_email: reminderEmail,
     reminder_sms: reminderSms,
+    signer_name: signerName,
   });
   if (error) return { error: error.message };
 
