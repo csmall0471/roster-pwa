@@ -228,6 +228,23 @@ function mirrorToDataUrl(url: string | null, set: (v: string | null) => void) {
   };
 }
 
+// How long to wait on the whole save pipeline (rasterize + uploads + DB write)
+// before giving up and offering a retry. The underlying upload may still land,
+// but the UI stops waiting so the user is never stuck behind an endless spinner.
+const SAVE_TIMEOUT_MS = 40_000;
+
+// Reject if `p` doesn't settle within `ms`. This doesn't cancel the underlying
+// work — it just stops the UI from waiting forever on a stalled network.
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 // Ensure an image URL is decoded before we snapshot the card.
 async function preloadImage(src: string | null | undefined) {
   if (!src) return;
@@ -526,6 +543,11 @@ export default function CardEditor({
   const [savingOriginal, setSavingOriginal] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [uploadingBg, setUploadingBg] = useState(false);
+  // Save failure (network stall / timeout / server error). When set, a blocking
+  // panel shows the message with a Retry button; `lastSaveTarget` remembers which
+  // assign target to re-run so Retry reproduces the exact same save.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [lastSaveTarget, setLastSaveTarget] = useState<string | undefined>(undefined);
   // "Share all backgrounds" contact sheet: rendering flag + progress counter.
   const [exportingAll, setExportingAll] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -2161,150 +2183,178 @@ export default function CardEditor({
     }
   }
 
+  // The heavy lifting of a save: rasterize both sides, upload them, and write the
+  // player_photos row(s). Returns what happened so the caller can navigate/notify
+  // OUTSIDE the timeout window — a slow post-save navigation must never read as a
+  // save failure. Throws on any real error.
+  async function performSave(
+    targetKey?: string
+  ): Promise<{ kind: "exported" } | { kind: "saved"; targetName: string }> {
+    // Decode the layer images before snapshotting so the rasterizer can't
+    // race and emit a card missing the photo/signature/headshot.
+    if ("fonts" in document) await (document as Document).fonts.ready;
+    await Promise.all([
+      preloadImage(cutoutDataUrl),
+      preloadImage(sigDataUrl ?? sigUrl),
+      preloadImage(headshotDataUrl ?? headshotUrl),
+    ]);
+
+    // ── Rasterize both sides at 2.5"×3.5" (750×1050 @ 300 DPI) ──
+    const { frontBlob, backBlob } = await renderSides();
+
+    // ── Standalone with no chosen player — save both sides to Photos ──
+    if (standalone && !targetKey) {
+      await exportCardImages(frontBlob, backBlob);
+      track("card_downloaded", {
+        standalone: true,
+        template: bg.type === "template" ? bg.id : "custom",
+      });
+      logClientActivity("card_downloaded", {
+        standalone: true,
+        template: bg.type === "template" ? bg.id : "custom",
+      }).catch(() => {});
+      return { kind: "exported" };
+    }
+
+    // Otherwise attach to a player: the prop player (player card page) or the
+    // chosen assign target (standalone Card Creator). A target carries the
+    // specific team picked, so a multi-team kid saves under the right team.
+    const target = targetKey ? assignTargets.find((t) => t.key === targetKey) : undefined;
+    const targetPlayerId = target?.id ?? playerId;
+    if (!targetPlayerId) throw new Error("No player to attach this card to.");
+
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+
+    const frontId = crypto.randomUUID();
+    const frontPath = `${user.id}/cards/${frontId}.png`;
+    const { error: frontUpErr } = await supabase.storage
+      .from("player-photos")
+      .upload(frontPath, frontBlob, { contentType: "image/png", upsert: false });
+    if (frontUpErr) throw frontUpErr;
+    const { data: frontUrlData } = supabase.storage
+      .from("player-photos")
+      .getPublicUrl(frontPath);
+
+    // ── Upload back (always saved, so every card has both sides) ──
+    const backStoragePath = `${user.id}/cards/${frontId}-back.png`;
+    const { error: backUpErr } = await supabase.storage
+      .from("player-photos")
+      .upload(backStoragePath, backBlob, { contentType: "image/png", upsert: false });
+    if (backUpErr) throw backUpErr;
+    const backPublicUrl = supabase.storage
+      .from("player-photos")
+      .getPublicUrl(backStoragePath).data.publicUrl;
+
+    // Players the card is saved to: the primary plus any extra subjects linked
+    // to a real teammate. Two or more → a shared "group card" (one gallery-only
+    // row per player, kept in sync by card_group_id). One → the normal path.
+    const extraLinkedIds = extraSubjects
+      .map((s) => s.playerId)
+      .filter(Boolean) as string[];
+    const featured = [...new Set([targetPlayerId, ...extraLinkedIds])];
+
+    if (featured.length >= 2) {
+      const res = await saveCardForPlayers({
+        playerIds: featured,
+        primaryPlayerId: targetPlayerId,
+        // Fold the primary's existing single card into the group (solo→group)
+        // when editing in place; when assigning to a chosen player, insert.
+        primaryPhotoId: !targetKey ? initialPhotoId ?? undefined : undefined,
+        cardGroupId: cardGroupId ?? undefined,
+        storagePath: frontPath,
+        publicUrl: frontUrlData.publicUrl,
+        backStoragePath,
+        backPublicUrl,
+        teamName: teamText,
+        season: seasonText || season || undefined,
+        teamId: (target ? target.teamId : teamId) ?? undefined,
+        cardDesign: buildDesign(),
+      });
+      if (res.error) throw new Error(res.error);
+      if (res.cardGroupId) setCardGroupId(res.cardGroupId);
+    } else {
+      const res = await savePlayerPhoto({
+        playerId: targetPlayerId,
+        // Only edit in place when saving back to the same card the editor
+        // opened (no assign target picked). Assigning to a chosen player inserts.
+        photoId: !targetKey ? initialPhotoId ?? undefined : undefined,
+        storagePath: frontPath,
+        publicUrl: frontUrlData.publicUrl,
+        backStoragePath,
+        backPublicUrl,
+        teamName: teamText,
+        season: seasonText || season || undefined,
+        teamId: (target ? target.teamId : teamId) ?? undefined,
+        cardDesign: buildDesign(),
+      });
+      if (res.error) throw new Error(res.error);
+    }
+
+    // A draft that's now a real card → remove it from the drafts list.
+    if (draftId) await deleteCardDraft(draftId).catch(() => {});
+
+    track("card_saved", {
+      team: teamText,
+      season: seasonText || season || undefined,
+      template: bg.type === "template" ? bg.id : "custom",
+      assigned: !!targetKey,
+    });
+    logClientActivity("card_saved", {
+      team: teamText,
+      season: seasonText || season || null,
+      template: bg.type === "template" ? bg.id : "custom",
+      assigned: !!targetKey,
+    }).catch(() => {});
+
+    return { kind: "saved", targetName: target?.name ?? "player" };
+  }
+
   async function handleSave(targetKey?: string) {
     if (!stageRef.current || !cutoutUrl) return;
     setStep("saving");
     setError(null);
+    setSaveError(null);
     setNotice(null);
+    setLastSaveTarget(targetKey);
+
+    let result: { kind: "exported" } | { kind: "saved"; targetName: string };
     try {
-      // Decode the layer images before snapshotting so the rasterizer can't
-      // race and emit a card missing the photo/signature/headshot.
-      if ("fonts" in document) await (document as Document).fonts.ready;
-      await Promise.all([
-        preloadImage(cutoutDataUrl),
-        preloadImage(sigDataUrl ?? sigUrl),
-        preloadImage(headshotDataUrl ?? headshotUrl),
-      ]);
-
-      // ── Rasterize both sides at 2.5"×3.5" (750×1050 @ 300 DPI) ──
-      const { frontBlob, backBlob } = await renderSides();
-
-      // ── Standalone with no chosen player — save both sides to Photos ──
-      if (standalone && !targetKey) {
-        await exportCardImages(frontBlob, backBlob);
-        track("card_downloaded", {
-          standalone: true,
-          template: bg.type === "template" ? bg.id : "custom",
-        });
-        logClientActivity("card_downloaded", {
-          standalone: true,
-          template: bg.type === "template" ? bg.id : "custom",
-        }).catch(() => {});
-        setStep("edit");
-        return;
-      }
-
-      // Otherwise attach to a player: the prop player (player card page) or the
-      // chosen assign target (standalone Card Creator). A target carries the
-      // specific team picked, so a multi-team kid saves under the right team.
-      const target = targetKey ? assignTargets.find((t) => t.key === targetKey) : undefined;
-      const targetPlayerId = target?.id ?? playerId;
-      if (!targetPlayerId) throw new Error("No player to attach this card to.");
-
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      const frontId = crypto.randomUUID();
-      const frontPath = `${user.id}/cards/${frontId}.png`;
-      const { error: frontUpErr } = await supabase.storage
-        .from("player-photos")
-        .upload(frontPath, frontBlob, { contentType: "image/png", upsert: false });
-      if (frontUpErr) throw frontUpErr;
-      const { data: frontUrlData } = supabase.storage
-        .from("player-photos")
-        .getPublicUrl(frontPath);
-
-      // ── Upload back (always saved, so every card has both sides) ──
-      const backStoragePath = `${user.id}/cards/${frontId}-back.png`;
-      const { error: backUpErr } = await supabase.storage
-        .from("player-photos")
-        .upload(backStoragePath, backBlob, { contentType: "image/png", upsert: false });
-      if (backUpErr) throw backUpErr;
-      const backPublicUrl = supabase.storage
-        .from("player-photos")
-        .getPublicUrl(backStoragePath).data.publicUrl;
-
-      // Players the card is saved to: the primary plus any extra subjects linked
-      // to a real teammate. Two or more → a shared "group card" (one gallery-only
-      // row per player, kept in sync by card_group_id). One → the normal path.
-      const extraLinkedIds = extraSubjects
-        .map((s) => s.playerId)
-        .filter(Boolean) as string[];
-      const featured = [...new Set([targetPlayerId, ...extraLinkedIds])];
-
-      if (featured.length >= 2) {
-        const res = await saveCardForPlayers({
-          playerIds: featured,
-          primaryPlayerId: targetPlayerId,
-          // Fold the primary's existing single card into the group (solo→group)
-          // when editing in place; when assigning to a chosen player, insert.
-          primaryPhotoId: !targetKey ? initialPhotoId ?? undefined : undefined,
-          cardGroupId: cardGroupId ?? undefined,
-          storagePath: frontPath,
-          publicUrl: frontUrlData.publicUrl,
-          backStoragePath,
-          backPublicUrl,
-          teamName: teamText,
-          season: seasonText || season || undefined,
-          teamId: (target ? target.teamId : teamId) ?? undefined,
-          cardDesign: buildDesign(),
-        });
-        if (res.error) throw new Error(res.error);
-        if (res.cardGroupId) setCardGroupId(res.cardGroupId);
-      } else {
-        const res = await savePlayerPhoto({
-          playerId: targetPlayerId,
-          // Only edit in place when saving back to the same card the editor
-          // opened (no assign target picked). Assigning to a chosen player inserts.
-          photoId: !targetKey ? initialPhotoId ?? undefined : undefined,
-          storagePath: frontPath,
-          publicUrl: frontUrlData.publicUrl,
-          backStoragePath,
-          backPublicUrl,
-          teamName: teamText,
-          season: seasonText || season || undefined,
-          teamId: (target ? target.teamId : teamId) ?? undefined,
-          cardDesign: buildDesign(),
-        });
-        if (res.error) throw new Error(res.error);
-      }
-
-      // A draft that's now a real card → remove it from the drafts list.
-      if (draftId) await deleteCardDraft(draftId).catch(() => {});
-
-      track("card_saved", {
-        team: teamText,
-        season: seasonText || season || undefined,
-        template: bg.type === "template" ? bg.id : "custom",
-        assigned: !!targetKey,
-      });
-      logClientActivity("card_saved", {
-        team: teamText,
-        season: seasonText || season || null,
-        template: bg.type === "template" ? bg.id : "custom",
-        assigned: !!targetKey,
-      }).catch(() => {});
-
-      // Standalone assign: stay in the tool with a confirmation (they may make
-      // another). Player-card page: navigate back as before.
-      if (standalone) {
-        setNotice(`Saved to ${target?.name ?? "player"}.`);
-        setStep("edit");
-        router.refresh();
-      } else {
-        setStep("saved");
-        router.push(returnHref);
-        router.refresh();
-      }
+      // Only the actual save work is raced against the timeout — not the
+      // navigation that follows — so a slow next-screen load can't masquerade as
+      // a failed save.
+      result = await withTimeout(
+        performSave(targetKey),
+        SAVE_TIMEOUT_MS,
+        "This is taking longer than expected — check your connection and try again. If your card already shows up in the gallery, it did save."
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       track("card_save_failed", { error: msg });
       logClientActivity("card_save_failed", { error: msg }).catch(() => {});
-      setError(msg);
       setStep("edit");
+      setSaveError(msg);
+      return;
+    }
+
+    // Post-save (untimed). A stalled navigation must never trap the user behind a
+    // spinner, so on the player-card page success is its own non-spinner overlay
+    // (checkmark + a manual "Done") while the router also navigates on its own.
+    if (result.kind === "exported") {
+      setStep("edit");
+      return;
+    }
+    if (standalone) {
+      setNotice(`Saved to ${result.targetName}.`);
+      setStep("edit");
+      router.refresh();
+    } else {
+      setStep("saved");
+      router.refresh();
+      router.push(returnHref);
     }
   }
 
@@ -4722,10 +4772,59 @@ export default function CardEditor({
         </div>
       )}
 
-      {/* Saving / exporting / downloading a card — covers the wait (renders both
-          sides + uploads) and stays up through the navigation that follows a
-          successful save, so there's no blank flash before the next screen. */}
-      {(step === "saving" || step === "saved" || downloading) && (
+      {/* Save failed / timed out — a blocking panel with the reason and a Retry
+          that re-runs the exact same save. Retry wins over every other overlay. */}
+      {saveError ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-950 text-xl">
+              ⚠️
+            </div>
+            <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Couldn&apos;t save your card
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{saveError}</p>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setSaveError(null)}
+                className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Keep editing
+              </button>
+              <button
+                onClick={() => handleSave(lastSaveTarget)}
+                className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : step === "saved" ? (
+        /* Save succeeded — a checkmark (never a spinner) so a slow next-screen
+           load can't look like an endless save. The router also navigates on its
+           own; "Done" is the manual escape hatch if that stalls. */
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400 text-xl">
+              ✓
+            </div>
+            <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Card saved!
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Taking you back…
+            </p>
+            <button
+              onClick={() => router.push(returnHref)}
+              className="mt-4 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      ) : (step === "saving" || downloading) ? (
+        /* Saving / exporting / downloading — covers the render + upload wait. */
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
@@ -4741,7 +4840,7 @@ export default function CardEditor({
             </p>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

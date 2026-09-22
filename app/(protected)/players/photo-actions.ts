@@ -200,6 +200,26 @@ export async function savePlayerPhoto({
         .single();
 
   if (error) return { error: error.message };
+
+  // Append an immutable version snapshot to the coach's backend history. The card
+  // itself is edited in place (one live row), so this is the only record of prior
+  // versions. Best-effort: if card_versions isn't present yet (migration 063) the
+  // insert just errors and is ignored — it must never fail the save.
+  try {
+    await service.from("card_versions").insert({
+      user_id: ownerId,
+      player_id: playerId,
+      team_id: teamId ?? null,
+      card_photo_id: data?.id ?? null,
+      public_url: publicUrl,
+      back_public_url: backPublicUrl ?? null,
+      card_design: cardDesign ?? null,
+      created_by: user.id,
+    });
+  } catch {
+    /* version history is non-critical */
+  }
+
   revalidatePath(`/players/${playerId}`);
   revalidatePath("/players");
   revalidatePath(`/parent/player/${playerId}`);

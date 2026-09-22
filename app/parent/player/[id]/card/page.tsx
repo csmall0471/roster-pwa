@@ -100,20 +100,50 @@ export default async function ParentPlayerCardPage({
     playerAge = String(age);
   }
 
-  // Pull an existing card_design for this player+team so they can re-edit it.
+  // Reopen this kid's existing card for THIS team so a return visit edits it in
+  // place instead of piling up duplicates. The card is owned by the coach
+  // (players.user_id) and RLS ("parents_read_photos") lets the parent read it —
+  // so we do NOT filter by the parent's own id (that always missed, which is why
+  // returning made a new card). Prefer a solo (non-group) card; fall back
+  // gracefully if the card_group_id column isn't applied on the DB yet.
   let initialDesign: CardDesign | null = null;
+  let initialPhotoId: string | null = null;
+  let initialCardGroupId: string | null = null;
   if (teamId) {
-    const { data: existing } = await supabase
+    const rich = await supabase
       .from("player_photos")
-      .select("card_design")
+      .select("id, card_design, card_group_id")
       .eq("player_id", id)
       .eq("team_id", teamId)
-      .eq("user_id", user.id)
       .not("card_design", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    initialDesign = (existing?.card_design as CardDesign | null) ?? null;
+      .order("created_at", { ascending: false });
+    const rows = rich.error
+      ? (
+          await supabase
+            .from("player_photos")
+            .select("id, card_design")
+            .eq("player_id", id)
+            .eq("team_id", teamId)
+            .not("card_design", "is", null)
+            .order("created_at", { ascending: false })
+        ).data
+      : rich.data;
+    const list = (rows ?? []) as Array<{
+      id: string;
+      card_design: CardDesign | null;
+      card_group_id?: string | null;
+    }>;
+    const chosen = list.find((r) => !r.card_group_id) ?? list[0];
+    if (chosen) {
+      initialDesign = (chosen.card_design as CardDesign | null) ?? null;
+      // Adopt the row for in-place editing only when it's a solo card. Editing a
+      // shared group card (coach-made) as a single player would desync the group,
+      // so there we preload the look but save a fresh solo copy instead.
+      if (!chosen.card_group_id) {
+        initialPhotoId = chosen.id ?? null;
+        initialCardGroupId = null;
+      }
+    }
   }
 
   const returnHref = teamId ? `/parent/team/${teamId}` : `/parent/player/${id}`;
@@ -129,7 +159,7 @@ export default async function ParentPlayerCardPage({
 
       <div className="mt-3 mb-5">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          Create card for {player.first_name}
+          {initialDesign ? "Edit" : "Create"} card for {player.first_name}
         </h1>
         {teamName && (
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
@@ -157,6 +187,8 @@ export default async function ParentPlayerCardPage({
           playerAge={playerAge}
           returnHref={returnHref}
           initialDesign={initialDesign}
+          initialPhotoId={initialPhotoId}
+          initialCardGroupId={initialCardGroupId}
           defaultSport={sportFromTeam(teamSport)}
         />
       )}
