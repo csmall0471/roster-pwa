@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS card_versions (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
+-- Idempotent so an earlier apply of this file (before these two columns existed)
+-- still gains them on re-run — CREATE TABLE IF NOT EXISTS alone wouldn't.
+ALTER TABLE card_versions ADD COLUMN IF NOT EXISTS storage_path      text;
+ALTER TABLE card_versions ADD COLUMN IF NOT EXISTS back_storage_path text;
+
 CREATE INDEX IF NOT EXISTS card_versions_owner_player_team
   ON card_versions (user_id, player_id, team_id, created_at DESC);
 
