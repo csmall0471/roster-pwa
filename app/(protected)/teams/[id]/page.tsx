@@ -7,6 +7,7 @@ import TeamCards from "./_components/TeamCards";
 import TeamMedia from "./_components/TeamMedia";
 import TeamPhotoBanner from "./_components/TeamPhotoBanner";
 import ScheduleTab, { type GameRow } from "./_components/ScheduleTab";
+import SeasonTab from "./_components/SeasonTab";
 
 function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
@@ -78,6 +79,12 @@ export default async function TeamDetailPage({
     .order("position", { ascending: true });
   const tagTypes = (tagTypesRaw ?? []) as import("@/lib/types").RosterTagType[];
 
+  // Coach-only end-of-season data: player awards + per-kid speech notes.
+  const [{ data: awardRows }, { data: noteRows }] = await Promise.all([
+    supabase.from("team_awards").select("award_key, player_id, position").eq("team_id", id),
+    supabase.from("team_season_notes").select("player_id, note").eq("team_id", id),
+  ]);
+
   if (!team) notFound();
 
   const t = team as Team;
@@ -129,6 +136,21 @@ export default async function TeamDetailPage({
     const lb = (b.players as unknown as { last_name: string } | null)?.last_name ?? "";
     return la.localeCompare(lb);
   });
+
+  // Season tab: ordered award lists (by position) + notes keyed by player, and a
+  // lean roster shape for the awards/notes UI.
+  const seasonAwards: Record<string, string[]> = {};
+  for (const r of [...(awardRows ?? [])].sort(
+    (a, b) => ((a.position as number) ?? 0) - ((b.position as number) ?? 0)
+  )) {
+    (seasonAwards[r.award_key as string] ??= []).push(r.player_id as string);
+  }
+  const seasonNotes: Record<string, string> = {};
+  for (const r of noteRows ?? []) seasonNotes[r.player_id as string] = (r.note as string) ?? "";
+  const seasonPlayers = sorted
+    .map((r) => r.players as unknown as { id: string; first_name: string; last_name: string } | null)
+    .filter((p): p is { id: string; first_name: string; last_name: string } => p != null)
+    .map((p) => ({ id: p.id, first_name: p.first_name, last_name: p.last_name }));
 
   const meta = [t.organization, t.sport, t.age_group, t.season].filter(Boolean).join(" · ");
   const dateRange = formatDateRange(t.season_start, t.season_end);
@@ -215,6 +237,9 @@ export default async function TeamDetailPage({
         </TabLink>
         <TabLink href={`/teams/${id}?tab=media`} active={tab === "media"}>
           Media {teamMedia?.length ? `(${teamMedia.length})` : ""}
+        </TabLink>
+        <TabLink href={`/teams/${id}?tab=season`} active={tab === "season"}>
+          Season
         </TabLink>
       </div>
 
@@ -308,6 +333,15 @@ export default async function TeamDetailPage({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           initialMedia={(teamMedia ?? []) as any}
           teamId={id}
+        />
+      )}
+
+      {tab === "season" && (
+        <SeasonTab
+          teamId={id}
+          players={seasonPlayers}
+          initialAwards={seasonAwards}
+          initialNotes={seasonNotes}
         />
       )}
     </div>
