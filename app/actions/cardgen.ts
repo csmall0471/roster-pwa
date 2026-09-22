@@ -95,68 +95,120 @@ const SPORT_AI: Record<
   },
 };
 
-// 851-labs/background-remover (BRIA RMBG) — fast, transparent PNG output.
-// Pinned version id from https://replicate.com/851-labs/background-remover/versions.
-// Update when you want to upgrade to a newer release.
+// fal.ai BiRefNet — always-warm (no cold start), transparent PNG output. This is
+// the fast path; https://fal.ai/models/fal-ai/birefnet.
+const FAL_MODEL = "fal-ai/birefnet";
+
+// 851-labs/background-remover (InSPyReNet) on Replicate — the fallback when fal
+// is unconfigured or errors. Pinned version id from
+// https://replicate.com/851-labs/background-remover/versions.
 const REPLICATE_VERSION =
   "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc";
 
 type RemoveBgResult = { cutoutUrl?: string; storagePath?: string; error?: string };
 
-export async function removeBackground(sourceUrl: string): Promise<RemoveBgResult> {
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token) {
-    return { error: "Background removal not configured (missing REPLICATE_API_TOKEN)." };
+// Ask fal.ai (BiRefNet) to cut out the background. Returns the remote cutout URL
+// or an error string (the caller falls back to Replicate). Synchronous endpoint
+// (fal.run waits for the result) against an always-warm model, so no cold start.
+async function falRemoveBackground(
+  sourceUrl: string
+): Promise<{ url?: string; error?: string; configured: boolean }> {
+  const key = process.env.FAL_KEY;
+  if (!key) return { configured: false, error: "fal not configured" };
+  try {
+    const res = await fetch(`https://fal.run/${FAL_MODEL}`, {
+      method: "POST",
+      headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ image_url: sourceUrl, output_format: "png" }),
+    });
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 200);
+      return { configured: true, error: `fal ${res.status}: ${detail}` };
+    }
+    // BiRefNet returns the foreground (bg removed) as `image.url`.
+    const json = (await res.json()) as { image?: { url?: string } };
+    const url = json.image?.url;
+    return url ? { configured: true, url } : { configured: true, error: "fal returned no image" };
+  } catch (e) {
+    return { configured: true, error: e instanceof Error ? e.message : "fal request failed" };
   }
+}
 
+// Remove the background from a photo already uploaded to our bucket. Tries the
+// always-warm fal.ai path first, then falls back to Replicate — so bg removal
+// never hard-fails just because the new provider is down/unconfigured. Either
+// way the result PNG is re-hosted on our own bucket so the canvas isn't tainted
+// at export.
+export async function removeBackground(sourceUrl: string): Promise<RemoveBgResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  // Call Replicate synchronously (Prefer: wait, up to 60s).
-  const res = await fetch("https://api.replicate.com/v1/predictions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Prefer: "wait",
-    },
-    body: JSON.stringify({
-      version: REPLICATE_VERSION,
-      input: { image: sourceUrl },
-    }),
-  });
+  // ── Fast path: fal.ai (BiRefNet), always warm ──
+  const fal = await falRemoveBackground(sourceUrl);
+  let remoteUrl: string | null = fal.url ?? null;
 
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const body = (await res.json()) as { detail?: string; title?: string };
-      detail = body.detail || body.title || "";
-    } catch {
-      detail = (await res.text()).slice(0, 200);
-    }
-    if (res.status === 402) {
+  // ── Fallback: Replicate (only if fal didn't produce a cutout) ──
+  if (!remoteUrl) {
+    const token = process.env.REPLICATE_API_TOKEN;
+    if (!token) {
+      // No provider available at all.
       return {
-        error:
-          "Replicate account has no credit. Add billing at replicate.com/account/billing.",
+        error: fal.configured
+          ? `Background removal failed: ${fal.error ?? "fal error"}`
+          : "Background removal not configured (set FAL_KEY or REPLICATE_API_TOKEN).",
       };
     }
-    return { error: `Background removal failed (${res.status}): ${detail}` };
+    if (fal.configured) {
+      console.error("[removeBackground] fal failed, falling back to Replicate:", fal.error);
+    }
+
+    // Call Replicate synchronously (Prefer: wait, up to 60s).
+    const res = await fetch("https://api.replicate.com/v1/predictions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Prefer: "wait",
+      },
+      body: JSON.stringify({
+        version: REPLICATE_VERSION,
+        input: { image: sourceUrl },
+      }),
+    });
+
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const body = (await res.json()) as { detail?: string; title?: string };
+        detail = body.detail || body.title || "";
+      } catch {
+        detail = (await res.text()).slice(0, 200);
+      }
+      if (res.status === 402) {
+        return {
+          error:
+            "Replicate account has no credit. Add billing at replicate.com/account/billing.",
+        };
+      }
+      return { error: `Background removal failed (${res.status}): ${detail}` };
+    }
+
+    const json = (await res.json()) as {
+      status: string;
+      output?: string | string[] | null;
+      error?: string | null;
+    };
+
+    if (json.status === "failed" || json.status === "canceled") {
+      return { error: json.error || "Background removal failed" };
+    }
+
+    const output = json.output;
+    remoteUrl =
+      typeof output === "string" ? output : Array.isArray(output) ? output[0] : null;
   }
 
-  const json = (await res.json()) as {
-    status: string;
-    output?: string | string[] | null;
-    error?: string | null;
-  };
-
-  if (json.status === "failed" || json.status === "canceled") {
-    return { error: json.error || "Background removal failed" };
-  }
-
-  const output = json.output;
-  const remoteUrl =
-    typeof output === "string" ? output : Array.isArray(output) ? output[0] : null;
   if (!remoteUrl) return { error: "Background removal returned no image" };
 
   // Pull the PNG and re-host on our own bucket so the canvas isn't tainted at export.
