@@ -11,10 +11,12 @@ CREATE TABLE IF NOT EXISTS card_versions (
   user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,  -- the coach (players.user_id)
   player_id       uuid REFERENCES players(id) ON DELETE CASCADE,
   team_id         uuid REFERENCES teams(id) ON DELETE SET NULL,
-  card_photo_id   uuid REFERENCES player_photos(id) ON DELETE SET NULL,       -- the live row this version belongs to
-  public_url      text,
-  back_public_url text,
-  card_design     jsonb,
+  card_photo_id     uuid REFERENCES player_photos(id) ON DELETE SET NULL,     -- the live row this version belongs to
+  storage_path      text,   -- the exact stored files, so a restore can point back at them
+  back_storage_path text,
+  public_url        text,
+  back_public_url   text,
+  card_design       jsonb,
   created_by      uuid,             -- auth.uid() of whoever saved (coach or a parent)
   created_at      timestamptz NOT NULL DEFAULT now()
 );

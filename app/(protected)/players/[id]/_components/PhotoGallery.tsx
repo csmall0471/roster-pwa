@@ -7,6 +7,7 @@ import { logClientActivity } from "@/app/actions/log-activity";
 import type { PlayerPhoto } from "@/lib/types";
 import { setPrimaryPhoto, deletePlayerPhoto, assignPhotoToTeam } from "../../photo-actions";
 import { fetchCardForPrint } from "@/lib/cardgen/print-normalize";
+import CardVersionsModal from "./CardVersionsModal";
 
 type PlayerTeam = { id: string; name: string; season: string | null };
 
@@ -213,6 +214,7 @@ function Lightbox({
 }) {
   const [index, setIndex] = useState(initialIndex);
   const [showBack, setShowBack] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const photo = photos[index];
@@ -363,7 +365,7 @@ function Lightbox({
             </div>
           )}
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={async () => {
                 try {
@@ -385,6 +387,18 @@ function Lightbox({
                 Set as current
               </button>
             )}
+            {/* Version history — only Card-Creator cards (card_design) are versioned. */}
+            {photo.card_design && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowVersions(true);
+                }}
+                className="rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-2 transition-colors"
+              >
+                History
+              </button>
+            )}
             <button
               onClick={handleDelete}
               disabled={pending}
@@ -395,6 +409,13 @@ function Lightbox({
           </div>
         </div>
       </div>
+
+      {showVersions && (
+        <CardVersionsModal
+          cardPhotoId={photo.id}
+          onClose={() => setShowVersions(false)}
+        />
+      )}
 
       {/* Next arrow */}
       {hasNext && (

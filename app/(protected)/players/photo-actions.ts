@@ -211,6 +211,8 @@ export async function savePlayerPhoto({
       player_id: playerId,
       team_id: teamId ?? null,
       card_photo_id: data?.id ?? null,
+      storage_path: storagePath,
+      back_storage_path: backStoragePath ?? null,
       public_url: publicUrl,
       back_public_url: backPublicUrl ?? null,
       card_design: cardDesign ?? null,
@@ -531,6 +533,139 @@ export async function deletePlayerPhoto(
   if (photoRow?.team_id) {
     revalidatePath(`/teams/${photoRow.team_id}`);
     revalidatePath(`/parent/team/${photoRow.team_id}`);
+  }
+  return {};
+}
+
+// ── Card version history (coach-only) ─────────────────────────
+// Every savePlayerPhoto appends an immutable snapshot to card_versions. These
+// read/restore that history for the coach. RLS scopes card_versions to the
+// owner (auth.uid() = user_id), so the user client only ever sees their own.
+
+export type CardVersion = {
+  id: string;
+  publicUrl: string | null;
+  backPublicUrl: string | null;
+  createdAt: string;
+  // Friendly label for who saved it: "You" (the coach) or the parent's name.
+  editor: string;
+};
+
+export async function getCardVersions(
+  cardPhotoId: string
+): Promise<{ error?: string; versions?: CardVersion[] }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data, error } = await supabase
+    .from("card_versions")
+    .select("id, public_url, back_public_url, created_by, created_at")
+    .eq("card_photo_id", cardPhotoId)
+    .order("created_at", { ascending: false });
+  if (error) return { error: error.message };
+  const rows = data ?? [];
+
+  // Resolve non-owner editors (parents) to display names.
+  const parentAuthIds = [
+    ...new Set(
+      rows
+        .map((r) => r.created_by as string | null)
+        .filter((id): id is string => !!id && id !== user.id)
+    ),
+  ];
+  const nameByAuthId = new Map<string, string>();
+  if (parentAuthIds.length) {
+    const service = createServiceClient();
+    const { data: links } = await service
+      .from("parent_auth")
+      .select("auth_user_id, parents(first_name, last_name)")
+      .in("auth_user_id", parentAuthIds);
+    for (const l of links ?? []) {
+      const p = l.parents as unknown as { first_name: string; last_name: string } | null;
+      if (p) nameByAuthId.set(l.auth_user_id as string, `${p.first_name} ${p.last_name}`.trim());
+    }
+  }
+
+  const versions: CardVersion[] = rows.map((r) => ({
+    id: r.id as string,
+    publicUrl: (r.public_url as string | null) ?? null,
+    backPublicUrl: (r.back_public_url as string | null) ?? null,
+    createdAt: r.created_at as string,
+    editor:
+      r.created_by === user.id
+        ? "You"
+        : nameByAuthId.get(r.created_by as string) ?? "A parent",
+  }));
+  return { versions };
+}
+
+// Roll the live card back to an earlier snapshot. The snapshot's image files
+// still exist in storage (each save uploads a fresh file, never overwriting), so
+// this just repoints the live row at them and restores its card_design — then
+// records the restore as its own new version.
+export async function restoreCardVersion(
+  versionId: string
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // RLS (owner read) guarantees this only resolves the coach's own versions.
+  const { data: v } = await supabase
+    .from("card_versions")
+    .select(
+      "id, user_id, player_id, team_id, card_photo_id, storage_path, back_storage_path, public_url, back_public_url, card_design"
+    )
+    .eq("id", versionId)
+    .maybeSingle();
+  if (!v) return { error: "Version not found" };
+  if (v.user_id !== user.id) return { error: "Not authorized" };
+  if (!v.card_photo_id) return { error: "The card for this version no longer exists." };
+
+  const service = createServiceClient();
+  const { error } = await service
+    .from("player_photos")
+    .update({
+      storage_path: v.storage_path,
+      back_storage_path: v.back_storage_path,
+      public_url: v.public_url,
+      back_public_url: v.back_public_url,
+      card_design: v.card_design,
+    })
+    .eq("id", v.card_photo_id)
+    .eq("user_id", v.user_id);
+  if (error) return { error: error.message };
+
+  // Record the restore itself as the new latest version (best-effort).
+  try {
+    await service.from("card_versions").insert({
+      user_id: v.user_id,
+      player_id: v.player_id,
+      team_id: v.team_id,
+      card_photo_id: v.card_photo_id,
+      storage_path: v.storage_path,
+      back_storage_path: v.back_storage_path,
+      public_url: v.public_url,
+      back_public_url: v.back_public_url,
+      card_design: v.card_design,
+      created_by: user.id,
+    });
+  } catch {
+    /* version history is non-critical */
+  }
+
+  if (v.player_id) {
+    revalidatePath(`/players/${v.player_id}`);
+    revalidatePath(`/parent/player/${v.player_id}`);
+  }
+  if (v.team_id) {
+    revalidatePath(`/teams/${v.team_id}`);
+    revalidatePath(`/parent/team/${v.team_id}`);
   }
   return {};
 }
