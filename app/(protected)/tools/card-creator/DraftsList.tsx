@@ -34,8 +34,16 @@ export default function DraftsList({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [navPending, startNav] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+
+  // Open a draft with an explicit loading overlay. useTransition keeps the click
+  // responsive and suppresses the route skeleton flash while the editor reloads
+  // with the draft's design.
+  function openDraft(id: string) {
+    startNav(() => router.push(`/tools/card-creator?draft=${id}`));
+  }
 
   if (drafts.length === 0) return null;
 
@@ -149,7 +157,14 @@ export default function DraftsList({
             >
               ✓
             </button>
-            <Link href={`/tools/card-creator?draft=${d.id}`} className="block">
+            <Link
+              href={`/tools/card-creator?draft=${d.id}`}
+              onClick={(e) => {
+                e.preventDefault();
+                openDraft(d.id);
+              }}
+              className="block"
+            >
               <div className="relative">
                 {d.front_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -184,6 +199,18 @@ export default function DraftsList({
           </li>
         ))}
       </ul>
+
+      {/* Opening a draft — full-screen loading while the editor reloads. */}
+      {navPending && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+            <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Loading draft…
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

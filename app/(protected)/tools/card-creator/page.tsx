@@ -1,11 +1,12 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { CardDesign } from "@/lib/types";
 import CardEditor, { type AssignTarget } from "@/app/_components/cardgen/CardEditor";
 import { toAssignTargets } from "@/app/_components/cardgen/assign-targets";
-import DraftsList, { type DraftRow } from "./DraftsList";
-import SeasonCardsSaver, { type SeasonGroup } from "./SeasonCardsSaver";
+import DraftsSection from "./DraftsSection";
+import SeasonCardsSection from "./SeasonCardsSection";
 
 // Standalone card creator (Tools → Card Creator). Build a card from any photo
 // without first picking a player; the finished card exports to the photo
@@ -111,59 +112,6 @@ export default async function CardCreatorPage({
     }));
   }
 
-  // Names for earmarked drafts, keyed by player id (owner's own players).
-  const nameById = new Map(
-    (players ?? []).map((p) => [p.id as string, `${p.first_name} ${p.last_name}`.trim()])
-  );
-
-  // Every card from the coach's in-progress seasons, so they can be saved in one
-  // shot. "In progress" = the season is currently active (started, not ended) —
-  // same rule as the Teams page. Cards live on player_photos, scoped by team.
-  let inProgressSeasons: SeasonGroup[] = [];
-  if (isOwner) {
-    const today = new Date().toISOString().slice(0, 10);
-    const { data: teamRows } = await supabase
-      .from("teams")
-      .select("id, name, season, season_start, season_end")
-      .eq("user_id", user.id);
-    const current = (teamRows ?? []).filter((t) => {
-      const start = t.season_start as string | null;
-      const end = t.season_end as string | null;
-      if (end && end < today) return false; // already finished
-      if (start && start > today) return false; // not started yet
-      return true; // in progress
-    });
-    const currentIds = current.map((t) => t.id as string);
-    if (currentIds.length > 0) {
-      const { data: cardRows } = await supabase
-        .from("player_photos")
-        .select("public_url, back_public_url, team_id, players(first_name, last_name)")
-        .in("team_id", currentIds)
-        .order("created_at", { ascending: false });
-      const byTeam = new Map<string, SeasonGroup>();
-      for (const t of current) {
-        byTeam.set(t.id as string, {
-          teamId: t.id as string,
-          teamName: (t.name as string) || "Team",
-          season: (t.season as string | null) ?? null,
-          cards: [],
-        });
-      }
-      for (const row of cardRows ?? []) {
-        const group = byTeam.get(row.team_id as string);
-        if (!group) continue;
-        const p = row.players as unknown as { first_name: string; last_name: string } | null;
-        const who = p ? `${p.first_name} ${p.last_name}`.trim() : "";
-        group.cards.push({
-          front: row.public_url as string,
-          back: (row.back_public_url as string | null) ?? null,
-          name: who || "card",
-        });
-      }
-      inProgressSeasons = [...byTeam.values()].filter((g) => g.cards.length > 0);
-    }
-  }
-
   // Reopen a draft (owner only). RLS scopes to this user. Try the assignment
   // columns first; fall back if the player_id/team_id migration isn't applied.
   let initialDesign: CardDesign | null = null;
@@ -183,28 +131,6 @@ export default async function CardCreatorPage({
     if (playerId) initialAssignKey = `${playerId}::${teamId ?? "none"}`;
   }
 
-  // The drafts list (graceful empty if the table isn't migrated yet; falls back
-  // to the pre-assignment columns so existing drafts still show before migrate).
-  let drafts: DraftRow[] = [];
-  if (isOwner) {
-    const rich = await supabase
-      .from("card_drafts")
-      .select("id, label, team_name, season, front_url, back_url, updated_at, player_id")
-      .order("updated_at", { ascending: false });
-    const rows = rich.error
-      ? (
-          await supabase
-            .from("card_drafts")
-            .select("id, label, team_name, season, front_url, back_url, updated_at")
-            .order("updated_at", { ascending: false })
-        ).data
-      : rich.data;
-    drafts = ((rows ?? []) as (DraftRow & { player_id?: string | null })[]).map((r) => ({
-      ...r,
-      player_name: r.player_id ? nameById.get(r.player_id) ?? null : null,
-    }));
-  }
-
   return (
     <div className="max-w-2xl lg:max-w-none">
       <Link href="/teams" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
@@ -219,7 +145,12 @@ export default async function CardCreatorPage({
         </p>
       </div>
 
-      {isOwner && <SeasonCardsSaver seasons={inProgressSeasons} />}
+      {/* Streamed so the editor paints immediately (its own query can be heavy). */}
+      {isOwner && (
+        <Suspense fallback={null}>
+          <SeasonCardsSection />
+        </Suspense>
+      )}
 
       <CardEditor
         key={draftId ?? "new"}
@@ -242,7 +173,20 @@ export default async function CardCreatorPage({
         initialAssignKey={initialAssignKey}
       />
 
-      {isOwner && <DraftsList drafts={drafts} activeId={draftId ?? null} />}
+      {/* Drafts stream in below the editor with a spinner, so the page shows
+          right away instead of blocking on this query. */}
+      {isOwner && (
+        <Suspense
+          fallback={
+            <div className="mt-10 flex items-center justify-center gap-2 py-6 text-sm text-gray-400 dark:text-gray-500">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+              Loading drafts…
+            </div>
+          }
+        >
+          <DraftsSection activeId={draftId ?? null} />
+        </Suspense>
+      )}
     </div>
   );
 }

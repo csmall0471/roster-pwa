@@ -4823,20 +4823,23 @@ export default function CardEditor({
             </button>
           </div>
         </div>
-      ) : (step === "saving" || downloading) ? (
-        /* Saving / exporting / downloading — covers the render + upload wait. */
+      ) : (step === "saving" || downloading || addingPlayer) ? (
+        /* Saving / exporting / downloading / adding a player — covers the wait
+           (render + upload, or background removal for an added player). */
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
-              {downloading
-                ? "Preparing your card…"
-                : standalone && !assignTargetKey
-                  ? "Exporting your card…"
-                  : "Saving your card…"}
+              {addingPlayer
+                ? "Adding player…"
+                : downloading
+                  ? "Preparing your card…"
+                  : standalone && !assignTargetKey
+                    ? "Exporting your card…"
+                    : "Saving your card…"}
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Rendering both sides…
+              {addingPlayer ? "Removing the background…" : "Rendering both sides…"}
             </p>
           </div>
         </div>
