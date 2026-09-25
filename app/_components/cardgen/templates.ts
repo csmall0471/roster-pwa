@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-export type TemplateCategory = "solid" | "gradient" | "stripes" | "rainbow" | "pattern" | "basketball" | "football";
+export type TemplateCategory = "solid" | "gradient" | "stripes" | "rainbow" | "pattern" | "smoke" | "burst" | "basketball" | "football";
 
 export type Template = {
   id: string;
@@ -17,6 +17,8 @@ export const TEMPLATE_CATEGORIES: { key: TemplateCategory; label: string }[] = [
   { key: "stripes", label: "Stripes" },
   { key: "rainbow", label: "Rainbow" },
   { key: "pattern", label: "Patterns" },
+  { key: "smoke", label: "Smoke" },
+  { key: "burst", label: "Color Blast" },
   { key: "basketball", label: "Basketball" },
   { key: "football", label: "Football" },
 ];
@@ -781,6 +783,156 @@ export const TEMPLATES: Template[] = [
         "repeating-linear-gradient(90deg, rgba(255,255,255,0.32) 0px, rgba(255,255,255,0.32) 2px, transparent 2px, transparent 40px), linear-gradient(180deg, #0d3b1e 0%, #12522a 50%, #0d3b1e 100%)",
     },
     textColor: "light",
+  },
+
+  // ── Smoke ──────────────────────────────────────────────────
+  // Moody "spotlight through colored smoke" looks — a bright cone from the top,
+  // colored plumes rising from the bottom corners, over a dark vignette. All
+  // pure CSS radial gradients so they survive the iOS foreignObject export.
+  {
+    id: "smoke-blue",
+    name: "Blue Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(60% 46% at 50% 0%, rgba(191,219,254,0.55) 0%, rgba(191,219,254,0.12) 32%, rgba(191,219,254,0) 62%), radial-gradient(95% 72% at 22% 108%, rgba(37,99,235,0.55) 0%, rgba(37,99,235,0) 62%), radial-gradient(95% 70% at 82% 102%, rgba(59,130,246,0.48) 0%, rgba(59,130,246,0) 58%), radial-gradient(120% 120% at 50% 42%, #0c1524 0%, #060b14 68%, #04060c 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "smoke-red",
+    name: "Red Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(60% 46% at 50% 0%, rgba(254,202,202,0.5) 0%, rgba(254,202,202,0.1) 32%, rgba(254,202,202,0) 62%), radial-gradient(95% 72% at 22% 108%, rgba(220,38,38,0.55) 0%, rgba(220,38,38,0) 62%), radial-gradient(95% 70% at 82% 102%, rgba(239,68,68,0.48) 0%, rgba(239,68,68,0) 58%), radial-gradient(120% 120% at 50% 42%, #1c0a0a 0%, #120606 68%, #0a0303 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "smoke-green",
+    name: "Green Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(60% 46% at 50% 0%, rgba(187,247,208,0.5) 0%, rgba(187,247,208,0.1) 32%, rgba(187,247,208,0) 62%), radial-gradient(95% 72% at 22% 108%, rgba(22,163,74,0.55) 0%, rgba(22,163,74,0) 62%), radial-gradient(95% 70% at 82% 102%, rgba(34,197,94,0.46) 0%, rgba(34,197,94,0) 58%), radial-gradient(120% 120% at 50% 42%, #06160d 0%, #040f08 68%, #020805 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "smoke-purple",
+    name: "Purple Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(60% 46% at 50% 0%, rgba(233,213,255,0.52) 0%, rgba(233,213,255,0.12) 32%, rgba(233,213,255,0) 62%), radial-gradient(95% 72% at 22% 108%, rgba(124,58,237,0.55) 0%, rgba(124,58,237,0) 62%), radial-gradient(95% 70% at 82% 102%, rgba(168,85,247,0.5) 0%, rgba(168,85,247,0) 58%), radial-gradient(120% 120% at 50% 42%, #140a24 0%, #0c0618 68%, #06040c 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "smoke-orange",
+    name: "Orange Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(60% 46% at 50% 0%, rgba(254,215,170,0.52) 0%, rgba(254,215,170,0.12) 32%, rgba(254,215,170,0) 62%), radial-gradient(95% 72% at 22% 108%, rgba(234,88,12,0.55) 0%, rgba(234,88,12,0) 62%), radial-gradient(95% 70% at 82% 102%, rgba(249,115,22,0.48) 0%, rgba(249,115,22,0) 58%), radial-gradient(120% 120% at 50% 42%, #1c0f06 0%, #130a04 68%, #0a0502 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "smoke-teal",
+    name: "Teal Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(60% 46% at 50% 0%, rgba(153,246,228,0.5) 0%, rgba(153,246,228,0.1) 32%, rgba(153,246,228,0) 62%), radial-gradient(95% 72% at 22% 108%, rgba(13,148,136,0.55) 0%, rgba(13,148,136,0) 62%), radial-gradient(95% 70% at 82% 102%, rgba(20,184,166,0.46) 0%, rgba(20,184,166,0) 58%), radial-gradient(120% 120% at 50% 42%, #061817 0%, #04100f 68%, #020807 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "smoke-magenta",
+    name: "Pink Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(60% 46% at 50% 0%, rgba(251,207,232,0.52) 0%, rgba(251,207,232,0.12) 32%, rgba(251,207,232,0) 62%), radial-gradient(95% 72% at 22% 108%, rgba(219,39,119,0.55) 0%, rgba(219,39,119,0) 62%), radial-gradient(95% 70% at 82% 102%, rgba(236,72,153,0.5) 0%, rgba(236,72,153,0) 58%), radial-gradient(120% 120% at 50% 42%, #1c0814 0%, #12050d 68%, #0a0307 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "smoke-stadium",
+    name: "Stadium Smoke",
+    category: "smoke",
+    style: {
+      background:
+        "radial-gradient(58% 48% at 50% 0%, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0.14) 30%, rgba(255,255,255,0) 60%), radial-gradient(95% 72% at 20% 108%, rgba(148,163,184,0.5) 0%, rgba(148,163,184,0) 62%), radial-gradient(95% 70% at 84% 102%, rgba(203,213,225,0.42) 0%, rgba(203,213,225,0) 58%), radial-gradient(120% 120% at 50% 42%, #141821 0%, #0b0f17 70%, #05070c 100%)",
+    },
+    textColor: "light",
+  },
+
+  // ── Color Blast ────────────────────────────────────────────
+  // Powder-explosion / Prizm "color blast" looks — vivid color bursts around a
+  // clearer center where the player stands. On white or near-black grounds. Pure
+  // CSS radial gradients (iOS-export-safe).
+  {
+    id: "burst-prizm-white",
+    name: "Prizm Blast",
+    category: "burst",
+    style: {
+      background:
+        "radial-gradient(42% 46% at 26% 32%, rgba(236,72,153,0.85) 0%, rgba(236,72,153,0) 55%), radial-gradient(40% 44% at 74% 28%, rgba(59,130,246,0.82) 0%, rgba(59,130,246,0) 55%), radial-gradient(44% 46% at 82% 62%, rgba(168,85,247,0.8) 0%, rgba(168,85,247,0) 55%), radial-gradient(44% 46% at 20% 68%, rgba(34,197,94,0.8) 0%, rgba(34,197,94,0) 55%), radial-gradient(40% 42% at 60% 82%, rgba(250,204,21,0.85) 0%, rgba(250,204,21,0) 55%), #ffffff",
+    },
+    textColor: "dark",
+  },
+  {
+    id: "burst-warm-white",
+    name: "Warm Blast",
+    category: "burst",
+    style: {
+      background:
+        "radial-gradient(46% 48% at 28% 34%, rgba(244,63,94,0.85) 0%, rgba(244,63,94,0) 56%), radial-gradient(42% 44% at 76% 30%, rgba(249,115,22,0.85) 0%, rgba(249,115,22,0) 55%), radial-gradient(44% 46% at 78% 70%, rgba(217,70,239,0.8) 0%, rgba(217,70,239,0) 55%), radial-gradient(42% 44% at 22% 72%, rgba(250,204,21,0.85) 0%, rgba(250,204,21,0) 55%), #ffffff",
+    },
+    textColor: "dark",
+  },
+  {
+    id: "burst-cool-white",
+    name: "Cool Blast",
+    category: "burst",
+    style: {
+      background:
+        "radial-gradient(46% 48% at 28% 32%, rgba(37,99,235,0.82) 0%, rgba(37,99,235,0) 56%), radial-gradient(42% 44% at 74% 30%, rgba(20,184,166,0.82) 0%, rgba(20,184,166,0) 55%), radial-gradient(44% 46% at 80% 70%, rgba(139,92,246,0.8) 0%, rgba(139,92,246,0) 55%), radial-gradient(42% 44% at 20% 72%, rgba(34,197,94,0.8) 0%, rgba(34,197,94,0) 55%), #ffffff",
+    },
+    textColor: "dark",
+  },
+  {
+    id: "burst-neon-dark",
+    name: "Neon Blast",
+    category: "burst",
+    style: {
+      background:
+        "radial-gradient(44% 46% at 26% 32%, rgba(236,72,153,0.85) 0%, rgba(236,72,153,0) 55%), radial-gradient(42% 44% at 76% 30%, rgba(34,211,238,0.82) 0%, rgba(34,211,238,0) 55%), radial-gradient(44% 46% at 80% 70%, rgba(168,85,247,0.82) 0%, rgba(168,85,247,0) 55%), radial-gradient(42% 44% at 20% 70%, rgba(163,230,53,0.78) 0%, rgba(163,230,53,0) 55%), radial-gradient(120% 120% at 50% 50%, #0b0b12 0%, #050507 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "burst-sunset-dark",
+    name: "Sunset Blast",
+    category: "burst",
+    style: {
+      background:
+        "radial-gradient(46% 48% at 28% 34%, rgba(249,115,22,0.85) 0%, rgba(249,115,22,0) 56%), radial-gradient(42% 44% at 74% 30%, rgba(236,72,153,0.82) 0%, rgba(236,72,153,0) 55%), radial-gradient(44% 46% at 80% 72%, rgba(139,92,246,0.8) 0%, rgba(139,92,246,0) 55%), radial-gradient(42% 44% at 22% 72%, rgba(250,204,21,0.8) 0%, rgba(250,204,21,0) 55%), radial-gradient(120% 120% at 50% 50%, #120a12 0%, #070409 100%)",
+    },
+    textColor: "light",
+  },
+  {
+    id: "burst-usa-white",
+    name: "USA Blast",
+    category: "burst",
+    style: {
+      background:
+        "radial-gradient(48% 50% at 26% 34%, rgba(220,38,38,0.85) 0%, rgba(220,38,38,0) 56%), radial-gradient(46% 48% at 78% 34%, rgba(37,99,235,0.85) 0%, rgba(37,99,235,0) 56%), radial-gradient(42% 44% at 74% 74%, rgba(220,38,38,0.7) 0%, rgba(220,38,38,0) 55%), radial-gradient(42% 44% at 24% 74%, rgba(37,99,235,0.7) 0%, rgba(37,99,235,0) 55%), #ffffff",
+    },
+    textColor: "dark",
   },
 ];
 

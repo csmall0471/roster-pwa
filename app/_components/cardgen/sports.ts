@@ -39,7 +39,7 @@ export const SPORTS: Record<CardSport, SportConfig> = {
   basketball: {
     id: "basketball",
     label: "Basketball",
-    backgroundCategories: ["basketball", "solid", "gradient", "stripes", "rainbow", "pattern"],
+    backgroundCategories: ["basketball", "solid", "gradient", "stripes", "rainbow", "pattern", "smoke", "burst"],
     defaultBackgroundId: "solid-midnight",
     positions: [
       { value: "GUARD", label: "Guard" },
@@ -71,7 +71,7 @@ export const SPORTS: Record<CardSport, SportConfig> = {
   football: {
     id: "football",
     label: "Football",
-    backgroundCategories: ["football", "stripes", "solid", "gradient"],
+    backgroundCategories: ["football", "stripes", "solid", "gradient", "smoke", "burst"],
     defaultBackgroundId: "fb-gridiron",
     positions: [
       { value: "QUARTERBACK", label: "Quarterback" },
