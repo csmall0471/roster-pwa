@@ -18,6 +18,7 @@ export type ActivityEvent =
   | "card_bg_removed"
   | "card_bg_removal_failed"
   | "card_template_picked"
+  | "card_frame_picked"
   | "card_bg_image_uploaded"
   | "card_side_switched"
   | "card_sport_changed"

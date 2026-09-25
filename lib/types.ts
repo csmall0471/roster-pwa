@@ -210,6 +210,9 @@ export interface CardDesign {
   // Optional team logo placed on the BACK — reuses the front logo's image, but
   // carries its own independent placement. Absent = no back logo.
   back_logo?: CardLogo | null;
+  // Optional decorative frame on the FRONT (id from cardgen/frames). Draws a
+  // border + colored team/player name plates. Absent/"none" = no frame.
+  frame?: string | null;
 }
 
 export interface CardBackDesign {

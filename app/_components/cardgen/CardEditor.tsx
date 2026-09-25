@@ -22,6 +22,15 @@ import {
 import { savePlayerPhoto, saveCardForPlayers } from "@/app/(protected)/players/photo-actions";
 import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
+import {
+  FRAMES,
+  getFrame,
+  NO_FRAME,
+  FRAME_INSET_PCT,
+  FRAME_BAND_PCT,
+  FRAME_KEYLINE_PCT,
+  FRAME_PLATE_INSET_PCT,
+} from "./frames";
 import { SPORTS, getSport, CARD_SPORTS, type CardSport } from "./sports";
 import { LOGO_PRESETS } from "./logos";
 import CardBackDuo from "./CardBackDuo";
@@ -689,6 +698,11 @@ export default function CardEditor({
   const [nameItalic, setNameItalic] = useState(
     initialDesign?.text.name_italic ?? false
   );
+  // Decorative front frame (border + team/name plates). NO_FRAME = off.
+  const [frameId, setFrameId] = useState<string>(
+    initialDesign?.frame ?? NO_FRAME
+  );
+  const frame = getFrame(frameId);
   // Number of copies "in circulation" — a serialized limited-edition stamp on
   // the front. Kept as a string for the input; parsed to a number when saved.
   const [circulation, setCirculation] = useState(
@@ -1786,6 +1800,7 @@ export default function CardEditor({
           }
         : {}),
       background: bg,
+      ...(frame ? { frame: frameId } : {}),
       transform: { x: tx, y: ty, scale, rotation },
       text: {
         team_name: teamText,
@@ -2687,6 +2702,35 @@ export default function CardEditor({
         {/* Overlay layer — jersey/plate/name; captured as one transparent layer
             and composited on top of the photo. */}
         <div ref={overlayLayerRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        {/* Decorative frame — two scaled bands just inside the card edge, drawn
+            below the plates/name so those sit on top of the border. */}
+        {frame && (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                inset: `calc(var(--cardw, 22rem) * ${FRAME_INSET_PCT} / 100)`,
+                borderStyle: "solid",
+                borderColor: frame.band,
+                borderWidth: `calc(var(--cardw, 22rem) * ${FRAME_BAND_PCT} / 100)`,
+                borderRadius: "calc(var(--cardw, 22rem) * 2 / 100)",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: `calc(var(--cardw, 22rem) * ${FRAME_INSET_PCT + FRAME_BAND_PCT} / 100)`,
+                borderStyle: "solid",
+                borderColor: frame.keyline,
+                borderWidth: `calc(var(--cardw, 22rem) * ${FRAME_KEYLINE_PCT} / 100)`,
+                borderRadius: "calc(var(--cardw, 22rem) * 1.2 / 100)",
+                pointerEvents: "none",
+              }}
+            />
+          </>
+        )}
+
         {/* Jersey number badge — top right. */}
         {stats.jersey && (
           <div
@@ -2721,17 +2765,21 @@ export default function CardEditor({
         <div
           style={{
             position: "absolute",
-            top: "6.5%",
-            left: 0,
+            // With a frame, tuck the plate just inside the top-left border;
+            // otherwise it's full-bleed to the left edge.
+            top: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT + 1.2} / 100)` : "6.5%",
+            left: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : 0,
             pointerEvents: "none",
             filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))",
           }}
         >
           <div
             style={{
-              background: "#fff",
-              color: "#0a0a0a",
-              padding: "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
+              background: frame ? frame.teamPlate.background : "#fff",
+              color: frame ? frame.teamPlate.color : "#0a0a0a",
+              padding: frame
+                ? "0.38em 1.4em"
+                : "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
               clipPath:
                 "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
               fontFamily: "var(--font-anton), Impact, sans-serif",
@@ -2746,9 +2794,11 @@ export default function CardEditor({
           {(ageText || seasonText) && (
             <div
               style={{
-                background: "#0a0a0a",
-                color: "#fff",
-                padding: "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
+                background: frame ? frame.teamPlate.subBackground : "#0a0a0a",
+                color: frame ? frame.teamPlate.subColor : "#fff",
+                padding: frame
+                  ? "0.45em 1.4em"
+                  : "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
                 clipPath:
                   "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
                 fontFamily:
@@ -2765,20 +2815,31 @@ export default function CardEditor({
           )}
         </div>
 
-        {/* Player name */}
+        {/* Player name — a colored plate bar when a frame is active, otherwise
+            plain title text over the photo. */}
         <div
           style={{
             position: "absolute",
-            left: "8%",
-            right: "8%",
-            bottom: "7%",
+            left: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : "8%",
+            right: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : "8%",
+            bottom: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT + 0.8} / 100)` : "7%",
             pointerEvents: "none",
             fontFamily: getNameFont(nameFont).family,
             fontStyle: nameItalic ? "italic" : "normal",
-            color: titleColor,
-            textShadow: titleShadow,
+            color: frame?.namePlate ? frame.namePlate.color : titleColor,
+            textShadow: frame?.namePlate ? "none" : titleShadow,
             lineHeight: 0.92,
             letterSpacing: "0.01em",
+            ...(frame?.namePlate
+              ? {
+                  background: frame.namePlate.background,
+                  padding:
+                    "calc(var(--cardw, 22rem) * 1.6 / 100) calc(var(--cardw, 22rem) * 2.4 / 100)",
+                  borderRadius: "calc(var(--cardw, 22rem) * 1 / 100)",
+                  textAlign: "center" as const,
+                  filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.4))",
+                }
+              : {}),
           }}
         >
           {isDuo ? (
@@ -3336,6 +3397,86 @@ export default function CardEditor({
 
           {tab === "bg" && (
             <div className="space-y-4">
+              {/* Frame — a decorative border with the team/player name on plates,
+                  layered over whichever background is chosen. */}
+              <div className="space-y-1.5">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  Frame
+                </h4>
+                <div className="grid grid-cols-3 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
+                  <button
+                    onClick={() => {
+                      setFrameId(NO_FRAME);
+                      scrollToPreview();
+                    }}
+                    className={`relative aspect-[5/7] rounded-lg overflow-hidden flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-[11px] font-medium text-gray-500 dark:text-gray-400 transition-all ${
+                      frameId === NO_FRAME
+                        ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900"
+                        : ""
+                    }`}
+                    aria-label="No frame"
+                  >
+                    No frame
+                  </button>
+                  {FRAMES.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => {
+                        setFrameId(f.id);
+                        scrollToPreview();
+                        track("card_frame_picked", { frame_id: f.id });
+                        logClientActivity("card_frame_picked", { frame_id: f.id }).catch(() => {});
+                      }}
+                      className={`relative aspect-[5/7] rounded-lg overflow-hidden bg-white dark:bg-gray-900 transition-all ${
+                        frameId === f.id
+                          ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900"
+                          : ""
+                      }`}
+                      aria-label={f.name}
+                      title={f.name}
+                    >
+                      <div style={{ position: "absolute", inset: "6%", border: `3px solid ${f.band}`, borderRadius: 4 }} />
+                      <div style={{ position: "absolute", inset: "11%", border: `1px solid ${f.keyline}` }} />
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "13%",
+                          left: "13%",
+                          background: f.teamPlate.background,
+                          color: f.teamPlate.color,
+                          fontSize: "7px",
+                          fontWeight: 700,
+                          letterSpacing: "0.04em",
+                          padding: "1px 5px",
+                        }}
+                      >
+                        TEAM
+                      </div>
+                      {f.namePlate && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: "13%",
+                            left: "13%",
+                            right: "13%",
+                            background: f.namePlate.background,
+                            color: f.namePlate.color,
+                            fontSize: "8px",
+                            fontWeight: 800,
+                            letterSpacing: "0.03em",
+                            padding: "3px 2px",
+                            textAlign: "center",
+                            borderRadius: 2,
+                          }}
+                        >
+                          NAME
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {getSport(sport).backgroundCategories.map((catKey) => {
                 const cat = TEMPLATE_CATEGORIES.find((c) => c.key === catKey);
                 if (!cat) return null;
