@@ -16,6 +16,7 @@ import {
   generateScoutingReport,
   findLookalike,
   findDuoLookalike,
+  lookupPlayerPhoto,
   type LookalikeOption,
   type DuoLookalikeOption,
 } from "@/app/actions/cardgen";
@@ -756,6 +757,10 @@ export default function CardEditor({
   const [lookAlikeOptions, setLookAlikeOptions] = useState<
     LookalikeOption[] | null
   >(null);
+  // Fetching a photo for a hand-typed "plays like" name (e.g. an older legend
+  // the AI picker didn't suggest) + a short status message for that lookup.
+  const [gettingPhoto, setGettingPhoto] = useState(false);
+  const [photoMsg, setPhotoMsg] = useState<string | null>(null);
   // Duo/trio "duo match" — the pair's famous-pairing match (analog of lookAlike),
   // stored on CardDesign.duo.match. Photos are drawn on the canvas at export.
   const [duoMatch, setDuoMatch] = useState(initialDesign?.duo?.match?.name ?? "");
@@ -1631,8 +1636,37 @@ export default function CardEditor({
     setLookAlikePhoto(opt.photoUrl ?? null);
     setLookAlikeBlurb(opt.blurb ?? "");
     setLookAlikeOptions(null);
+    setPhotoMsg(null);
     track("card_lookalike_generated", { name: opt.name });
     logClientActivity("card_lookalike_generated", { name: opt.name }).catch(() => {});
+  }
+
+  // Fetch the pro photo for the name typed in "Plays like" — so any player (even
+  // one the AI picker never suggests, like an older Hall-of-Famer) can get a
+  // photo on the card, not just a name.
+  async function handleGetPlayerPhoto() {
+    const name = lookAlike.trim();
+    if (!name || gettingPhoto) return;
+    setGettingPhoto(true);
+    setPhotoMsg(null);
+    setError(null);
+    try {
+      const res = await lookupPlayerPhoto(name, sport);
+      if (res.error) throw new Error(res.error);
+      if (res.photoUrl) {
+        setLookAlikePhoto(res.photoUrl);
+        setPhotoMsg(`Photo added for ${name}.`);
+        track("card_lookalike_generated", { name });
+        logClientActivity("card_lookalike_generated", { name }).catch(() => {});
+      } else {
+        setLookAlikePhoto(null);
+        setPhotoMsg(`No pro photo found for “${name}” — the name will still show. Try the full name.`);
+      }
+    } catch (e) {
+      setPhotoMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGettingPhoto(false);
+    }
   }
 
   // Duo/trio "duo match" — the same idea as the solo look-alike but the AI
@@ -4272,19 +4306,48 @@ export default function CardEditor({
                   setLookAlike(e.target.value);
                   setLookAlikePhoto(null); // typed name → drop the AI-matched photo
                   setLookAlikeBlurb(""); // and its AI blurb
+                  setPhotoMsg(null);
                 }}
                 placeholder="Stephen Curry"
                 className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
               />
-              <button
-                onClick={handleFindLookalike}
-                disabled={aiPending !== null}
-                className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
-              >
-                {aiPending === "lookalike"
-                  ? "Finding…"
-                  : "✨ Find matches (pick from 10)"}
-              </button>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <button
+                  onClick={handleFindLookalike}
+                  disabled={aiPending !== null || gettingPhoto}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                >
+                  {aiPending === "lookalike"
+                    ? "Finding…"
+                    : "✨ Find matches (pick from 10)"}
+                </button>
+                {/* Fetch the photo for whatever name was typed (any player/era). */}
+                {lookAlike.trim() && (
+                  <button
+                    onClick={handleGetPlayerPhoto}
+                    disabled={gettingPhoto || aiPending !== null}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                  >
+                    {gettingPhoto ? "Finding photo…" : "🔎 Get this player's photo"}
+                  </button>
+                )}
+              </div>
+              {(photoMsg || lookAlikePhoto) && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  {lookAlikePhoto && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={lookAlikePhoto}
+                      alt=""
+                      className="h-8 w-8 rounded-full border border-gray-200 dark:border-gray-700 object-cover"
+                      style={{ objectPosition: "center 22%" }}
+                    />
+                  )}
+                  {photoMsg && (
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">{photoMsg}</span>
+                  )}
+                </div>
+              )}
             </Field>
           </div>
         )}

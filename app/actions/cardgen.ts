@@ -91,6 +91,8 @@ const SPORT_AI: Record<
       "a clutch kicker",
       "a special-teams gunner",
       "an all-purpose athlete",
+      "a throwback Hall of Fame legend",
+      "an intimidating old-school enforcer",
     ],
   },
 };
@@ -319,6 +321,24 @@ async function wikipediaPhoto(name: string, suffix: string): Promise<string | nu
   } catch {
     return null;
   }
+}
+
+// Look up ONE named pro's photo (for a typed "plays like" match). The AI picker
+// favors household names, so an older Hall-of-Famer the coach types by hand —
+// e.g. Jack Lambert — never got a photo. This fetches it directly from Wikipedia
+// for whatever name was typed, scoped to the card's sport.
+export async function lookupPlayerPhoto(
+  name: string,
+  sport?: CardSport
+): Promise<{ photoUrl?: string | null; error?: string }> {
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "Enter a player name first." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+  const ai = SPORT_AI[sport ?? "basketball"];
+  const photoUrl = await wikipediaPhoto(trimmed, ai.wikiSuffix);
+  return { photoUrl };
 }
 
 export type LookalikeOption = {
