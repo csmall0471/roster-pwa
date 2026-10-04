@@ -16,7 +16,7 @@ import {
   generateScoutingReport,
   findLookalike,
   findDuoLookalike,
-  lookupPlayerPhoto,
+  lookupPlayerMatch,
   type LookalikeOption,
   type DuoLookalikeOption,
 } from "@/app/actions/cardgen";
@@ -1641,9 +1641,9 @@ export default function CardEditor({
     logClientActivity("card_lookalike_generated", { name: opt.name }).catch(() => {});
   }
 
-  // Fetch the pro photo for the name typed in "Plays like" — so any player (even
-  // one the AI picker never suggests, like an older Hall-of-Famer) can get a
-  // photo on the card, not just a name.
+  // Fetch the pro photo AND the "plays like" comparison blurb for the name typed
+  // in "Plays like" — so any player (even one the AI picker never suggests, like
+  // an older Hall-of-Famer) gets the same photo + blurb a picked match would.
   async function handleGetPlayerPhoto() {
     const name = lookAlike.trim();
     if (!name || gettingPhoto) return;
@@ -1651,16 +1651,23 @@ export default function CardEditor({
     setPhotoMsg(null);
     setError(null);
     try {
-      const res = await lookupPlayerPhoto(name, sport);
+      const res = await lookupPlayerMatch(name, sport);
       if (res.error) throw new Error(res.error);
+      if (res.blurb) setLookAlikeBlurb(res.blurb);
       if (res.photoUrl) {
         setLookAlikePhoto(res.photoUrl);
-        setPhotoMsg(`Photo added for ${name}.`);
+        setPhotoMsg(
+          res.blurb ? `Photo + match added for ${name}.` : `Photo added for ${name}.`
+        );
         track("card_lookalike_generated", { name });
         logClientActivity("card_lookalike_generated", { name }).catch(() => {});
       } else {
         setLookAlikePhoto(null);
-        setPhotoMsg(`No pro photo found for “${name}” — the name will still show. Try the full name.`);
+        setPhotoMsg(
+          res.blurb
+            ? `Added a match for “${name}”, but found no photo — the name + blurb still show. Try the full name.`
+            : `No pro photo found for “${name}” — the name will still show. Try the full name.`
+        );
       }
     } catch (e) {
       setPhotoMsg(e instanceof Error ? e.message : String(e));
@@ -4321,31 +4328,38 @@ export default function CardEditor({
                     ? "Finding…"
                     : "✨ Find matches (pick from 10)"}
                 </button>
-                {/* Fetch the photo for whatever name was typed (any player/era). */}
+                {/* Fetch the photo + comparison blurb for a typed name (any player/era). */}
                 {lookAlike.trim() && (
                   <button
                     onClick={handleGetPlayerPhoto}
                     disabled={gettingPhoto || aiPending !== null}
                     className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
                   >
-                    {gettingPhoto ? "Finding photo…" : "🔎 Get this player's photo"}
+                    {gettingPhoto ? "Finding…" : "🔎 Get photo + match"}
                   </button>
                 )}
               </div>
-              {(photoMsg || lookAlikePhoto) && (
-                <div className="mt-1.5 flex items-center gap-2">
+              {(photoMsg || lookAlikePhoto || lookAlikeBlurb) && (
+                <div className="mt-1.5 flex items-start gap-2">
                   {lookAlikePhoto && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={lookAlikePhoto}
                       alt=""
-                      className="h-8 w-8 rounded-full border border-gray-200 dark:border-gray-700 object-cover"
+                      className="h-8 w-8 shrink-0 rounded-full border border-gray-200 dark:border-gray-700 object-cover"
                       style={{ objectPosition: "center 22%" }}
                     />
                   )}
-                  {photoMsg && (
-                    <span className="text-[11px] text-gray-500 dark:text-gray-400">{photoMsg}</span>
-                  )}
+                  <div className="min-w-0">
+                    {photoMsg && (
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">{photoMsg}</p>
+                    )}
+                    {lookAlikeBlurb && (
+                      <p className="text-[11px] italic text-gray-600 dark:text-gray-300">
+                        &ldquo;{lookAlikeBlurb}&rdquo;
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </Field>

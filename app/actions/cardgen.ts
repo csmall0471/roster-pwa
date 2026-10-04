@@ -323,22 +323,50 @@ async function wikipediaPhoto(name: string, suffix: string): Promise<string | nu
   }
 }
 
-// Look up ONE named pro's photo (for a typed "plays like" match). The AI picker
-// favors household names, so an older Hall-of-Famer the coach types by hand —
-// e.g. Jack Lambert — never got a photo. This fetches it directly from Wikipedia
-// for whatever name was typed, scoped to the card's sport.
-export async function lookupPlayerPhoto(
+// Write the one-line "plays like" blurb for a named pro — the same style of
+// comparison sentence the AI picker attaches to each suggestion. Text-only, so
+// Haiku is plenty. Best-effort: returns "" on any failure.
+async function playerStyleBlurb(name: string, noun: string): Promise<string> {
+  if (!process.env.ANTHROPIC_API_KEY) return "";
+  try {
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const res = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 60,
+      messages: [
+        {
+          role: "user",
+          content: `In ONE short present-tense sentence (about 8-14 words), describe how the ${noun} player ${name} plays — their signature style and energy. Do NOT repeat their name. No quotation marks, no preamble; output only the sentence.`,
+        },
+      ],
+    });
+    const raw = res.content[0]?.type === "text" ? res.content[0].text.trim() : "";
+    return raw.replace(/^["'\s]+|["'.\s]+$/g, "").trim();
+  } catch {
+    return "";
+  }
+}
+
+// Look up ONE named pro for a typed "plays like" match — both their photo and the
+// comparison blurb the AI picker normally attaches. The AI picker favors
+// household names, so an older Hall-of-Famer the coach types by hand (e.g. Jack
+// Lambert) never got a photo OR a blurb. Photo (Wikipedia) + blurb (Claude) are
+// both best-effort and fetched in parallel; scoped to the card's sport.
+export async function lookupPlayerMatch(
   name: string,
   sport?: CardSport
-): Promise<{ photoUrl?: string | null; error?: string }> {
+): Promise<{ photoUrl?: string | null; blurb?: string; error?: string }> {
   const trimmed = name.trim();
   if (!trimmed) return { error: "Enter a player name first." };
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
   const ai = SPORT_AI[sport ?? "basketball"];
-  const photoUrl = await wikipediaPhoto(trimmed, ai.wikiSuffix);
-  return { photoUrl };
+  const [photoUrl, blurb] = await Promise.all([
+    wikipediaPhoto(trimmed, ai.wikiSuffix),
+    playerStyleBlurb(trimmed, ai.noun),
+  ]);
+  return { photoUrl, blurb: blurb || undefined };
 }
 
 export type LookalikeOption = {
