@@ -575,6 +575,12 @@ export default function CardEditor({
   const [sport, setSport] = useState<CardSport>(
     initialDesign ? initialDesign.sport ?? "basketball" : defaultSport ?? "basketball"
   );
+  // Templates offered for the current sport — shared by the picker and the
+  // "share all backgrounds" sheet, so every number on the sheet maps to a swatch
+  // in the editor (no more "I see it in the export but can't pick it").
+  const bgSheetTemplates = TEMPLATES.filter((t) =>
+    getSport(sport).backgroundCategories.includes(t.category)
+  );
   // Card shape: portrait (2.5×3.5, default) or landscape (3.5×2.5).
   const [orientation, setOrientation] = useState<CardOrientation>(
     initialDesign?.orientation ?? "portrait"
@@ -1989,8 +1995,11 @@ export default function CardEditor({
         TEMPLATE_CATEGORIES.find((c) => c.key === cat)?.label ?? cat;
 
       const tiles: SheetTile[] = [];
-      for (let i = 0; i < TEMPLATES.length; i++) {
-        const t = TEMPLATES[i];
+      // Only the current sport's backgrounds — matches the editor picker. The
+      // tile number stays the GLOBAL swatch number (TEMPLATES index + 1) so a
+      // parent's "#34" maps straight to swatch #34 in the editor.
+      for (let i = 0; i < bgSheetTemplates.length; i++) {
+        const t = bgSheetTemplates[i];
         flushSync(() => setBg({ type: "template", id: t.id }));
         // Wait for the browser to commit the new background before snapshotting.
         await new Promise((r) =>
@@ -2010,7 +2019,7 @@ export default function CardEditor({
         );
         tiles.push({
           canvas,
-          num: i + 1,
+          num: TEMPLATES.indexOf(t) + 1,
           name: t.name,
           category: t.category,
           categoryLabel: labelFor(t.category),
@@ -2027,9 +2036,9 @@ export default function CardEditor({
         sheet,
         `${(who || "card").toLowerCase().replace(/\s+/g, "-")}-background-options.png`
       );
-      track("card_bg_options_exported", { count: TEMPLATES.length });
+      track("card_bg_options_exported", { count: bgSheetTemplates.length });
       logClientActivity("card_bg_options_exported", {
-        count: TEMPLATES.length,
+        count: bgSheetTemplates.length,
       }).catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -3626,7 +3635,7 @@ export default function CardEditor({
                     className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
                   >
                     {exportingAll
-                      ? `Rendering ${exportProgress}/${TEMPLATES.length}…`
+                      ? `Rendering ${exportProgress}/${bgSheetTemplates.length}…`
                       : "📤 Share all backgrounds to pick from"}
                   </button>
                   <p className="text-[11px] text-gray-400 dark:text-gray-500">
@@ -4907,7 +4916,7 @@ export default function CardEditor({
               Building background options…
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {exportProgress} of {TEMPLATES.length}
+              {exportProgress} of {bgSheetTemplates.length}
             </p>
           </div>
         </div>

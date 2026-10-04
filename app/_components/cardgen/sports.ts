@@ -71,7 +71,7 @@ export const SPORTS: Record<CardSport, SportConfig> = {
   football: {
     id: "football",
     label: "Football",
-    backgroundCategories: ["football", "stripes", "solid", "gradient", "smoke", "burst"],
+    backgroundCategories: ["football", "stripes", "solid", "gradient", "rainbow", "pattern", "smoke", "burst"],
     defaultBackgroundId: "fb-gridiron",
     positions: [
       { value: "QUARTERBACK", label: "Quarterback" },
