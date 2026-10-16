@@ -83,6 +83,7 @@ const guestVM = (id: string, name: string): PersonVM => ({
   statusSource: "none",
   familyKey: null,
   teamIds: [],
+  age: null,
   rsvpNote: null,
 });
 
@@ -734,6 +735,7 @@ export default function SeatingTool({
           <PeoplePanel
             people={plan.people}
             picks={plan.picks}
+            teamNames={plan.teamNames}
             selectedPersonId={selectedPersonId}
             search={search}
             onSearch={setSearch}

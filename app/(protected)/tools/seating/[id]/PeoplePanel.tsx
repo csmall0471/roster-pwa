@@ -6,7 +6,15 @@ import { STATUS_RANK } from "../types";
 import PersonChip, { isKid } from "./PersonChip";
 
 export type StatusFilter = DerivedStatus | "all";
-export type KindFilter = "all" | "kids" | "adults";
+export type KindFilter = "all" | "kids" | "adults" | "player" | "sibling" | "parent" | "guest";
+type GroupBy = "assignment" | "team" | "kind" | "age";
+
+const KIND_LABEL: Record<string, string> = {
+  player: "Player",
+  sibling: "Sibling",
+  parent: "Parent",
+  guest: "Guest",
+};
 
 const STATUS_PILL: Record<DerivedStatus, string> = {
   planning: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
@@ -31,6 +39,7 @@ const byName = (a: PersonVM, b: PersonVM) =>
 type Props = {
   people: PersonVM[];
   picks: PickVM[];
+  teamNames: Record<string, string>;
   selectedPersonId: string | null;
   search: string;
   onSearch: (v: string) => void;
@@ -56,6 +65,7 @@ type Props = {
 export default function PeoplePanel({
   people,
   picks,
+  teamNames,
   selectedPersonId,
   search,
   onSearch,
@@ -79,19 +89,59 @@ export default function PeoplePanel({
 }: Props) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [picksFor, setPicksFor] = useState<string | null>(null);
+  const [groupBy, setGroupBy] = useState<GroupBy>("assignment");
+  const [teamFilter, setTeamFilter] = useState<string>("all");
 
   const byId = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
 
-  // Search + kind narrow the list; the status pills then narrow further.
+  // A person's EFFECTIVE teams: their own roster teams, else their household's
+  // (a parent or sibling "belongs" to the team their kid plays on) — so team
+  // grouping/filtering keeps whole families together.
+  const effTeamsById = useMemo(() => {
+    const familyTeams = new Map<string, Set<string>>();
+    for (const p of people) {
+      if (!p.familyKey || p.teamIds.length === 0) continue;
+      const set = familyTeams.get(p.familyKey) ?? new Set<string>();
+      for (const t of p.teamIds) set.add(t);
+      familyTeams.set(p.familyKey, set);
+    }
+    const out = new Map<string, string[]>();
+    for (const p of people) {
+      const own = p.teamIds.length
+        ? p.teamIds
+        : p.sourceTeamId
+          ? [p.sourceTeamId]
+          : p.familyKey
+            ? [...(familyTeams.get(p.familyKey) ?? [])]
+            : [];
+      out.set(p.id, own);
+    }
+    return out;
+  }, [people]);
+
+  // Teams represented in this plan, for the filter dropdown.
+  const planTeams = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of effTeamsById.values()) for (const id of list) ids.add(id);
+    return [...ids]
+      .map((id) => ({ id, name: teamNames[id] ?? "Team" }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [effTeamsById, teamNames]);
+
+  // Search + kind + team narrow the list; the status pills then narrow further.
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
     return people.filter((p) => {
       if (q && !p.displayName.toLowerCase().includes(q)) return false;
       if (kindFilter === "kids" && !isKid(p)) return false;
       if (kindFilter === "adults" && isKid(p)) return false;
+      if (["player", "sibling", "parent", "guest"].includes(kindFilter) && p.kind !== kindFilter)
+        return false;
+      if (teamFilter !== "all" && !(effTeamsById.get(p.id) ?? []).includes(teamFilter))
+        return false;
       return true;
     });
-  }, [people, search, kindFilter]);
+  }, [people, search, kindFilter, teamFilter, effTeamsById]);
 
   const statusCounts = useMemo(() => {
     const c: Record<DerivedStatus, number> = { planning: 0, invited: 0, opened: 0, yes: 0, no: 0 };
@@ -112,26 +162,70 @@ export default function PeoplePanel({
   }, [people]);
 
   const groups = useMemo(() => {
-    const unassignedKids: PersonVM[] = [];
-    const seatedList: PersonVM[] = [];
-    const standing: PersonVM[] = [];
-    const otherUnassigned: PersonVM[] = [];
-    const out: PersonVM[] = [];
-    for (const p of filtered) {
-      if (p.seatId) seatedList.push(p);
-      else if (p.inSro) standing.push(p);
-      else if (p.status === "no") out.push(p);
-      else if (isKid(p)) unassignedKids.push(p);
-      else otherUnassigned.push(p);
+    if (groupBy === "assignment") {
+      const unassignedKids: PersonVM[] = [];
+      const seatedList: PersonVM[] = [];
+      const standing: PersonVM[] = [];
+      const otherUnassigned: PersonVM[] = [];
+      const out: PersonVM[] = [];
+      for (const p of filtered) {
+        if (p.seatId) seatedList.push(p);
+        else if (p.inSro) standing.push(p);
+        else if (p.status === "no") out.push(p);
+        else if (isKid(p)) unassignedKids.push(p);
+        else otherUnassigned.push(p);
+      }
+      return [
+        { label: "Unassigned kids", list: unassignedKids.sort(byName) },
+        { label: "Seated", list: seatedList.sort(byName) },
+        { label: "Standing (SRO)", list: standing.sort(byName) },
+        { label: "Unassigned adults", list: otherUnassigned.sort(byName) },
+        { label: "Out (no)", list: out.sort(byName) },
+      ].filter((g) => g.list.length > 0);
     }
-    return [
-      { label: "Unassigned kids", list: unassignedKids.sort(byName) },
-      { label: "Seated", list: seatedList.sort(byName) },
-      { label: "Standing (SRO)", list: standing.sort(byName) },
-      { label: "Unassigned adults", list: otherUnassigned.sort(byName) },
-      { label: "Out (no)", list: out.sort(byName) },
-    ].filter((g) => g.list.length > 0);
-  }, [filtered]);
+
+    if (groupBy === "kind") {
+      const order: PersonVM["kind"][] = ["player", "sibling", "parent", "guest"];
+      return order
+        .map((k) => ({
+          label: `${KIND_LABEL[k]}s`,
+          list: filtered.filter((p) => p.kind === k).sort(byName),
+        }))
+        .filter((g) => g.list.length > 0);
+    }
+
+    if (groupBy === "age") {
+      const byAge = new Map<number, PersonVM[]>();
+      const unknown: PersonVM[] = [];
+      for (const p of filtered) {
+        if (p.age == null) unknown.push(p);
+        else (byAge.get(p.age) ?? byAge.set(p.age, []).get(p.age)!).push(p);
+      }
+      const out = [...byAge.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([age, list]) => ({ label: `Age ${age}`, list: list.sort(byName) }));
+      if (unknown.length) out.push({ label: "No age on file", list: unknown.sort(byName) });
+      return out;
+    }
+
+    // groupBy === "team": a person files under each of their effective teams
+    // (families stay with their kid's team); no team → the trailing group.
+    const byTeam = new Map<string, PersonVM[]>();
+    const teamless: PersonVM[] = [];
+    for (const p of filtered) {
+      const teams = effTeamsById.get(p.id) ?? [];
+      if (teams.length === 0) {
+        teamless.push(p);
+        continue;
+      }
+      for (const t of teams) (byTeam.get(t) ?? byTeam.set(t, []).get(t)!).push(p);
+    }
+    const out = [...byTeam.entries()]
+      .map(([id, list]) => ({ label: teamNames[id] ?? "Team", list: list.sort(byName) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    if (teamless.length) out.push({ label: "No team", list: teamless.sort(byName) });
+    return out;
+  }, [filtered, groupBy, effTeamsById, teamNames]);
 
   const inviteIds = filtered.filter((p) => p.status === "planning").map((p) => p.id);
 
@@ -193,18 +287,22 @@ export default function PeoplePanel({
       </div>
 
       {/* Kind filter */}
-      <div className="mt-2 flex gap-1">
+      <div className="mt-2 flex flex-wrap gap-1">
         {(
           [
             ["all", "Everyone"],
             ["kids", "Kids"],
             ["adults", "Adults"],
+            ["player", "Players"],
+            ["sibling", "Siblings"],
+            ["parent", "Parents"],
+            ["guest", "Guests"],
           ] as const
         ).map(([k, label]) => (
           <button
             key={k}
             type="button"
-            onClick={() => onKindFilter(k)}
+            onClick={() => onKindFilter(kindFilter === k && k !== "all" ? "all" : k)}
             className={`${pillBase} ${
               kindFilter === k
                 ? "bg-blue-600 text-white"
@@ -214,6 +312,42 @@ export default function PeoplePanel({
             {label}
           </button>
         ))}
+      </div>
+
+      {/* Group by + team filter */}
+      <div className="mt-2 flex gap-1.5">
+        <label className="flex min-w-0 flex-1 items-center gap-1 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+          Group
+          <select
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+            className="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-300"
+            aria-label="Group people by"
+          >
+            <option value="assignment">Assignment</option>
+            <option value="team">Team</option>
+            <option value="kind">Type</option>
+            <option value="age">Age</option>
+          </select>
+        </label>
+        {planTeams.length > 0 && (
+          <label className="flex min-w-0 flex-1 items-center gap-1 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+            Team
+            <select
+              value={teamFilter}
+              onChange={(e) => setTeamFilter(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-300"
+              aria-label="Filter by team"
+            >
+              <option value="all">All</option>
+              {planTeams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
@@ -238,6 +372,18 @@ export default function PeoplePanel({
               const pickTargets = people.filter(
                 (o) => isKid(o) && o.id !== p.id && !myPicks.some((pk) => pk.toPersonId === o.id)
               );
+              // Meta line: type · team(s) · age. Non-players show their
+              // household's team so families read together.
+              const teamsLabel = (effTeamsById.get(p.id) ?? [])
+                .map((t) => teamNames[t] ?? "Team")
+                .join(", ");
+              const meta = [
+                KIND_LABEL[p.kind] ?? p.kind,
+                teamsLabel || null,
+                p.age != null ? `Age ${p.age}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
               return (
                 <div key={p.id}>
                   <div className="relative flex items-center gap-1.5">
@@ -300,6 +446,11 @@ export default function PeoplePanel({
                       </>
                     )}
                   </div>
+                  {meta && (
+                    <p className="ml-2 mt-0.5 truncate text-[10px] leading-tight text-gray-400 dark:text-gray-500">
+                      {meta}
+                    </p>
+                  )}
 
                   {/* Inline sit-by picks editor */}
                   {picksFor === p.id && (

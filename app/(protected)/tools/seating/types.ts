@@ -58,6 +58,9 @@ export type PersonVM = {
   // Same key for everyone in one household (sorted parent-ids joined with "+").
   familyKey: string | null;
   teamIds: string[];
+  // Age in years (from players.date_of_birth) for anyone tied to a player
+  // record; null for free-text siblings, parents, and guests.
+  age: number | null;
   // Set when the family RSVP'd but this person couldn't be matched to an
   // attendee (prompts a manual status fix).
   rsvpNote: string | null;
@@ -86,6 +89,9 @@ export type PlanData = {
   people: PersonVM[];
   picks: PickVM[];
   event: SeatingEventInfo | null;
+  // Names for every team referenced by the plan's people (id → name), for the
+  // sidebar's team labels/grouping/filter.
+  teamNames: Record<string, string>;
   // Event attendees that no seating_people row matched — shown as a badge on
   // the "Pull from RSVPs" action.
   unmatchedRsvpCount: number;

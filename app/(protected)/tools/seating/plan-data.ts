@@ -177,19 +177,46 @@ export async function loadPlanData(id: string): Promise<PlanData | null> {
     return p.parent_id ? famOf(p.parent_id) : null;
   };
 
-  // Active team membership per player (drives auto-assign's team grouping).
+  // Active team membership per player (drives auto-assign's team grouping and
+  // the sidebar's team labels), plus each linked player's age.
   const teamsByPlayer = new Map<string, string[]>();
+  const ageByPlayer = new Map<string, number>();
   if (planPlayerIds.length > 0) {
-    const { data: rosterRows } = await supabase
-      .from("roster")
-      .select("player_id, team_id, status")
-      .in("player_id", planPlayerIds);
+    const [{ data: rosterRows }, { data: playerRows }] = await Promise.all([
+      supabase.from("roster").select("player_id, team_id, status").in("player_id", planPlayerIds),
+      supabase.from("players").select("id, date_of_birth").in("id", planPlayerIds),
+    ]);
     for (const r of rosterRows ?? []) {
       if (r.status !== "active") continue;
       const pid = r.player_id as string;
       const arr = teamsByPlayer.get(pid) ?? [];
       if (!arr.includes(r.team_id as string)) arr.push(r.team_id as string);
       teamsByPlayer.set(pid, arr);
+    }
+    const today = new Date();
+    for (const row of playerRows ?? []) {
+      const dob = row.date_of_birth as string | null;
+      if (!dob) continue;
+      const birth = new Date(dob + "T00:00:00");
+      let age = today.getFullYear() - birth.getFullYear();
+      const m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+      if (Number.isFinite(age) && age >= 0) ageByPlayer.set(row.id as string, age);
+    }
+  }
+
+  // Names for every team the plan references (membership + source teams).
+  const teamNames: Record<string, string> = {};
+  {
+    const teamIdSet = new Set<string>();
+    for (const ids of teamsByPlayer.values()) for (const id of ids) teamIdSet.add(id);
+    for (const p of people) if (p.source_team_id) teamIdSet.add(p.source_team_id);
+    if (teamIdSet.size > 0) {
+      const { data: teamRows } = await supabase
+        .from("teams")
+        .select("id, name")
+        .in("id", [...teamIdSet]);
+      for (const t of teamRows ?? []) teamNames[t.id as string] = (t.name as string) ?? "Team";
     }
   }
 
@@ -330,6 +357,7 @@ export async function loadPlanData(id: string): Promise<PlanData | null> {
       statusSource: d.statusSource,
       familyKey,
       teamIds: p.player_id ? teamsByPlayer.get(p.player_id) ?? [] : [],
+      age: p.player_id ? ageByPlayer.get(p.player_id) ?? null : null,
       rsvpNote: d.rsvpNote,
     };
   });
@@ -404,6 +432,7 @@ export async function loadPlanData(id: string): Promise<PlanData | null> {
     people: peopleVMs,
     picks: [...merged.values()],
     event,
+    teamNames,
     unmatchedRsvpCount,
   };
 }
