@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadPlansList } from "./plan-data";
 import NewPlanButton from "./NewPlanButton";
+import DeletePlanButton from "./DeletePlanButton";
 
 // Plans index for the Seating tool. The (protected) layout gates who gets here;
 // RLS additionally scopes the list to the owner / 'seating' grantees, so an
@@ -38,10 +39,13 @@ export default async function SeatingPage() {
       {plans.length > 0 ? (
         <ul className="divide-y divide-gray-200 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
           {plans.map((p) => (
-            <li key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 first:rounded-t-xl last:rounded-b-xl">
+            <li
+              key={p.id}
+              className="flex items-center gap-1 pr-2 hover:bg-gray-50 dark:hover:bg-gray-800/50 first:rounded-t-xl last:rounded-b-xl"
+            >
               <Link
                 href={`/tools/seating/${p.id}`}
-                className="flex items-center justify-between gap-3 px-4 py-3"
+                className="flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-3"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
@@ -59,6 +63,7 @@ export default async function SeatingPage() {
                 </div>
                 <span className="shrink-0 text-gray-400 dark:text-gray-500">→</span>
               </Link>
+              <DeletePlanButton planId={p.id} title={p.title} />
             </li>
           ))}
         </ul>
