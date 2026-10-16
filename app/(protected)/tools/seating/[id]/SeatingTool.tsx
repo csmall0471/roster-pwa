@@ -187,6 +187,22 @@ export default function SeatingTool({
   const sroZone = useMemo(() => plan.zones.find((z) => z.kind === "sro") ?? null, [plan.zones]);
   const sroCount = useMemo(() => plan.people.filter((p) => p.inSro).length, [plan.people]);
 
+  // Layout predating the venue-true seed (BL1–BL12 are 2×4 sections in the
+  // venue): any of those sections holding ≤4 seats means this plan was created
+  // before the correction — surface a reset banner instead of leaving it stale.
+  const staleLayout = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of plan.seats) {
+      if (s.zoneId) counts.set(s.zoneId, (counts.get(s.zoneId) ?? 0) + 1);
+    }
+    return plan.zones.some(
+      (z) =>
+        z.kind === "cluster" &&
+        /^BL([1-9]|1[0-2])$/i.test(z.label.trim()) &&
+        (counts.get(z.id) ?? 0) <= 4
+    );
+  }, [plan.zones, plan.seats]);
+
   // ── Assign-mode mutations ───────────────────────────────────────────────────
 
   function handleAssign(personId: string, seatId: string) {
@@ -744,6 +760,21 @@ export default function SeatingTool({
 
       {/* Toolbar + map */}
       <div className="min-w-0">
+        {staleLayout && (
+          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
+            <span className="text-sm text-amber-800 dark:text-amber-300">
+              This plan&apos;s layout predates the venue-true model (BL1–BL12 are 2-row sections
+              with your real ticket inventory).
+            </span>
+            <button
+              type="button"
+              onClick={handleResetLayout}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+            >
+              ↺ Reset layout now
+            </button>
+          </div>
+        )}
         <Toolbar
           mode={mode}
           onMode={setMode}

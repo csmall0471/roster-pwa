@@ -689,21 +689,45 @@ export default function SeatMap({
               transformOrigin: "top left",
             }}
           />
-          {/* Hardwood court in the middle of the bowl. */}
+          {/* Hardwood court — PORTRAIT from here: the lounge looks on from
+              behind the baseline/corner (sections 117–122 side), so the court's
+              long axis runs away from the viewer. Midline + center circle. */}
           <div
-            className="pointer-events-none absolute rounded-lg bg-gradient-to-br from-amber-200 to-amber-400 dark:from-amber-900 dark:to-amber-950 shadow-inner"
-            style={{ left: 1250, top: 430, width: 1150, height: 620 }}
+            className="pointer-events-none absolute rounded-lg bg-gradient-to-b from-amber-200 to-amber-400 dark:from-amber-900 dark:to-amber-950 shadow-inner"
+            style={{ left: 1320, top: 290, width: 620, height: 1000 }}
           >
-            <div className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-amber-700/50 dark:bg-amber-500/30" />
+            <div className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-amber-700/50 dark:bg-amber-500/30" />
             <div className="absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-amber-700/50 dark:border-amber-500/30" />
-            <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[18px] font-bold uppercase tracking-[0.5em] text-amber-800/50 dark:text-amber-400/30 pl-[0.5em]">
+            {/* Keys at each end. */}
+            <div className="absolute left-1/2 top-0 h-28 w-40 -translate-x-1/2 rounded-b-md border-2 border-t-0 border-amber-700/40 dark:border-amber-500/25" />
+            <div className="absolute bottom-0 left-1/2 h-28 w-40 -translate-x-1/2 rounded-t-md border-2 border-b-0 border-amber-700/40 dark:border-amber-500/25" />
+            <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[16px] font-bold uppercase tracking-[0.5em] text-amber-800/50 dark:text-amber-400/30 pl-[0.5em]">
               Court
             </span>
           </div>
+
+          {/* Lounge floor slabs behind the seat backs (straight segment + the
+              corner floor squared to the 45° wall), so the lounge reads as its
+              own room. */}
+          <div
+            className="pointer-events-none absolute rounded-3xl bg-stone-200/80 dark:bg-stone-900/50"
+            style={{ left: 160, top: 1680, width: 3140, height: 650 }}
+          />
+          <div
+            className="pointer-events-none absolute rounded-3xl bg-stone-200/80 dark:bg-stone-900/50"
+            style={{
+              left: 3260,
+              top: 1760,
+              width: 1500,
+              height: 560,
+              transform: "rotate(315deg)",
+              transformOrigin: "top left",
+            }}
+          />
           {/* Lounge floor lettering, behind the seat backs. */}
           <span
-            className="pointer-events-none absolute text-[34px] font-bold uppercase tracking-[0.7em] text-stone-400/70 dark:text-stone-600/60"
-            style={{ left: 1450, top: 2020 }}
+            className="pointer-events-none absolute text-[30px] font-bold uppercase tracking-[0.7em] text-stone-500/70 dark:text-stone-500/60"
+            style={{ left: 1100, top: 2180 }}
           >
             Hideaway Lounge
           </span>

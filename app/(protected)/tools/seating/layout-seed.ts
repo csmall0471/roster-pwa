@@ -214,46 +214,61 @@ export function buildDefaultLayout(): SeedZone[] {
     zones.push(section(`BL${n}`, 3200 + k * 226, 1460 - k * 226, 315, "2x4", n));
   }
 
-  // Lounge interior (BEHIND the seats): standing room, cocktail tables, and the
-  // two bars from the venue — the long back bar and the island bar by the 45°
-  // wall. Bars/tables are decorative; SRO is the parents' default home.
+  // Lounge interior (BEHIND the seats), arranged like the venue renders:
+  // a walkway right behind the ledges with small two-seat high-top nooks in the
+  // gaps between sections (the NL spots), then the two long bar ISLANDS along
+  // the straight segment, and in the corner the main rectangular BAR with
+  // armchair groups (four tub chairs around a round table) scattered on the
+  // floor. Bars/tables are decorative; SRO is the parents' default home.
+
+  // Standing room — the open lounge floor at the far end.
   zones.push({
     kind: "sro",
     label: "Standing Room",
-    x: 300,
-    y: 1800,
+    x: 240,
+    y: 1840,
     rotation: 0,
-    w: 1050,
-    h: 380,
+    w: 640,
+    h: 420,
     capacity: 52,
     position: 100,
     seats: [],
   });
 
-  const tableXs = [1500, 1800, 2100, 2400];
-  tableXs.forEach((tx, i) => {
+  let tablePos = 200;
+  const table = (x: number, y: number, size: number) => {
     zones.push({
       kind: "table",
       label: "",
-      x: tx,
-      y: 1770,
+      x,
+      y,
       rotation: 0,
-      w: 120,
-      h: 120,
+      w: size,
+      h: size,
       capacity: null,
-      position: 200 + i,
+      position: tablePos++,
       seats: [],
     });
-  });
+  };
 
+  // High-top nooks in the gaps between the horizontal sections (NL spots).
+  for (let k = 0; k < 8; k++) table(474 + k * 320, 1700, 76);
+
+  // Armchair groups on the corner lounge floor (by the 45° wall).
+  table(3080, 1940, 170);
+  table(3290, 2080, 170);
+  table(3520, 1820, 170);
+  table(3770, 2010, 170);
+
+  // The two long bar islands along the straight segment…
   zones.push({
     kind: "bar",
     label: "BAR",
-    x: 2620,
-    y: 1860,
+    x: 1000,
+    y: 1920,
     rotation: 0,
-    w: 900,
-    h: 110,
+    w: 620,
+    h: 130,
     capacity: null,
     position: 300,
     seats: [],
@@ -261,13 +276,26 @@ export function buildDefaultLayout(): SeedZone[] {
   zones.push({
     kind: "bar",
     label: "BAR",
-    x: 3820,
-    y: 1560,
-    rotation: 315,
-    w: 420,
-    h: 110,
+    x: 1950,
+    y: 1920,
+    rotation: 0,
+    w: 620,
+    h: 130,
     capacity: null,
     position: 301,
+    seats: [],
+  });
+  // …and the main corner bar, squared to the 45° wall.
+  zones.push({
+    kind: "bar",
+    label: "BAR",
+    x: 3650,
+    y: 1640,
+    rotation: 315,
+    w: 520,
+    h: 170,
+    capacity: null,
+    position: 302,
     seats: [],
   });
 
