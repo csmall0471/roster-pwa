@@ -676,13 +676,13 @@ export default function SeatMap({
           {/* Arena bowl, with a band hugging the 45° wall so it wraps the corner. */}
           <div
             className="pointer-events-none absolute rounded-[48px] bg-gradient-to-b from-gray-400/60 to-gray-600/70 dark:from-gray-950 dark:to-black"
-            style={{ left: 300, top: 150, width: 2600, height: 1200 }}
+            style={{ left: 300, top: 150, width: 2800, height: 1200 }}
           />
           <div
             className="pointer-events-none absolute rounded-[48px] bg-gradient-to-b from-gray-400/60 to-gray-600/70 dark:from-gray-950 dark:to-black"
             style={{
-              left: 2640,
-              top: 1140,
+              left: 3100,
+              top: 1200,
               width: 1500,
               height: 420,
               transform: "rotate(315deg)",
@@ -711,7 +711,7 @@ export default function SeatMap({
               own room. */}
           <div
             className="pointer-events-none absolute rounded-3xl bg-stone-200/80 dark:bg-stone-900/50"
-            style={{ left: 160, top: 1680, width: 3140, height: 650 }}
+            style={{ left: 160, top: 1680, width: 3360, height: 650 }}
           />
           <div
             className="pointer-events-none absolute rounded-3xl bg-stone-200/80 dark:bg-stone-900/50"

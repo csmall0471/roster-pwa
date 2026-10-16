@@ -199,19 +199,20 @@ export function buildDefaultLayout(): SeedZone[] {
   // pocket (above the horizontal run, up-left of the 45° run) and the LOUNGE
   // interior sits behind the seat backs (below / lower-right).
 
-  // Horizontal run: BL15 (leftmost) … BL7, ledges facing the court ABOVE.
-  // BL13–BL15 are single-row sections in the venue.
-  for (let k = 0; k < 9; k++) {
+  // Flat run: BL15 (leftmost) … BL6, ledges facing the court ABOVE. BL6 sits on
+  // the flat side next to BL7 (per the venue map — only BL1–BL5 are on the 45°
+  // wall). BL13–BL15 are single-row sections in the venue.
+  for (let k = 0; k < 10; k++) {
     const n = 15 - k;
     const shape: ClusterShape = n >= 13 ? "1x4" : "2x4";
     zones.push(section(`BL${n}`, 200 + k * 320, 1480, 0, shape, n));
   }
 
-  // The 45° wall: BL6 … BL1 climbing up-right, ledges facing the court to the
+  // The 45° wall: BL5 … BL1 climbing up-right, ledges facing the court to the
   // upper-left (the local top rotates there at 315°).
-  for (let k = 0; k < 6; k++) {
-    const n = 6 - k;
-    zones.push(section(`BL${n}`, 3200 + k * 226, 1460 - k * 226, 315, "2x4", n));
+  for (let k = 0; k < 5; k++) {
+    const n = 5 - k;
+    zones.push(section(`BL${n}`, 3520 + k * 226, 1460 - k * 226, 315, "2x4", n));
   }
 
   // Lounge interior (BEHIND the seats), arranged like the venue renders:
@@ -251,8 +252,8 @@ export function buildDefaultLayout(): SeedZone[] {
     });
   };
 
-  // High-top nooks in the gaps between the horizontal sections (NL spots).
-  for (let k = 0; k < 8; k++) table(474 + k * 320, 1700, 76);
+  // High-top nooks in the gaps between the flat-run sections (NL spots).
+  for (let k = 0; k < 9; k++) table(474 + k * 320, 1700, 76);
 
   // Armchair groups on the corner lounge floor (by the 45° wall).
   table(3080, 1940, 170);

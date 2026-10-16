@@ -188,9 +188,10 @@ export default function SeatingTool({
   const sroZone = useMemo(() => plan.zones.find((z) => z.kind === "sro") ?? null, [plan.zones]);
   const sroCount = useMemo(() => plan.people.filter((p) => p.inSro).length, [plan.people]);
 
-  // Layout predating the venue-true seed (BL1–BL12 are 2×4 sections in the
-  // venue): any of those sections holding ≤4 seats means this plan was created
-  // before the correction — surface a reset banner instead of leaving it stale.
+  // Layout predating the venue-true seed: BL1–BL12 are 2×4 sections (≤4 seats
+  // means the old geometry), and BL6 belongs on the FLAT run next to BL7 (a
+  // rotated BL6 is the older diagonal placement). Surface a reset banner
+  // instead of leaving the plan stale.
   const staleLayout = useMemo(() => {
     const counts = new Map<string, number>();
     for (const s of plan.seats) {
@@ -199,8 +200,8 @@ export default function SeatingTool({
     return plan.zones.some(
       (z) =>
         z.kind === "cluster" &&
-        /^BL([1-9]|1[0-2])$/i.test(z.label.trim()) &&
-        (counts.get(z.id) ?? 0) <= 4
+        ((/^BL([1-9]|1[0-2])$/i.test(z.label.trim()) && (counts.get(z.id) ?? 0) <= 4) ||
+          (/^BL6$/i.test(z.label.trim()) && z.rotation !== 0))
     );
   }, [plan.zones, plan.seats]);
 
