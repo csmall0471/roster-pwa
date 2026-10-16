@@ -658,7 +658,7 @@ export default function SeatMap({
       >
         <div
           data-zoom={zoomedOut ? "out" : "in"}
-          className="bg-white/50 dark:bg-gray-900/40"
+          className="bg-stone-100 dark:bg-gray-900/60"
           style={{
             width: VIRTUAL_W,
             height: VIRTUAL_H,
@@ -668,8 +668,37 @@ export default function SeatMap({
             backgroundImage: GRID_BG,
           }}
         >
-          {/* SRO at the bottom of the stack, then tables, then seat clusters. */}
-          {(["sro", "table", "cluster"] as const).map((kind) =>
+          {/* Static venue ambience, under everything: the arena bowl falling
+              away past the seat ledges (bottom + 45° walls) and the lounge name
+              on the floor. Pure decoration — not stored, not interactive. */}
+          <div
+            className="pointer-events-none absolute rounded-2xl bg-gradient-to-b from-gray-400/70 to-gray-600/80 dark:from-gray-950 dark:to-black"
+            style={{ left: 60, top: 1660, width: 3120, height: 680 }}
+          >
+            <span className="absolute left-1/2 top-8 -translate-x-1/2 text-[26px] font-bold uppercase tracking-[0.6em] text-white/50 dark:text-white/25">
+              Court side ↓
+            </span>
+          </div>
+          <div
+            className="pointer-events-none absolute rounded-2xl bg-gradient-to-b from-gray-400/70 to-gray-600/80 dark:from-gray-950 dark:to-black"
+            style={{
+              left: 3390,
+              top: 1570,
+              width: 1750,
+              height: 650,
+              transform: "rotate(315deg)",
+              transformOrigin: "top left",
+            }}
+          />
+          <span
+            className="pointer-events-none absolute text-[34px] font-bold uppercase tracking-[0.7em] text-stone-400/70 dark:text-stone-600/60"
+            style={{ left: 1450, top: 860 }}
+          >
+            Hideaway Lounge
+          </span>
+
+          {/* SRO at the bottom of the stack, then bars/tables, then seat clusters. */}
+          {(["sro", "bar", "table", "cluster"] as const).map((kind) =>
             zones
               .filter((z) => z.kind === kind)
               .map((z) => (

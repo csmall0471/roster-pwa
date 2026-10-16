@@ -5,15 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logToolActivity } from "@/lib/activity";
 import { dedupeSiblings } from "@/app/_components/dedupe-siblings";
 import { inviteParents } from "@/app/(protected)/events/actions";
-import {
-  ROW_H,
-  ROW_W,
-  SEAT,
-  SEAT_GAP,
-  SQUARE_H,
-  SQUARE_W,
-  buildDefaultLayout,
-} from "./layout-seed";
+import { buildDefaultLayout, clusterSeats, type ClusterShape } from "./layout-seed";
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 // Anyone allowed to USE the Seating tool: the coach who owns teams, or a person
@@ -55,6 +47,48 @@ function revalidatePlan(planId: string) {
 
 // ── Plans ─────────────────────────────────────────────────────────────────────
 
+// Seed the default Hideaway Lounge layout into a plan: each zone row, then its
+// seats. Sequential inserts are fine — ~15 zones. Shared by createPlan and
+// resetLayoutToSeed.
+async function seedLayout(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  planId: string
+): Promise<{ error?: string }> {
+  for (const z of buildDefaultLayout()) {
+    const { data: zone, error: zErr } = await supabase
+      .from("seating_zones")
+      .insert({
+        plan_id: planId,
+        kind: z.kind,
+        label: z.label,
+        x: z.x,
+        y: z.y,
+        rotation: z.rotation,
+        w: z.w,
+        h: z.h,
+        capacity: z.capacity,
+        position: z.position,
+      })
+      .select("id")
+      .single();
+    if (zErr || !zone) return { error: zErr?.message ?? "Failed to seed the layout" };
+    if (z.seats.length > 0) {
+      const { error: sErr } = await supabase.from("seating_seats").insert(
+        z.seats.map((s) => ({
+          plan_id: planId,
+          zone_id: zone.id as string,
+          label: s.label,
+          x: s.x,
+          y: s.y,
+          unavailable: s.unavailable,
+        }))
+      );
+      if (sErr) return { error: sErr.message };
+    }
+  }
+  return {};
+}
+
 export async function createPlan(title: string): Promise<{ id?: string; error?: string }> {
   try {
     const { supabase, user } = await requireSeating();
@@ -67,44 +101,35 @@ export async function createPlan(title: string): Promise<{ id?: string; error?: 
     if (error || !plan) return { error: error?.message ?? "Failed to create plan" };
     const planId = plan.id as string;
 
-    // Seed the default Hideaway Lounge layout: each zone row, then its seats.
-    // Sequential inserts are fine — 15 zones.
-    for (const z of buildDefaultLayout()) {
-      const { data: zone, error: zErr } = await supabase
-        .from("seating_zones")
-        .insert({
-          plan_id: planId,
-          kind: z.kind,
-          label: z.label,
-          x: z.x,
-          y: z.y,
-          rotation: z.rotation,
-          w: z.w,
-          h: z.h,
-          capacity: z.capacity,
-          position: z.position,
-        })
-        .select("id")
-        .single();
-      if (zErr || !zone) return { error: zErr?.message ?? "Failed to seed the layout" };
-      if (z.seats.length > 0) {
-        const { error: sErr } = await supabase.from("seating_seats").insert(
-          z.seats.map((s) => ({
-            plan_id: planId,
-            zone_id: zone.id as string,
-            label: s.label,
-            x: s.x,
-            y: s.y,
-            unavailable: s.unavailable,
-          }))
-        );
-        if (sErr) return { error: sErr.message };
-      }
-    }
+    const seeded = await seedLayout(supabase, planId);
+    if (seeded.error) return seeded;
 
     void logToolActivity("seating_plan_created", { plan_id: planId, title: name });
     revalidatePath("/tools/seating");
     return { id: planId };
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
+// Throw away the plan's layout (zones + seats — people stay; their seat
+// assignments clear via the seat FK) and re-seed the default lounge. Lets an
+// existing plan pick up seed improvements without recreating it.
+export async function resetLayoutToSeed(planId: string): Promise<{ error?: string }> {
+  try {
+    const { supabase } = await requireSeating();
+    // Zones cascade their seats; loose seats (no zone) need their own delete.
+    const { error: zErr } = await supabase.from("seating_zones").delete().eq("plan_id", planId);
+    if (zErr) return { error: zErr.message };
+    const { error: sErr } = await supabase.from("seating_seats").delete().eq("plan_id", planId);
+    if (sErr) return { error: sErr.message };
+
+    const seeded = await seedLayout(supabase, planId);
+    if (seeded.error) return seeded;
+
+    void logToolActivity("seating_layout_reset", { plan_id: planId });
+    revalidatePlan(planId);
+    return {};
   } catch (e) {
     return { error: errMsg(e) };
   }
@@ -645,21 +670,15 @@ export async function moveZone(
   }
 }
 
-// Cluster seat-grid metrics, derived from layout-seed's exported footprints so
-// a zone added here matches the seeded ones exactly.
-const PAD = (ROW_W - 4 * SEAT - 3 * SEAT_GAP) / 2; // 12 — inner padding
-const STRIP = ROW_H - SEAT - PAD; // 32 — label strip above the seats
-const PITCH = SEAT + SEAT_GAP; // 72 — seat-to-seat spacing
-
 export async function addZone(
   planId: string,
   input: {
-    kind: "cluster" | "sro" | "table";
+    kind: "cluster" | "sro" | "table" | "bar";
     label: string;
     x: number;
     y: number;
     rotation?: number;
-    shape?: "2x2" | "1x4";
+    shape?: ClusterShape;
     capacity?: number | null;
   }
 ): Promise<{ error?: string }> {
@@ -667,7 +686,7 @@ export async function addZone(
     const { supabase } = await requireSeating();
 
     // Stable ordering: next position after this plan's zones of the same kind
-    // (clusters count from 1; sro/table bases mirror the seeded layout).
+    // (clusters count from 1; sro/table/bar bases mirror the seeded layout).
     const { data: maxRow } = await supabase
       .from("seating_zones")
       .select("position")
@@ -676,18 +695,23 @@ export async function addZone(
       .order("position", { ascending: false })
       .limit(1)
       .maybeSingle();
-    const base = input.kind === "sro" ? 99 : input.kind === "table" ? 199 : 0;
+    const base =
+      input.kind === "sro" ? 99 : input.kind === "table" ? 199 : input.kind === "bar" ? 299 : 0;
     const position = ((maxRow?.position as number | undefined) ?? base) + 1;
 
-    const shape = input.shape ?? "2x2";
+    const shape: ClusterShape = input.shape ?? "2x4";
+    const grid = input.kind === "cluster" ? clusterSeats(shape) : null;
     let w: number;
     let h: number;
-    if (input.kind === "cluster") {
-      w = shape === "1x4" ? ROW_W : SQUARE_W;
-      h = shape === "1x4" ? ROW_H : SQUARE_H;
+    if (grid) {
+      w = grid.w;
+      h = grid.h;
     } else if (input.kind === "table") {
       w = 140;
       h = 140;
+    } else if (input.kind === "bar") {
+      w = 420;
+      h = 110;
     } else {
       w = 600;
       h = 400;
@@ -711,14 +735,14 @@ export async function addZone(
       .single();
     if (error || !zone) return { error: error?.message ?? "Failed to add zone" };
 
-    if (input.kind === "cluster") {
-      // Seed 4 seats in the chosen shape (same local-coords math as layout-seed).
-      const seats = [0, 1, 2, 3].map((i) => ({
+    if (grid) {
+      // Seed the shape's seats (same local-coords math as the seeded layout).
+      const seats = grid.seats.map((s) => ({
         plan_id: planId,
         zone_id: zone.id as string,
-        label: `${input.label}-${i + 1}`,
-        x: shape === "1x4" ? PAD + i * PITCH : PAD + (i % 2) * PITCH,
-        y: shape === "1x4" ? STRIP : STRIP + Math.floor(i / 2) * PITCH,
+        label: s.label,
+        x: s.x,
+        y: s.y,
         unavailable: false,
       }));
       const { error: sErr } = await supabase.from("seating_seats").insert(seats);

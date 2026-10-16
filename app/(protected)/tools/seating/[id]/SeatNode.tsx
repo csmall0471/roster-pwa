@@ -38,11 +38,16 @@ function SeatNode({
 }) {
   const base =
     "absolute rounded-lg text-center select-none touch-none overflow-hidden transition-shadow";
+  // Three clear states: occupied (blue kid / violet adult), PURCHASED-but-empty
+  // (green, like Ticketmaster's owned-seat checkmarks), and not-purchased
+  // (hatched gray, never assignable).
   const look = occupant
     ? isKid(occupant)
-      ? "bg-blue-600 text-white"
-      : "bg-violet-600 text-white"
-    : "bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300";
+      ? "bg-blue-600 text-white shadow"
+      : "bg-violet-600 text-white shadow"
+    : seat.unavailable
+      ? "bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-400 dark:text-gray-500"
+      : "bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-500/80 dark:border-emerald-600 text-emerald-700 dark:text-emerald-300 shadow-sm";
   const ring = selected
     ? "ring-2 ring-blue-500"
     : eligible
@@ -52,8 +57,8 @@ function SeatNode({
   const title = occupant
     ? `${seat.label} — ${occupant.displayName}${occupant.locked ? " (locked)" : ""}`
     : seat.unavailable
-      ? `${seat.label} — unavailable`
-      : seat.label;
+      ? `${seat.label} — not purchased`
+      : `${seat.label} — open (purchased)`;
 
   const [first, lastInitial] = occupant ? nameLines(occupant.displayName) : ["", ""];
 
@@ -61,7 +66,7 @@ function SeatNode({
     <div
       onPointerDown={onPointerDown}
       title={title}
-      className={`${base} ${look} ${ring} ${seat.unavailable ? "opacity-50" : ""} ${
+      className={`${base} ${look} ${ring} ${seat.unavailable ? "opacity-60" : ""} ${
         onPointerDown ? "cursor-grab active:cursor-grabbing" : ""
       }`}
       style={{
@@ -88,12 +93,15 @@ function SeatNode({
               {lastInitial && <span className="block">{lastInitial}</span>}
             </span>
           )
+        ) : seat.unavailable ? (
+          !zoomedOut && <span className="text-[8px] font-medium">{seat.label}</span>
+        ) : zoomedOut ? (
+          <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">✓</span>
         ) : (
-          !zoomedOut && (
-            <span className="text-[8px] font-medium text-gray-400 dark:text-gray-500">
-              {seat.label}
-            </span>
-          )
+          <span className="block leading-tight">
+            <span className="block text-[11px] font-bold text-emerald-600 dark:text-emerald-400">✓</span>
+            <span className="block text-[8px] font-semibold">{seat.label}</span>
+          </span>
         )}
       </div>
 

@@ -15,10 +15,7 @@ import {
   VIRTUAL_H,
   SEAT,
   SNAP,
-  ROW_W,
-  ROW_H,
-  SQUARE_W,
-  SQUARE_H,
+  clusterSeats,
   seatWorldCenters,
 } from "../layout-seed";
 import { autoAssign } from "../assign";
@@ -45,6 +42,7 @@ import {
   removeAdminPick,
   syncPeopleFromEvent,
   invitePeople,
+  resetLayoutToSeed,
 } from "../actions";
 import SeatMap, { type SeatMapApi } from "./SeatMap";
 import Toolbar, { type AddKind } from "./Toolbar";
@@ -637,19 +635,18 @@ export default function SeatingTool({
       );
       return;
     }
-    if (kind === "2x2" || kind === "1x4") {
-      const label = window.prompt("Cluster label (e.g. BL16)", "");
+    if (kind === "2x4" || kind === "2x2" || kind === "1x4") {
+      const label = window.prompt("Section label (e.g. BL16)", "");
       if (label == null || !label.trim()) return;
-      const w = kind === "2x2" ? SQUARE_W : ROW_W;
-      const h = kind === "2x2" ? SQUARE_H : ROW_H;
+      const grid = clusterSeats(kind);
       void addZone(planId, {
         kind: "cluster",
         label: label.trim(),
-        x: snapTo(c.x - w / 2),
-        y: snapTo(c.y - h / 2),
+        x: snapTo(c.x - grid.w / 2),
+        y: snapTo(c.y - grid.h / 2),
         shape: kind,
         capacity: null,
-      }).then(afterCreate("Cluster added"));
+      }).then(afterCreate("Section added"));
       return;
     }
     if (kind === "table") {
@@ -660,6 +657,17 @@ export default function SeatingTool({
         y: snapTo(c.y - 70),
         capacity: null,
       }).then(afterCreate("Table added"));
+      return;
+    }
+    if (kind === "bar") {
+      // Server creates bars at 420×110.
+      void addZone(planId, {
+        kind: "bar",
+        label: "BAR",
+        x: snapTo(c.x - 210),
+        y: snapTo(c.y - 55),
+        capacity: null,
+      }).then(afterCreate("Bar added"));
       return;
     }
     const raw = window.prompt("Standing-room capacity", "52");
@@ -673,6 +681,23 @@ export default function SeatingTool({
       y: snapTo(c.y - 200),
       capacity: Number.isFinite(cap) ? cap : null,
     }).then(afterCreate("SRO zone added"));
+  }
+
+  function handleResetLayout() {
+    if (
+      !window.confirm(
+        "Replace the whole layout with the seeded Hideaway Lounge (real ticket inventory)? People stay, but every seat assignment clears."
+      )
+    )
+      return;
+    void resetLayoutToSeed(planId).then((res) => {
+      if (res.error) {
+        showToast(res.error);
+        return;
+      }
+      showToast("Layout reset to the seeded lounge");
+      router.refresh();
+    });
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -737,6 +762,7 @@ export default function SeatingTool({
           onUnlink={handleUnlink}
           onOpenLink={() => setLinkOpen(true)}
           onAdd={handleAdd}
+          onResetLayout={handleResetLayout}
         />
         <SeatMap
           mode={mode}

@@ -6,7 +6,7 @@ import type { SeatVM, ZoneVM } from "./types";
 
 // Fixed virtual canvas (integer px). The viewport pans/zooms over this; seat
 // and zone coordinates are stored in these units and never rescale.
-export const VIRTUAL_W = 4600;
+export const VIRTUAL_W = 4800;
 export const VIRTUAL_H = 2400;
 export const SEAT = 60; // seat square, px
 export const SEAT_GAP = 12;
@@ -73,12 +73,89 @@ export function pointInZone(
   return lx >= 0 && ly >= 0 && lx <= zone.w && ly <= zone.h;
 }
 
+// ── Cluster geometry ─────────────────────────────────────────────────────────
+// A bar-ledge section as it exists in the venue: up to two rows of 4 seats
+// facing the court over a drink ledge. Ticketmaster labels the rows "1" (front,
+// at the ledge) and "3" (back). Within a row, seats run 1→4 right-to-left when
+// you stand BEHIND the seats facing the court — with the court at the bottom of
+// our canvas that puts Seat 1 leftmost on screen.
+
+const PAD = 12; // inner padding
+const STRIP = 26; // label strip height at the top of a cluster
+const PITCH = SEAT + SEAT_GAP; // 72
+export const LEDGE_H = 12; // the drink ledge drawn along the court edge
+
+export type ClusterShape = "1x4" | "2x2" | "2x4";
+
+// Local seat positions + footprint for a cluster shape. Labels are `R{row}·S{n}`
+// (section context comes from the zone label). Row 3 sits at the top (lounge
+// side), Row 1 at the bottom against the ledge; a single-row shape is Row 1.
+export function clusterSeats(
+  shape: ClusterShape
+): { w: number; h: number; seats: { x: number; y: number; label: string }[] } {
+  const seatX = (s: number) => PAD + (s - 1) * PITCH; // Seat 1 leftmost on screen
+  const seats: { x: number; y: number; label: string }[] = [];
+
+  if (shape === "2x2") {
+    // Legacy compact square (editor option): rows 3/1, two seats each.
+    for (const [row, y] of [
+      [3, STRIP],
+      [1, STRIP + PITCH],
+    ] as const) {
+      for (let s = 1; s <= 2; s++) seats.push({ x: seatX(s), y, label: `R${row}·S${s}` });
+    }
+    return { w: PAD * 2 + 2 * SEAT + SEAT_GAP, h: STRIP + PITCH + SEAT + 6 + LEDGE_H + 8, seats };
+  }
+
+  const rows: [number, number][] =
+    shape === "2x4"
+      ? [
+          [3, STRIP],
+          [1, STRIP + PITCH],
+        ]
+      : [[1, STRIP]];
+  for (const [row, y] of rows) {
+    for (let s = 1; s <= 4; s++) seats.push({ x: seatX(s), y, label: `R${row}·S${s}` });
+  }
+  const lastRowY = rows[rows.length - 1][1];
+  return {
+    w: PAD * 2 + 4 * SEAT + 3 * SEAT_GAP, // 300
+    h: lastRowY + SEAT + 6 + LEDGE_H + 8,
+    seats,
+  };
+}
+
+// Kept for callers that size by shape without seeding seats.
+export const SECTION_W = clusterSeats("2x4").w; // 300
+export const SECTION_H = clusterSeats("2x4").h;
+export const ROW_W = clusterSeats("1x4").w;
+export const ROW_H = clusterSeats("1x4").h;
+export const SQUARE_W = clusterSeats("2x2").w;
+export const SQUARE_H = clusterSeats("2x2").h;
+
 // ── Seeded layout ─────────────────────────────────────────────────────────────
-// Best-effort Hideaway Lounge: a horizontal bar-ledge run (BL15…BL7, 1×4 rows)
-// meeting a 45° diagonal run (BL6…BL1, 2×2 clusters) — the geometry Connor's own
-// prototype validated — plus one SRO standing zone (cap 52) and four decorative
-// lounge tables. 15 clusters × 4 = 60 seats; BL13–BL15 seed `unavailable` so 48
-// start available. Everything is editable in the tool; these are just defaults.
+// The Hideaway Lounge as built, with OWNERSHIP taken from the actual
+// Ticketmaster account (am.ticketmaster.com HAR, event 27SN0326): 48 bar-ledge
+// seats purchased + 52 standing room. Sections BL1–BL12 physically have two
+// rows (Row 1 front / Row 3 back) of 4; BL13–BL15 have a single front row.
+// A seat the account doesn't hold is seeded `unavailable` (not purchased —
+// toggle it available in the editor after buying more).
+//
+// Owned rows per section (from the HAR):
+//   BL1 BL2 BL3 BL5 → Rows 1 + 3 (8 seats each)
+//   BL4             → Row 1 only
+//   BL6 BL7 BL8     → Row 3 only
+//   BL9–BL15        → none yet
+const OWNED_ROWS: Record<string, number[]> = {
+  BL1: [1, 3],
+  BL2: [1, 3],
+  BL3: [1, 3],
+  BL4: [1],
+  BL5: [1, 3],
+  BL6: [3],
+  BL7: [3],
+  BL8: [3],
+};
 
 export type SeedZone = {
   kind: ZoneVM["kind"];
@@ -93,105 +170,107 @@ export type SeedZone = {
   seats: { x: number; y: number; label: string; unavailable: boolean }[];
 };
 
-// Cluster content metrics (label strip above the seats).
-const PAD = 12;
-const STRIP = 32; // label strip height inside the cluster
-const PITCH = SEAT + SEAT_GAP; // 72
-
-function rowSeats(zoneLabel: string, unavailable: boolean) {
-  // 1×4 horizontal row.
-  return [0, 1, 2, 3].map((i) => ({
-    x: PAD + i * PITCH,
-    y: STRIP,
-    label: `${zoneLabel}-${i + 1}`,
-    unavailable,
-  }));
+function section(
+  label: string,
+  x: number,
+  y: number,
+  rotation: number,
+  shape: ClusterShape,
+  position: number
+): SeedZone {
+  const grid = clusterSeats(shape);
+  const owned = new Set(OWNED_ROWS[label] ?? []);
+  return {
+    kind: "cluster",
+    label,
+    x,
+    y,
+    rotation,
+    w: grid.w,
+    h: grid.h,
+    capacity: null,
+    position,
+    seats: grid.seats.map((s) => ({
+      ...s,
+      // label is `R{row}·S{n}` — row number is the char after "R".
+      unavailable: !owned.has(Number(s.label[1])),
+    })),
+  };
 }
-
-function squareSeats(zoneLabel: string, unavailable: boolean) {
-  // 2×2 square.
-  return [0, 1, 2, 3].map((i) => ({
-    x: PAD + (i % 2) * PITCH,
-    y: STRIP + Math.floor(i / 2) * PITCH,
-    label: `${zoneLabel}-${i + 1}`,
-    unavailable,
-  }));
-}
-
-export const ROW_W = PAD * 2 + 4 * SEAT + 3 * SEAT_GAP; // 300
-export const ROW_H = STRIP + SEAT + PAD; // 104
-export const SQUARE_W = PAD * 2 + 2 * SEAT + SEAT_GAP; // 156
-export const SQUARE_H = STRIP + 2 * SEAT + SEAT_GAP + PAD; // 176
 
 export function buildDefaultLayout(): SeedZone[] {
   const zones: SeedZone[] = [];
 
-  // Horizontal wall: BL15 (leftmost) … BL7, 1×4 rows along y=1400.
+  // Court-side wall, horizontal run: BL15 (leftmost) … BL7, ledges facing the
+  // court below. BL13–BL15 are single-row sections in the venue.
   for (let k = 0; k < 9; k++) {
     const n = 15 - k;
-    const label = `BL${n}`;
-    const unavailable = n >= 13; // BL13–BL15 not owned (yet)
-    zones.push({
-      kind: "cluster",
-      label,
-      x: 200 + k * 320,
-      y: 1400,
-      rotation: 0,
-      w: ROW_W,
-      h: ROW_H,
-      capacity: null,
-      position: n,
-      seats: rowSeats(label, unavailable),
-    });
+    const shape: ClusterShape = n >= 13 ? "1x4" : "2x4";
+    zones.push(section(`BL${n}`, 200 + k * 320, 1400, 0, shape, n));
   }
 
-  // Diagonal wall: BL6 … BL1, 2×2 squares climbing up-right at 315°.
+  // The 45° wall: BL6 … BL1 climbing up-right, ledges facing the court to the
+  // lower-right (local bottom rotates there at 315°).
   for (let k = 0; k < 6; k++) {
     const n = 6 - k;
-    const label = `BL${n}`;
-    zones.push({
-      kind: "cluster",
-      label,
-      x: 3140 + k * 226,
-      y: 1360 - k * 226,
-      rotation: 315,
-      w: SQUARE_W,
-      h: SQUARE_H,
-      capacity: null,
-      position: n,
-      seats: squareSeats(label, false),
-    });
+    zones.push(section(`BL${n}`, 3140 + k * 226, 1380 - k * 226, 315, "2x4", n));
   }
 
-  // Standing room (parents live here by default; capacity-counted, no spots).
+  // Lounge interior (behind the seats): standing room, cocktail tables, and the
+  // two bars from the venue — the long back bar and the island bar by the
+  // 45° wall. Bars/tables are decorative; SRO is the parents' default home.
   zones.push({
     kind: "sro",
     label: "Standing Room",
-    x: 300,
-    y: 1650,
+    x: 260,
+    y: 940,
     rotation: 0,
-    w: 1100,
-    h: 500,
+    w: 1050,
+    h: 360,
     capacity: 52,
     position: 100,
     seats: [],
   });
 
-  // Decorative lounge tables (no drop behavior).
-  const tableXs = [700, 1300, 1900, 2500];
+  const tableXs = [1480, 1780, 2080, 2380];
   tableXs.forEach((tx, i) => {
     zones.push({
       kind: "table",
       label: "",
       x: tx,
-      y: 1000,
+      y: 1180,
       rotation: 0,
-      w: 140,
-      h: 140,
+      w: 120,
+      h: 120,
       capacity: null,
       position: 200 + i,
       seats: [],
     });
+  });
+
+  zones.push({
+    kind: "bar",
+    label: "BAR",
+    x: 2550,
+    y: 1020,
+    rotation: 0,
+    w: 900,
+    h: 110,
+    capacity: null,
+    position: 300,
+    seats: [],
+  });
+  zones.push({
+    kind: "bar",
+    label: "BAR",
+    x: 3420,
+    y: 760,
+    rotation: 315,
+    w: 420,
+    h: 110,
+    capacity: null,
+    position: 301,
+    seats: [],
   });
 
   return zones;

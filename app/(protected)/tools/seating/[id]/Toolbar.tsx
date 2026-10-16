@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { SeatingEventInfo } from "../types";
 
 type Mode = "assign" | "edit";
-export type AddKind = "2x2" | "1x4" | "seat" | "table" | "sro";
+export type AddKind = "2x4" | "2x2" | "1x4" | "seat" | "table" | "bar" | "sro";
 
 type Props = {
   mode: Mode;
@@ -24,6 +24,7 @@ type Props = {
   onUnlink: () => void;
   onOpenLink: () => void;
   onAdd: (kind: AddKind) => void;
+  onResetLayout: () => void;
 };
 
 const btn =
@@ -96,6 +97,7 @@ export default function Toolbar({
   onUnlink,
   onOpenLink,
   onAdd,
+  onResetLayout,
 }: Props) {
   const seatsOver = seated > seatsAvailable;
   const sroOver = sroCap != null && sro > sroCap;
@@ -171,13 +173,20 @@ export default function Toolbar({
           <Menu
             label="+ Add"
             items={[
-              { label: "Cluster 2×2", onClick: () => onAdd("2x2") },
-              { label: "Cluster 1×4", onClick: () => onAdd("1x4") },
+              { label: "Section 2 rows × 4 (8 seats)", onClick: () => onAdd("2x4") },
+              { label: "Row 1×4 (4 seats)", onClick: () => onAdd("1x4") },
+              { label: "Cluster 2×2 (4 seats)", onClick: () => onAdd("2x2") },
               { label: "Single seat", onClick: () => onAdd("seat") },
+              { label: "Bar", onClick: () => onAdd("bar") },
               { label: "Table", onClick: () => onAdd("table") },
               { label: "SRO zone", onClick: () => onAdd("sro") },
             ]}
           />
+        )}
+        {mode === "edit" && (
+          <button type="button" onClick={onResetLayout} className={btn} title="Replace the layout with the seeded Hideaway Lounge (people stay; seats unassign)">
+            ↺ Reset layout
+          </button>
         )}
 
         {/* Event chip */}

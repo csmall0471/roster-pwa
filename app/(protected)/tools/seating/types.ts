@@ -4,7 +4,7 @@
 
 export type DerivedStatus = "planning" | "invited" | "opened" | "no" | "yes";
 export type PersonKind = "player" | "sibling" | "parent" | "guest";
-export type ZoneKind = "cluster" | "sro" | "table";
+export type ZoneKind = "cluster" | "sro" | "table" | "bar";
 
 // Display + sort order for the status funnel (events/[id] page idiom).
 export const STATUS_RANK: Record<DerivedStatus, number> = {

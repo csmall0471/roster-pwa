@@ -68,6 +68,7 @@ export type ActivityEvent =
   // helper), like the rc_* events.
   | "seating_plan_created"
   | "seating_plan_deleted"
+  | "seating_layout_reset"
   | "seating_people_added"
   | "seating_auto_assigned"
   | "seating_invites_sent"

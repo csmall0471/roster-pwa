@@ -56,13 +56,37 @@ function ZoneNode({
   const zoneDown = edit && onZonePointerDown ? (e: React.PointerEvent) => onZonePointerDown(zone, e) : undefined;
 
   if (zone.kind === "table") {
+    // Cocktail table + four chairs, like the lounge renders.
+    const chair = "absolute h-[22%] w-[22%] rounded-full bg-stone-400/80 dark:bg-stone-600/80";
+    return (
+      <div onPointerDown={zoneDown} style={frame} className={`${editable} ${ring} rounded-full`} title={zone.label || "Lounge table"}>
+        <span className={chair} style={{ left: "39%", top: "-6%" }} />
+        <span className={chair} style={{ left: "39%", bottom: "-6%" }} />
+        <span className={chair} style={{ left: "-6%", top: "39%" }} />
+        <span className={chair} style={{ right: "-6%", top: "39%" }} />
+        <div className="absolute inset-[12%] rounded-full border-2 border-stone-400/80 dark:border-stone-600 bg-gradient-to-br from-stone-200 to-stone-300 dark:from-stone-800 dark:to-stone-900 shadow-sm" />
+        <div className="absolute inset-[38%] rounded-full bg-stone-300/90 dark:bg-stone-700/90" />
+      </div>
+    );
+  }
+
+  if (zone.kind === "bar") {
+    // A lounge bar: stone counter with an inner service line and a brass edge.
     return (
       <div
         onPointerDown={zoneDown}
         style={frame}
-        className={`rounded-full border-2 border-gray-300/70 dark:border-gray-700 bg-gray-200/40 dark:bg-gray-800/40 ${editable} ${ring}`}
-        title={zone.label || "Lounge table"}
-      />
+        className={`rounded-xl border-2 border-stone-400 dark:border-stone-600 bg-gradient-to-b from-stone-200 via-stone-100 to-stone-300 dark:from-stone-800 dark:via-stone-900 dark:to-stone-950 shadow-md ${editable} ${ring}`}
+        title={zone.label || "Bar"}
+      >
+        <div className="absolute inset-x-2 top-1.5 h-1 rounded-full bg-amber-600/50 dark:bg-amber-500/40" />
+        <div className="absolute inset-[18%] rounded-lg border border-stone-400/60 dark:border-stone-600/60" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[13px] font-bold uppercase tracking-[0.5em] text-stone-500 dark:text-stone-400 pl-[0.5em]">
+            {zone.label || "BAR"}
+          </span>
+        </div>
+      </div>
     );
   }
 
@@ -106,16 +130,22 @@ function ZoneNode({
     );
   }
 
-  // Cluster: dashed footprint + label strip + its seats.
+  // Cluster: a bar-ledge section — solid panel, section label, its seats, and
+  // the drink ledge along the court edge (local bottom; rotates with the zone).
   return (
     <div
       onPointerDown={zoneDown}
       style={frame}
-      className={`rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-white/60 dark:bg-gray-900/60 ${editable} ${ring}`}
+      className={`rounded-lg border border-gray-300/80 dark:border-gray-700 bg-white/85 dark:bg-gray-900/80 shadow-sm ${editable} ${ring}`}
     >
-      <div className="absolute left-1.5 top-1 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <div className="absolute left-2 top-1 text-[12px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">
         {zone.label}
       </div>
+      {/* Drink ledge / rail the seats face (court side). */}
+      <div
+        className="absolute inset-x-1 bottom-1 h-2.5 rounded-full bg-gradient-to-b from-amber-700 to-amber-900 dark:from-amber-800 dark:to-amber-950 opacity-80"
+        title="Ledge (court side)"
+      />
       {seats.map((s) => {
         const occupant = occupantBySeat.get(s.id) ?? null;
         const down = edit
