@@ -55,6 +55,9 @@ export type IdentifiedParent = {
   // Everyone in the family (the signed-in parent + co-parents who share a kid),
   // so the Parent tier can pre-fill both parents — not just whoever logged in.
   family_parents: { name: string }[];
+  // This family's saved "sit by" seating picks for the event, keyed by kid
+  // player id. Empty when nothing's picked (or the table doesn't exist yet).
+  sit_by_picks: Record<string, string[]>;
   existing_signup: ExistingSignup | null;
 };
 
@@ -154,6 +157,25 @@ export async function identifyParent(
     siblings.push({ name: s.name, attributes: s.attributes ?? {} });
   }
 
+  // The family's saved "who should they sit by" picks for this event, keyed by
+  // kid, to prefill the picker. Best-effort: the event_sit_by_picks table ships
+  // with a later migration, so any failure just yields no prefill.
+  const sit_by_picks: Record<string, string[]> = {};
+  if (eventId && players.length) {
+    try {
+      const { data: pickRows } = await service
+        .from("event_sit_by_picks")
+        .select("player_id, picked_player_id")
+        .eq("event_id", eventId)
+        .in("player_id", players.map((p) => p.id));
+      for (const r of (pickRows ?? []) as { player_id: string; picked_player_id: string }[]) {
+        (sit_by_picks[r.player_id] ??= []).push(r.picked_player_id);
+      }
+    } catch {
+      // Table missing / query failed — the picker simply starts empty.
+    }
+  }
+
   // If this parent already RSVP'd to this event, return that row so the form can
   // be re-populated and edited in place instead of creating a duplicate.
   let existing_signup: ExistingSignup | null = null;
@@ -205,6 +227,7 @@ export async function identifyParent(
     players,
     siblings,
     family_parents,
+    sit_by_picks,
     existing_signup,
   };
 }
@@ -245,6 +268,8 @@ export async function logEventView(
 export type SubmitAttendeeInput = {
   tier_id: string;
   name: string | null;
+  // Links a roster kid. Server-verified against the family — never trusted.
+  player_id?: string | null;
   attributes: Record<string, string | number | boolean>;
   status?: AttendeeStatus;
 };
@@ -257,6 +282,9 @@ export type SubmitSignupInput = {
   phone: string;
   responses: Record<string, string | number | boolean>;
   attendees: SubmitAttendeeInput[];
+  // "Who should they sit by" seating picks, one entry per roster kid. Sent only
+  // when the event collects them (absent = leave any stored picks untouched).
+  sit_by?: { player_id: string; picked: string[] }[];
   // "Can't make it": record a decline (no attendees, $0) and skip the form's
   // required-field validation — declining shouldn't force you to fill the form.
   decline?: boolean;
@@ -303,11 +331,31 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     }
   }
 
+  // SECURITY: an attendee's player_id may only point at one of this family's own
+  // kids — null out anything else so a forged payload can't tag someone else's
+  // player. Guests (no parent_id) never carry player links. The family ids are
+  // also reused below for the edit-in-place match and the sit-by picks.
+  let familyIds: string[] = [];
+  const familyKidIds = new Set<string>();
+  if (input.parent_id) {
+    const service = createServiceClient();
+    familyIds = await familyParentIds(service, input.parent_id);
+    const { data: kidRows } = await service
+      .from("player_parents")
+      .select("player_id")
+      .in("parent_id", familyIds);
+    for (const r of kidRows ?? []) familyKidIds.add(r.player_id as string);
+  }
+  const safeAttendees = input.attendees.map((a) => ({
+    ...a,
+    player_id: a.player_id && familyKidIds.has(a.player_id) ? a.player_id : null,
+  }));
+
   // Build the priced attendee snapshot from the server's authoritative tier
   // amounts/labels (never trust the client). Shared with the coach-side editor.
   const { attendees, total_cents, attendingUnits, siblingDrafts } = buildPricedAttendees(
     (event.event_price_tiers ?? []) as unknown as PricingTier[],
-    input.attendees,
+    safeAttendees,
     isDecline,
   );
 
@@ -342,8 +390,7 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   let existingId: string | null = null;
   if (input.parent_id) {
     const service = createServiceClient();
-    // Either parent of the family edits the same row.
-    const familyIds = await familyParentIds(service, input.parent_id);
+    // Either parent of the family (resolved above) edits the same row.
     const { data: existing } = await service
       .from("event_signups")
       .select("id")
@@ -362,6 +409,20 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
   } else {
     const { error } = await supabase.from("event_signups").insert(row);
     if (error) return { error: error.message };
+  }
+
+  // Seating ("sit by") picks ride along with the RSVP but must never break it —
+  // the event_sit_by_picks table ships with a later migration and may not exist
+  // yet, so failures are logged and swallowed. A decline clears the family's
+  // picks; an absent sit_by payload (events without the picker) changes nothing.
+  if (input.parent_id && (isDecline || Array.isArray(input.sit_by))) {
+    await persistSitByPicks(
+      input.event_id,
+      event.team_id ?? null,
+      input.parent_id,
+      familyKidIds,
+      isDecline ? [] : (input.sit_by ?? []),
+    ).catch((e) => console.error("event sit-by picks not saved:", e));
   }
 
   // Remember the family's siblings for next time (skip any that are actually
@@ -408,6 +469,64 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
     pay_url: payUrl,
     pay_instructions: declined ? null : event.pay_instructions,
   };
+}
+
+// Replace this family's "sit by" seating picks for an event. Picks are only
+// written for the family's own kids, may only point at active players on the
+// event's team roster(s) — the same pool the page offers — are capped at 3, and
+// never the kid themself. Deleting with nothing to re-insert is how a
+// deselect-all (or a decline) clears them. Callers treat failures as non-fatal:
+// the event_sit_by_picks table ships with a later migration and may not exist.
+async function persistSitByPicks(
+  eventId: string,
+  primaryTeamId: string | null,
+  parentId: string,
+  familyKidIds: Set<string>,
+  entries: { player_id: string; picked: string[] }[],
+): Promise<void> {
+  if (familyKidIds.size === 0) return;
+  const service = createServiceClient();
+
+  const rows: { event_id: string; player_id: string; picked_player_id: string; parent_id: string }[] = [];
+  const wanted = entries.filter((e) => familyKidIds.has(e.player_id) && (e.picked?.length ?? 0) > 0);
+  if (wanted.length) {
+    const { data: teamRows } = await service
+      .from("event_teams")
+      .select("team_id")
+      .eq("event_id", eventId);
+    const teamIds = [
+      ...new Set([...(teamRows ?? []).map((r) => r.team_id as string), ...(primaryTeamId ? [primaryTeamId] : [])]),
+    ];
+    const rosterIds = new Set<string>();
+    if (teamIds.length) {
+      const { data: rosterRows } = await service
+        .from("roster")
+        .select("player_id, status")
+        .in("team_id", teamIds);
+      for (const r of (rosterRows ?? []) as { player_id: string; status: string }[]) {
+        if (r.status === "active") rosterIds.add(r.player_id);
+      }
+    }
+    for (const e of wanted) {
+      const picked = [...new Set(e.picked)]
+        .filter((id) => id && id !== e.player_id && rosterIds.has(id))
+        .slice(0, 3);
+      for (const pid of picked) {
+        rows.push({ event_id: eventId, player_id: e.player_id, picked_player_id: pid, parent_id: parentId });
+      }
+    }
+  }
+
+  const del = await service
+    .from("event_sit_by_picks")
+    .delete()
+    .eq("event_id", eventId)
+    .in("player_id", [...familyKidIds]);
+  if (del.error) throw new Error(del.error.message);
+  if (rows.length) {
+    const ins = await service.from("event_sit_by_picks").insert(rows);
+    if (ins.error) throw new Error(ins.error.message);
+  }
 }
 
 // Upsert the family's siblings by name (case-insensitive). Siblings whose name

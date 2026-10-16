@@ -399,6 +399,8 @@ export interface SignupAttendee {
   tier_label: string;
   amount_cents: number;
   is_player: boolean;
+  // Links a roster kid (players.id); absent on legacy rows.
+  player_id?: string | null;
   name: string | null;
   attributes: Record<string, string | number | boolean>;
   status?: AttendeeStatus;

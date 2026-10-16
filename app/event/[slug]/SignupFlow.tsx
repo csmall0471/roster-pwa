@@ -45,6 +45,8 @@ type AttendeeDraft = {
   playerId: string | null;
   attributes: Record<string, string | number | boolean>;
   status: AttendeeStatus;
+  // Roster kids only: ids of the teammates this kid wants to sit by (max 3).
+  sitBy: string[];
   // Sibling tier only: first/last edited separately (last is pre-filled with the
   // family surname). `name` stays the combined source of truth for submit.
   firstName?: string;
@@ -75,9 +77,13 @@ const labelCls = "block text-sm font-medium text-gray-700 mb-1";
 export default function SignupFlow({
   event,
   attendance,
+  sitByChoices = [],
 }: {
   event: EventWithDetails;
   attendance: AttendanceSummary;
+  // Active roster kids ("First L.") offered as "sit by" picks — empty/absent
+  // when the event doesn't collect seating preferences.
+  sitByChoices?: { id: string; name: string }[];
 }) {
   const [step, setStep] = useState<Step>("identify");
   // True until we've checked for an existing session (avoids flashing the phone
@@ -199,12 +205,14 @@ export default function SignupFlow({
               for (const [labelKey, v] of Object.entries(a.attributes ?? {})) {
                 attrs[labelToId.get(labelKey) ?? labelKey] = v;
               }
+              const playerId = a.player_id ?? null;
               return {
                 key: newKey(),
                 name: a.name ?? "",
-                playerId: null,
+                playerId,
                 attributes: attrs,
                 status: a.status === "declined" ? "declined" : "attending",
+                sitBy: playerId ? parent.sit_by_picks[playerId] ?? [] : [],
               };
             });
           } else {
@@ -231,6 +239,7 @@ export default function SignupFlow({
               playerId: p.id,
               attributes: kidAttributes(p, playerTier.player_attributes ?? []),
               status: "attending",
+              sitBy: parent.sit_by_picks[p.id] ?? [],
             })),
           }));
         } else {
@@ -252,7 +261,7 @@ export default function SignupFlow({
               if (fid !== undefined) attrs[fid] = v;
             }
             const { firstName, lastName } = splitName(s.name);
-            return { key: newKey(), name: s.name, firstName, lastName, playerId: null, attributes: attrs, status: "attending" as const };
+            return { key: newKey(), name: s.name, firstName, lastName, playerId: null, attributes: attrs, status: "attending" as const, sitBy: [] };
           }),
         }));
       }
@@ -275,6 +284,7 @@ export default function SignupFlow({
                   playerId: null,
                   attributes: {},
                   status: "attending" as const,
+                  sitBy: [],
                 })),
               }
         );
@@ -373,8 +383,8 @@ export default function SignupFlow({
       [tier.id]: [
         ...(a[tier.id] ?? []),
         tier.is_sibling
-          ? { key: newKey(), name: familyLast, firstName: "", lastName: familyLast, playerId: null, attributes: {}, status: "attending" as const }
-          : { key: newKey(), name: "", playerId: null, attributes: {}, status: "attending" as const },
+          ? { key: newKey(), name: familyLast, firstName: "", lastName: familyLast, playerId: null, attributes: {}, status: "attending" as const, sitBy: [] }
+          : { key: newKey(), name: "", playerId: null, attributes: {}, status: "attending" as const, sitBy: [] },
       ],
     }));
   const removeAttendee = (tierId: string, key: string) =>
@@ -434,18 +444,33 @@ export default function SignupFlow({
     const out: {
       tier_id: string;
       name: string | null;
+      player_id: string | null;
       attributes: Record<string, string | number | boolean>;
       status: AttendeeStatus;
     }[] = [];
     for (const t of tiers) {
       if (t.collect_attendees) {
         for (const a of attendees[t.id] ?? []) {
-          out.push({ tier_id: t.id, name: a.name.trim(), attributes: a.attributes, status: a.status });
+          out.push({ tier_id: t.id, name: a.name.trim(), player_id: a.playerId ?? null, attributes: a.attributes, status: a.status });
         }
       } else {
         const n = counts[t.id] ?? 0;
         for (let i = 0; i < n; i++)
-          out.push({ tier_id: t.id, name: null, attributes: {}, status: "attending" });
+          out.push({ tier_id: t.id, name: null, player_id: null, attributes: {}, status: "attending" });
+      }
+    }
+
+    // Seating picks — one entry per attending roster kid with picks. Only sent
+    // when the event offers the picker (so other events' picks stay untouched).
+    let sitBy: { player_id: string; picked: string[] }[] | undefined;
+    if (sitByChoices.length > 0) {
+      sitBy = [];
+      for (const t of tiers) {
+        if (!t.collect_attendees || !t.is_player) continue;
+        for (const a of attendees[t.id] ?? []) {
+          if (a.playerId && a.status === "attending" && a.sitBy.length > 0)
+            sitBy.push({ player_id: a.playerId, picked: a.sitBy.slice(0, 3) });
+        }
       }
     }
 
@@ -458,6 +483,7 @@ export default function SignupFlow({
       phone: contactPhone,
       responses,
       attendees: out,
+      sit_by: sitBy,
     });
     setSubmitting(false);
     if ("error" in res) {
@@ -710,6 +736,15 @@ export default function SignupFlow({
                                 </button>
                               ))}
                             </div>
+                            {t.is_player && a.playerId && a.status === "attending" && sitByChoices.length > 0 && (
+                              <SitByPicker
+                                kidName={a.name}
+                                selfId={a.playerId}
+                                choices={sitByChoices}
+                                value={a.sitBy}
+                                onChange={(ids) => updateAttendee(t.id, a.key, { sitBy: ids })}
+                              />
+                            )}
                             {!declined && t.attendeeFields.length > 0 && (
                               <div className="mt-2 space-y-2">
                                 {t.attendeeFields.map((f) => (
@@ -1150,6 +1185,69 @@ function FieldInput({
     <div>
       <label className={labelCls}>{field.label}{req}</label>
       <input className={inputCls} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+// "Who should {kid} sit by?" — tap-to-toggle chips over the event's roster kids
+// (max 3, never the kid themself). A filter input appears for long rosters.
+function SitByPicker({
+  kidName,
+  selfId,
+  choices,
+  value,
+  onChange,
+}: {
+  kidName: string;
+  selfId: string;
+  choices: { id: string; name: string }[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const options = choices.filter((c) => c.id !== selfId);
+  if (options.length === 0) return null;
+  const q = filter.trim().toLowerCase();
+  const shown = q ? options.filter((c) => c.name.toLowerCase().includes(q)) : options;
+  const firstName = kidName.trim().split(/\s+/)[0] || "they";
+  const full = value.length >= 3;
+  const toggle = (id: string) =>
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+
+  return (
+    <div className="mt-2">
+      <p className="text-xs font-medium text-gray-600">
+        Who should {firstName} sit by? <span className="font-normal text-gray-400">(up to 3)</span>
+      </p>
+      {options.length > 15 && (
+        <input
+          className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none"
+          placeholder="Search teammates…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      )}
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {shown.map((c) => {
+          const selected = value.includes(c.id);
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => toggle(c.id)}
+              disabled={!selected && full}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                selected
+                  ? "bg-blue-600 text-white"
+                  : "border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white"
+              }`}
+            >
+              {c.name}
+            </button>
+          );
+        })}
+        {shown.length === 0 && <span className="text-xs text-gray-400">No teammates match.</span>}
+      </div>
     </div>
   );
 }

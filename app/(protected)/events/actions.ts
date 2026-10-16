@@ -311,6 +311,8 @@ export async function updateSignupNotes(
 export type CoachAttendeeInput = {
   tier_id: string;
   name: string | null;
+  // Links a roster kid — round-tripped so coach edits don't strip stored links.
+  player_id?: string | null;
   attributes: Record<string, string | number | boolean>; // keyed by field id
   status?: AttendeeStatus;
 };

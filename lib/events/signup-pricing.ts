@@ -29,6 +29,7 @@ export type PricingTier = {
 export type PricedAttendeeInput = {
   tier_id: string;
   name: string | null;
+  player_id?: string | null; // links a roster kid; callers validate ownership
   attributes: Record<string, string | number | boolean>; // keyed by field id
   status?: AttendeeStatus;
 };
@@ -80,6 +81,7 @@ export function buildPricedAttendees(
       tier_label: t.label,
       amount_cents: unitAmount,
       is_player: t.is_player,
+      player_id: a.player_id ?? null,
       name: trimmedName,
       attributes: labeled,
       status,

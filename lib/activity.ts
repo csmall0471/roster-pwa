@@ -64,6 +64,14 @@ export type ActivityEvent =
   | "rc_duplicates_removed"
   | "rc_access_granted"
   | "rc_access_revoked"
+  // Seating tool — attributed to the ACTOR's auth user (owner or a granted
+  // helper), like the rc_* events.
+  | "seating_plan_created"
+  | "seating_plan_deleted"
+  | "seating_people_added"
+  | "seating_auto_assigned"
+  | "seating_invites_sent"
+  | "seating_event_linked"
   // Tool permission manager (/access) — granting/revoking tools per user.
   | "tool_access_granted"
   | "tool_access_revoked"

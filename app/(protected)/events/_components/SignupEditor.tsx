@@ -26,7 +26,9 @@ export type RosterParentOption = {
 
 type FieldVal = string | number | boolean;
 type EditorField = { id: string; label: string; field_type: EventFieldType; options: string[]; required: boolean };
-type Row = { key: string; tierId: string; name: string; attrs: Record<string, FieldVal>; status: "attending" | "declined" };
+// playerId links a roster kid (from the stored attendee or the family seed) and
+// is round-tripped on save so coach edits don't strip stored player links.
+type Row = { key: string; tierId: string; name: string; playerId: string | null; attrs: Record<string, FieldVal>; status: "attending" | "declined" };
 
 let seq = 0;
 const nextKey = () => `r${seq++}`;
@@ -94,6 +96,7 @@ function initialRows(
         key: nextKey(),
         tierId: t.id,
         name: a.name ?? "",
+        playerId: a.player_id ?? null,
         attrs,
         status: a.status === "declined" ? "declined" : "attending",
       });
@@ -208,14 +211,14 @@ export default function SignupEditor({
   const setAttr = (key: string, fieldId: string, v: FieldVal) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, attrs: { ...r.attrs, [fieldId]: v } } : r)));
   const addRow = (tierId: string) =>
-    setRows((rs) => [...rs, { key: nextKey(), tierId, name: "", attrs: {}, status: "attending" }]);
+    setRows((rs) => [...rs, { key: nextKey(), tierId, name: "", playerId: null, attrs: {}, status: "attending" }]);
   const removeRow = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
   const setCount = (tierId: string, n: number) =>
     setRows((rs) => {
       const others = rs.filter((r) => r.tierId !== tierId);
       const mine = rs.filter((r) => r.tierId === tierId);
       const next = [...mine];
-      while (next.length < n) next.push({ key: nextKey(), tierId, name: "", attrs: {}, status: "attending" });
+      while (next.length < n) next.push({ key: nextKey(), tierId, name: "", playerId: null, attrs: {}, status: "attending" });
       next.length = Math.max(0, n);
       return [...others, ...next];
     });
@@ -242,6 +245,7 @@ export default function SignupEditor({
           key: nextKey(),
           tierId: playerTier.id,
           name: playerTier.collect_attendees ? kid.name : "",
+          playerId: kid.id,
           attrs: playerTier.collect_attendees ? kidAttrsForTier(playerTier, kid) : {},
           status: "attending",
         });
@@ -256,14 +260,14 @@ export default function SignupEditor({
           const fid = labelToId.get(labelKey);
           if (fid !== undefined) attrs[fid] = v;
         }
-        seeded.push({ key: nextKey(), tierId: siblingTier.id, name: s.name, attrs, status: "attending" });
+        seeded.push({ key: nextKey(), tierId: siblingTier.id, name: s.name, playerId: null, attrs, status: "attending" });
       }
     }
     const parentTier = sorted.find((t) => t.is_parent);
     const fam = p.familyParents.length ? p.familyParents : [{ name: p.name }];
     if (parentTier?.collect_attendees) {
       for (const par of fam)
-        seeded.push({ key: nextKey(), tierId: parentTier.id, name: par.name, attrs: {}, status: "attending" });
+        seeded.push({ key: nextKey(), tierId: parentTier.id, name: par.name, playerId: null, attrs: {}, status: "attending" });
     }
     if (seeded.length) setRows(seeded);
   }
@@ -288,6 +292,7 @@ export default function SignupEditor({
           return {
             tier_id: r.tierId,
             name: collect ? r.name.trim() || null : null,
+            player_id: r.playerId,
             attributes: collect ? r.attrs : {},
             status: r.status,
           };

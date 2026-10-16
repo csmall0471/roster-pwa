@@ -3,7 +3,7 @@
 // scoped helper nav, Parent Portal nav). Keys match the `tools[]` values stored
 // in the tool_access table.
 
-export type ToolKey = "roster-creator" | "card-creator";
+export type ToolKey = "roster-creator" | "card-creator" | "seating";
 
 export type ToolDef = {
   key: ToolKey;
@@ -27,6 +27,12 @@ export const TOOLS: readonly ToolDef[] = [
     label: "Card Creator",
     href: "/tools/card-creator",
     parentHref: "/parent/card-creator",
+  },
+  {
+    key: "seating",
+    label: "Seating",
+    href: "/tools/seating",
+    parentHref: null,
   },
 ] as const;
 

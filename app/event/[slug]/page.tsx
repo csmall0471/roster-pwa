@@ -89,5 +89,42 @@ export default async function PublicEventPage({
     families: fam.map(({ lead, extras }) => ({ lead, extras })),
   };
 
-  return <SignupFlow event={ev} attendance={attendance} />;
+  // "Sit by" choices — the event's active roster kids, offered on the RSVP form
+  // when the coach turned seating collection on. events.collect_sit_by ships
+  // with a later migration, so it may be undefined — the picker simply stays
+  // hidden until then. Same privacy posture as who's-coming: first name + last
+  // initial only, via the service client.
+  const sitByChoices: { id: string; name: string }[] = [];
+  if ((event as { collect_sit_by?: boolean }).collect_sit_by === true) {
+    const teamIds = new Set<string>();
+    if (ev.team_id) teamIds.add(ev.team_id);
+    const { data: teamRows } = await service
+      .from("event_teams")
+      .select("team_id")
+      .eq("event_id", ev.id);
+    for (const r of teamRows ?? []) teamIds.add(r.team_id as string);
+
+    if (teamIds.size > 0) {
+      const { data: rosterRows } = await service
+        .from("roster")
+        .select("player_id, status, players(id, first_name, last_name)")
+        .in("team_id", [...teamIds]);
+      // PostgREST may return the players embed as an object or a one-element
+      // array depending on how it resolves the relationship — handle both.
+      type PlayerRow = { id: string; first_name: string; last_name: string };
+      type RosterRow = { player_id: string; status: string; players: PlayerRow | PlayerRow[] | null };
+      const seen = new Set<string>();
+      for (const row of (rosterRows ?? []) as unknown as RosterRow[]) {
+        if (row.status !== "active") continue;
+        const p = Array.isArray(row.players) ? row.players[0] : row.players;
+        if (!p || seen.has(p.id)) continue;
+        seen.add(p.id);
+        const lastInitial = p.last_name?.trim() ? ` ${p.last_name.trim()[0]}.` : "";
+        sitByChoices.push({ id: p.id, name: `${p.first_name ?? ""}${lastInitial}`.trim() });
+      }
+      sitByChoices.sort((a, b) => a.name.localeCompare(b.name));
+    }
+  }
+
+  return <SignupFlow event={ev} attendance={attendance} sitByChoices={sitByChoices} />;
 }
