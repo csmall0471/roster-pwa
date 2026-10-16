@@ -130,22 +130,23 @@ function ZoneNode({
     );
   }
 
-  // Cluster: a bar-ledge section — solid panel, section label, its seats, and
-  // the drink ledge along the court edge (local bottom; rotates with the zone).
+  // Cluster: a bar-ledge section — the drink ledge along the court edge (local
+  // TOP; rotates with the zone), Row 1 at the ledge, the section label along
+  // the bottom where you'd read it standing in the lounge behind the seats.
   return (
     <div
       onPointerDown={zoneDown}
       style={frame}
       className={`rounded-lg border border-gray-300/80 dark:border-gray-700 bg-white/85 dark:bg-gray-900/80 shadow-sm ${editable} ${ring}`}
     >
-      <div className="absolute left-2 top-1 text-[12px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-        {zone.label}
-      </div>
       {/* Drink ledge / rail the seats face (court side). */}
       <div
-        className="absolute inset-x-1 bottom-1 h-2.5 rounded-full bg-gradient-to-b from-amber-700 to-amber-900 dark:from-amber-800 dark:to-amber-950 opacity-80"
+        className="absolute inset-x-1 top-1 h-2.5 rounded-full bg-gradient-to-b from-amber-700 to-amber-900 dark:from-amber-800 dark:to-amber-950 opacity-80"
         title="Ledge (court side)"
       />
+      <div className="absolute bottom-1 left-2 text-[12px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">
+        {zone.label}
+      </div>
       {seats.map((s) => {
         const occupant = occupantBySeat.get(s.id) ?? null;
         const down = edit

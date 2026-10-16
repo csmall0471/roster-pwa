@@ -75,52 +75,46 @@ export function pointInZone(
 
 // ── Cluster geometry ─────────────────────────────────────────────────────────
 // A bar-ledge section as it exists in the venue: up to two rows of 4 seats
-// facing the court over a drink ledge. Ticketmaster labels the rows "1" (front,
-// at the ledge) and "3" (back). Within a row, seats run 1→4 right-to-left when
-// you stand BEHIND the seats facing the court — with the court at the bottom of
-// our canvas that puts Seat 1 leftmost on screen.
+// facing the COURT over a drink ledge, with the lounge behind the seat backs.
+// On our canvas the court sits in the concave pocket the seat band wraps —
+// ABOVE the horizontal run and up-left of the 45° run — so inside a section the
+// LEDGE is the TOP edge, Row 1 (front) is the top row, Row 3 behind it, and the
+// section label reads along the bottom (lounge side).
+// Seat numbers: Ticketmaster runs 1→4 right-to-left when you stand BEHIND the
+// seats (in the lounge) facing the court. Standing below a section looking up
+// (north), your right hand points east — so Seat 1 is the RIGHTMOST on screen.
 
 const PAD = 12; // inner padding
-const STRIP = 26; // label strip height at the top of a cluster
+const STRIP = 26; // label strip height at the BOTTOM of a cluster (lounge side)
 const PITCH = SEAT + SEAT_GAP; // 72
-export const LEDGE_H = 12; // the drink ledge drawn along the court edge
+export const LEDGE_H = 12; // the drink ledge drawn along the court (top) edge
+const LEDGE_BAND = 8 + LEDGE_H + 6; // 26 — ledge + breathing room above Row 1
 
 export type ClusterShape = "1x4" | "2x2" | "2x4";
 
 // Local seat positions + footprint for a cluster shape. Labels are `R{row}·S{n}`
-// (section context comes from the zone label). Row 3 sits at the top (lounge
-// side), Row 1 at the bottom against the ledge; a single-row shape is Row 1.
+// (section context comes from the zone label).
 export function clusterSeats(
   shape: ClusterShape
 ): { w: number; h: number; seats: { x: number; y: number; label: string }[] } {
-  const seatX = (s: number) => PAD + (s - 1) * PITCH; // Seat 1 leftmost on screen
-  const seats: { x: number; y: number; label: string }[] = [];
-
-  if (shape === "2x2") {
-    // Legacy compact square (editor option): rows 3/1, two seats each.
-    for (const [row, y] of [
-      [3, STRIP],
-      [1, STRIP + PITCH],
-    ] as const) {
-      for (let s = 1; s <= 2; s++) seats.push({ x: seatX(s), y, label: `R${row}·S${s}` });
-    }
-    return { w: PAD * 2 + 2 * SEAT + SEAT_GAP, h: STRIP + PITCH + SEAT + 6 + LEDGE_H + 8, seats };
-  }
-
+  const perRow = shape === "2x2" ? 2 : 4;
+  const seatX = (s: number) => PAD + (perRow - s) * PITCH; // Seat 1 rightmost
   const rows: [number, number][] =
-    shape === "2x4"
-      ? [
-          [3, STRIP],
-          [1, STRIP + PITCH],
-        ]
-      : [[1, STRIP]];
+    shape === "1x4"
+      ? [[1, LEDGE_BAND]]
+      : [
+          [1, LEDGE_BAND], // front row, at the ledge
+          [3, LEDGE_BAND + PITCH], // back row
+        ];
+
+  const seats: { x: number; y: number; label: string }[] = [];
   for (const [row, y] of rows) {
-    for (let s = 1; s <= 4; s++) seats.push({ x: seatX(s), y, label: `R${row}·S${s}` });
+    for (let s = 1; s <= perRow; s++) seats.push({ x: seatX(s), y, label: `R${row}·S${s}` });
   }
   const lastRowY = rows[rows.length - 1][1];
   return {
-    w: PAD * 2 + 4 * SEAT + 3 * SEAT_GAP, // 300
-    h: lastRowY + SEAT + 6 + LEDGE_H + 8,
+    w: PAD * 2 + perRow * SEAT + (perRow - 1) * SEAT_GAP, // 2x4/1x4 → 300
+    h: lastRowY + SEAT + STRIP,
     seats,
   };
 }
@@ -201,44 +195,48 @@ function section(
 export function buildDefaultLayout(): SeedZone[] {
   const zones: SeedZone[] = [];
 
-  // Court-side wall, horizontal run: BL15 (leftmost) … BL7, ledges facing the
-  // court below. BL13–BL15 are single-row sections in the venue.
+  // The seat band wraps a corner of the bowl: the COURT fills the concave
+  // pocket (above the horizontal run, up-left of the 45° run) and the LOUNGE
+  // interior sits behind the seat backs (below / lower-right).
+
+  // Horizontal run: BL15 (leftmost) … BL7, ledges facing the court ABOVE.
+  // BL13–BL15 are single-row sections in the venue.
   for (let k = 0; k < 9; k++) {
     const n = 15 - k;
     const shape: ClusterShape = n >= 13 ? "1x4" : "2x4";
-    zones.push(section(`BL${n}`, 200 + k * 320, 1400, 0, shape, n));
+    zones.push(section(`BL${n}`, 200 + k * 320, 1480, 0, shape, n));
   }
 
   // The 45° wall: BL6 … BL1 climbing up-right, ledges facing the court to the
-  // lower-right (local bottom rotates there at 315°).
+  // upper-left (the local top rotates there at 315°).
   for (let k = 0; k < 6; k++) {
     const n = 6 - k;
-    zones.push(section(`BL${n}`, 3140 + k * 226, 1380 - k * 226, 315, "2x4", n));
+    zones.push(section(`BL${n}`, 3200 + k * 226, 1460 - k * 226, 315, "2x4", n));
   }
 
-  // Lounge interior (behind the seats): standing room, cocktail tables, and the
-  // two bars from the venue — the long back bar and the island bar by the
-  // 45° wall. Bars/tables are decorative; SRO is the parents' default home.
+  // Lounge interior (BEHIND the seats): standing room, cocktail tables, and the
+  // two bars from the venue — the long back bar and the island bar by the 45°
+  // wall. Bars/tables are decorative; SRO is the parents' default home.
   zones.push({
     kind: "sro",
     label: "Standing Room",
-    x: 260,
-    y: 940,
+    x: 300,
+    y: 1800,
     rotation: 0,
     w: 1050,
-    h: 360,
+    h: 380,
     capacity: 52,
     position: 100,
     seats: [],
   });
 
-  const tableXs = [1480, 1780, 2080, 2380];
+  const tableXs = [1500, 1800, 2100, 2400];
   tableXs.forEach((tx, i) => {
     zones.push({
       kind: "table",
       label: "",
       x: tx,
-      y: 1180,
+      y: 1770,
       rotation: 0,
       w: 120,
       h: 120,
@@ -251,8 +249,8 @@ export function buildDefaultLayout(): SeedZone[] {
   zones.push({
     kind: "bar",
     label: "BAR",
-    x: 2550,
-    y: 1020,
+    x: 2620,
+    y: 1860,
     rotation: 0,
     w: 900,
     h: 110,
@@ -263,8 +261,8 @@ export function buildDefaultLayout(): SeedZone[] {
   zones.push({
     kind: "bar",
     label: "BAR",
-    x: 3420,
-    y: 760,
+    x: 3820,
+    y: 1560,
     rotation: 315,
     w: 420,
     h: 110,

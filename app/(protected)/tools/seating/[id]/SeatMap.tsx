@@ -668,31 +668,42 @@ export default function SeatMap({
             backgroundImage: GRID_BG,
           }}
         >
-          {/* Static venue ambience, under everything: the arena bowl falling
-              away past the seat ledges (bottom + 45° walls) and the lounge name
-              on the floor. Pure decoration — not stored, not interactive. */}
+          {/* Static venue ambience, under everything. The seat band wraps a
+              corner of the arena bowl: the COURT fills the concave pocket the
+              seats face (above the horizontal run, up-left of the 45° run) and
+              the lounge floor is behind the seat backs. Pure decoration — not
+              stored, not interactive. */}
+          {/* Arena bowl, with a band hugging the 45° wall so it wraps the corner. */}
           <div
-            className="pointer-events-none absolute rounded-2xl bg-gradient-to-b from-gray-400/70 to-gray-600/80 dark:from-gray-950 dark:to-black"
-            style={{ left: 60, top: 1660, width: 3120, height: 680 }}
-          >
-            <span className="absolute left-1/2 top-8 -translate-x-1/2 text-[26px] font-bold uppercase tracking-[0.6em] text-white/50 dark:text-white/25">
-              Court side ↓
-            </span>
-          </div>
+            className="pointer-events-none absolute rounded-[48px] bg-gradient-to-b from-gray-400/60 to-gray-600/70 dark:from-gray-950 dark:to-black"
+            style={{ left: 300, top: 150, width: 2600, height: 1200 }}
+          />
           <div
-            className="pointer-events-none absolute rounded-2xl bg-gradient-to-b from-gray-400/70 to-gray-600/80 dark:from-gray-950 dark:to-black"
+            className="pointer-events-none absolute rounded-[48px] bg-gradient-to-b from-gray-400/60 to-gray-600/70 dark:from-gray-950 dark:to-black"
             style={{
-              left: 3390,
-              top: 1570,
-              width: 1750,
-              height: 650,
+              left: 2640,
+              top: 1140,
+              width: 1500,
+              height: 420,
               transform: "rotate(315deg)",
               transformOrigin: "top left",
             }}
           />
+          {/* Hardwood court in the middle of the bowl. */}
+          <div
+            className="pointer-events-none absolute rounded-lg bg-gradient-to-br from-amber-200 to-amber-400 dark:from-amber-900 dark:to-amber-950 shadow-inner"
+            style={{ left: 1250, top: 430, width: 1150, height: 620 }}
+          >
+            <div className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-amber-700/50 dark:bg-amber-500/30" />
+            <div className="absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-amber-700/50 dark:border-amber-500/30" />
+            <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[18px] font-bold uppercase tracking-[0.5em] text-amber-800/50 dark:text-amber-400/30 pl-[0.5em]">
+              Court
+            </span>
+          </div>
+          {/* Lounge floor lettering, behind the seat backs. */}
           <span
             className="pointer-events-none absolute text-[34px] font-bold uppercase tracking-[0.7em] text-stone-400/70 dark:text-stone-600/60"
-            style={{ left: 1450, top: 860 }}
+            style={{ left: 1450, top: 2020 }}
           >
             Hideaway Lounge
           </span>
