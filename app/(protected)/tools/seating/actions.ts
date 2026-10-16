@@ -281,14 +281,17 @@ export async function addPeopleFromTeams(
       }
     }
 
+    // Every row carries the SAME keys: PostgREST bulk inserts pad keys missing
+    // from some rows with NULL (not the column default), which trips the
+    // in_sro NOT NULL constraint on mixed player/parent batches.
     type NewPerson = {
       plan_id: string;
       kind: string;
       display_name: string;
-      player_id?: string | null;
-      parent_id?: string | null;
-      source_team_id?: string | null;
-      in_sro?: boolean;
+      player_id: string | null;
+      parent_id: string | null;
+      source_team_id: string | null;
+      in_sro: boolean;
     };
     const rows: NewPerson[] = [];
 
@@ -305,7 +308,9 @@ export async function addPeopleFromTeams(
         kind: "player",
         display_name: fullName(player.first_name, player.last_name) || "Player",
         player_id: player.id,
+        parent_id: null,
         source_team_id: teamId,
+        in_sro: false, // kids queue for seats
       });
     }
 
@@ -317,7 +322,9 @@ export async function addPeopleFromTeams(
           plan_id: planId,
           kind: "parent",
           display_name: fullName(p.first_name, p.last_name) || "Parent",
+          player_id: null,
           parent_id: p.id,
+          source_team_id: null,
           in_sro: true, // parents default to standing room
         });
       }
@@ -351,6 +358,8 @@ export async function addPeopleFromTeams(
           display_name: sib.name,
           parent_id: guardianByName.get(key) ?? null,
           player_id: sib.player_id ?? null,
+          source_team_id: null,
+          in_sro: false, // siblings are kids — they queue for seats too
         });
       }
     }
@@ -944,13 +953,16 @@ export async function syncPeopleFromEvent(planId: string): Promise<{ added?: num
       existing.filter((p) => p.kind === "player").map((p) => nameKey(p.display_name))
     );
 
+    // Every row carries the SAME keys — PostgREST bulk inserts pad keys missing
+    // from some rows with NULL (not the column default), which trips the
+    // in_sro NOT NULL constraint on mixed batches.
     type NewPerson = {
       plan_id: string;
       kind: string;
       display_name: string;
-      player_id?: string | null;
-      parent_id?: string | null;
-      in_sro?: boolean;
+      player_id: string | null;
+      parent_id: string | null;
+      in_sro: boolean;
     };
     const rows: NewPerson[] = [];
 
@@ -984,6 +996,7 @@ export async function syncPeopleFromEvent(planId: string): Promise<{ added?: num
             display_name: aName || signupName || "Player",
             player_id: aPlayerId,
             parent_id: familyParentId,
+            in_sro: false,
           });
         } else if (isParent) {
           const display = aName || signupName;
@@ -998,6 +1011,7 @@ export async function syncPeopleFromEvent(planId: string): Promise<{ added?: num
             plan_id: planId,
             kind: "parent",
             display_name: display,
+            player_id: null,
             parent_id: linkParent,
             in_sro: true,
           });
@@ -1009,7 +1023,9 @@ export async function syncPeopleFromEvent(planId: string): Promise<{ added?: num
             plan_id: planId,
             kind: "sibling",
             display_name: aName,
+            player_id: null,
             parent_id: familyParentId,
+            in_sro: false,
           });
         } else {
           const display = aName || signupName;
@@ -1020,7 +1036,9 @@ export async function syncPeopleFromEvent(planId: string): Promise<{ added?: num
             plan_id: planId,
             kind: "guest",
             display_name: display,
+            player_id: null,
             parent_id: familyParentId,
+            in_sro: false,
           });
         }
       }
