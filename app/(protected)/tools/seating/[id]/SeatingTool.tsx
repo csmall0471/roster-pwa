@@ -43,6 +43,8 @@ import {
   syncPeopleFromEvent,
   invitePeople,
   resetLayoutToSeed,
+  clearAllAssignments,
+  restoreAssignments,
 } from "../actions";
 import SeatMap, { type SeatMapApi } from "./SeatMap";
 import Toolbar, { type AddKind } from "./Toolbar";
@@ -205,9 +207,101 @@ export default function SeatingTool({
     );
   }, [plan.zones, plan.seats]);
 
+  // ── Undo / redo (assignment changes only) ───────────────────────────────────
+  // Each mutation snapshots everyone's {seatId, inSro} BEFORE applying; undo
+  // restores that exact state (locked included) via restoreAssignments.
+
+  type AssignSnapshot = Map<string, { seatId: string | null; inSro: boolean }>;
+  const undoStack = useRef<AssignSnapshot[]>([]);
+  const redoStack = useRef<AssignSnapshot[]>([]);
+  // Stack sizes mirrored into state so the toolbar's disabled flags render
+  // without reading refs during render.
+  const [histSize, setHistSize] = useState({ undo: 0, redo: 0 });
+  const syncHist = () =>
+    setHistSize({ undo: undoStack.current.length, redo: redoStack.current.length });
+
+  const snapshotAssignments = (): AssignSnapshot =>
+    new Map(plan.people.map((p) => [p.id, { seatId: p.seatId, inSro: p.inSro }]));
+
+  function pushHistory() {
+    undoStack.current.push(snapshotAssignments());
+    if (undoStack.current.length > 50) undoStack.current.shift();
+    redoStack.current = [];
+    syncHist();
+  }
+
+  function applyAssignmentSnapshot(snap: AssignSnapshot) {
+    void act(
+      (p) => ({
+        ...p,
+        people: p.people.map((x) => {
+          const s = snap.get(x.id);
+          return s ? { ...x, seatId: s.seatId, inSro: s.inSro } : x;
+        }),
+      }),
+      () =>
+        restoreAssignments(
+          planId,
+          [...snap.entries()].map(([personId, s]) => ({
+            personId,
+            seatId: s.seatId,
+            inSro: s.inSro,
+          }))
+        )
+    );
+  }
+
+  function handleUndo() {
+    const snap = undoStack.current.pop();
+    if (!snap) return;
+    redoStack.current.push(snapshotAssignments());
+    syncHist();
+    applyAssignmentSnapshot(snap);
+  }
+
+  function handleRedo() {
+    const snap = redoStack.current.pop();
+    if (!snap) return;
+    undoStack.current.push(snapshotAssignments());
+    syncHist();
+    applyAssignmentSnapshot(snap);
+  }
+
+  function handleClearAll() {
+    if (
+      !window.confirm(
+        "Unassign EVERY seat (locked ones too)? Standing-room stays. You can Undo this."
+      )
+    )
+      return;
+    pushHistory();
+    void act(
+      (p) => ({
+        ...p,
+        people: p.people.map((x) => (x.seatId ? { ...x, seatId: null } : x)),
+      }),
+      () => clearAllAssignments(planId)
+    );
+  }
+
+  // Cmd/Ctrl+Z undo, Shift+Cmd/Ctrl+Z redo — skipped while typing in a field.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+      const t = e.target as HTMLElement | null;
+      if (t && /^(input|textarea|select)$/i.test(t.tagName)) return;
+      e.preventDefault();
+      if (e.shiftKey) handleRedo();
+      else handleUndo();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   // ── Assign-mode mutations ───────────────────────────────────────────────────
 
   function handleAssign(personId: string, seatId: string) {
+    pushHistory();
     void act(
       (p) => patchPerson(p, personId, { seatId, inSro: false }),
       () => assignSeat(planId, personId, seatId)
@@ -215,6 +309,7 @@ export default function SeatingTool({
   }
 
   function handleSwap(aId: string, bId: string) {
+    pushHistory();
     void act((p) => {
       const a = p.people.find((x) => x.id === aId);
       const b = p.people.find((x) => x.id === bId);
@@ -233,6 +328,7 @@ export default function SeatingTool({
   }
 
   function handleSro(personId: string) {
+    pushHistory();
     void act(
       (p) => patchPerson(p, personId, { inSro: true, seatId: null }),
       () => setInSro(planId, personId, true)
@@ -240,6 +336,8 @@ export default function SeatingTool({
   }
 
   function handleUnassign(person: PersonVM) {
+    if (!person.seatId && !person.inSro) return;
+    pushHistory();
     if (person.seatId) {
       void act(
         (p) => patchPerson(p, person.id, { seatId: null }),
@@ -438,6 +536,7 @@ export default function SeatingTool({
   // ── Auto-assign ─────────────────────────────────────────────────────────────
 
   function runAutoAssign(scope: "unassigned" | "all") {
+    pushHistory();
     const p = planRef.current;
     // Kids only (players + siblings), not out, not locked, not deliberately
     // standing in SRO. "unassigned" additionally skips anyone already seated.
@@ -509,6 +608,7 @@ export default function SeatingTool({
 
   function handleClearUnlocked() {
     if (!window.confirm("Clear every unlocked seat assignment? (Standing-room stays put.)")) return;
+    pushHistory();
     // Matches the server: only seat_id clears; in_sro is left alone so parents
     // stay standing.
     void act(
@@ -797,9 +897,16 @@ export default function SeatingTool({
           onOpenLink={() => setLinkOpen(true)}
           onAdd={handleAdd}
           onResetLayout={handleResetLayout}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={histSize.undo > 0}
+          canRedo={histSize.redo > 0}
+          onClearAll={handleClearAll}
         />
         <SeatMap
           mode={mode}
+          picks={plan.picks}
+          teamNames={plan.teamNames}
           zones={plan.zones}
           seats={plan.seats}
           people={plan.people}

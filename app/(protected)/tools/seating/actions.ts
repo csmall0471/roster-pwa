@@ -630,6 +630,65 @@ export async function applyAssignments(
   }
 }
 
+// Unseat EVERYONE (locked included) — the toolbar's "clear seats". Standing-
+// room flags stay; undo can bring the seating back.
+export async function clearAllAssignments(planId: string): Promise<{ error?: string }> {
+  try {
+    const { supabase } = await requireSeating();
+    const { error } = await supabase
+      .from("seating_people")
+      .update({ seat_id: null })
+      .eq("plan_id", planId)
+      .not("seat_id", "is", null);
+    if (error) return { error: error.message };
+    revalidatePlan(planId);
+    return {};
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
+// Apply an EXACT assignment state (seat + standing per person) — the undo/redo
+// persistence path. Unlike applyAssignments this does not skip locked people:
+// an explicit undo restores exactly what the admin saw. Clears listed seats
+// first so the one-person-per-seat unique index can't trip mid-apply.
+export async function restoreAssignments(
+  planId: string,
+  rows: { personId: string; seatId: string | null; inSro: boolean }[]
+): Promise<{ error?: string }> {
+  try {
+    const { supabase } = await requireSeating();
+    if (rows.length === 0) return {};
+    const ids = rows.map((r) => r.personId);
+    const { error: clearErr } = await supabase
+      .from("seating_people")
+      .update({ seat_id: null })
+      .eq("plan_id", planId)
+      .in("id", ids);
+    if (clearErr) return { error: clearErr.message };
+
+    // Individual updates carry distinct values; run them in small batches.
+    for (let i = 0; i < rows.length; i += 10) {
+      const chunk = rows.slice(i, i + 10);
+      const results = await Promise.all(
+        chunk.map((r) =>
+          supabase
+            .from("seating_people")
+            .update({ seat_id: r.seatId, in_sro: r.inSro })
+            .eq("plan_id", planId)
+            .eq("id", r.personId)
+        )
+      );
+      const bad = results.find((res) => res.error);
+      if (bad?.error) return { error: bad.error.message };
+    }
+    revalidatePlan(planId);
+    return {};
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
 // Unseat everyone who isn't locked (in_sro flags stay as they are).
 export async function clearUnlockedAssignments(planId: string): Promise<{ error?: string }> {
   try {

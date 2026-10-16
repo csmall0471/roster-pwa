@@ -9,11 +9,16 @@ import { isKid, initialsOf } from "./PersonChip";
 const STRIPES =
   "repeating-linear-gradient(45deg, rgba(120,120,130,0.25) 0 6px, transparent 6px 12px)";
 
-function nameLines(name: string): [string, string] {
+// How much detail a seat shows at the current scale: initials when far out,
+// first name + last initial at mid zoom, the full name when zoomed right in.
+export type ZoomTier = "out" | "mid" | "in";
+
+function nameLines(name: string): { first: string; lastInitial: string; last: string } {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const first = parts[0] ?? "";
-  const last = parts.length > 1 ? `${parts[parts.length - 1][0]}.` : "";
-  return [first, last];
+  const last = parts.slice(1).join(" ");
+  const lastInitial = last ? `${last[0]}.` : "";
+  return { first, lastInitial, last };
 }
 
 // One 60px seat square. Positioned absolutely at the seat's coords — zone-local
@@ -22,7 +27,7 @@ function nameLines(name: string): [string, string] {
 function SeatNode({
   seat,
   occupant,
-  zoomedOut,
+  zoom,
   rotation = 0,
   eligible = false,
   selected = false,
@@ -30,12 +35,13 @@ function SeatNode({
 }: {
   seat: SeatVM;
   occupant: PersonVM | null;
-  zoomedOut: boolean;
+  zoom: ZoomTier;
   rotation?: number;
   eligible?: boolean;
   selected?: boolean;
   onPointerDown?: (e: React.PointerEvent) => void;
 }) {
+  const zoomedOut = zoom === "out";
   const base =
     "absolute rounded-lg text-center select-none touch-none overflow-hidden transition-shadow";
   // Three clear states: occupied (blue kid / violet adult), PURCHASED-but-empty
@@ -60,7 +66,9 @@ function SeatNode({
       ? `${seat.label} — not purchased`
       : `${seat.label} — open (purchased)`;
 
-  const [first, lastInitial] = occupant ? nameLines(occupant.displayName) : ["", ""];
+  const { first, lastInitial, last } = occupant
+    ? nameLines(occupant.displayName)
+    : { first: "", lastInitial: "", last: "" };
 
   return (
     <div
@@ -85,6 +93,18 @@ function SeatNode({
         {occupant ? (
           zoomedOut ? (
             <span className="text-xs font-bold">{initialsOf(occupant.displayName)}</span>
+          ) : zoom === "in" ? (
+            // Zoomed right in: the whole name, two lines.
+            <span className="block px-0.5 text-[9px] leading-[1.1] font-semibold">
+              <span className="block truncate" style={{ maxWidth: SEAT - 6 }}>
+                {first}
+              </span>
+              {last && (
+                <span className="block truncate" style={{ maxWidth: SEAT - 6 }}>
+                  {last}
+                </span>
+              )}
+            </span>
           ) : (
             <span className="block px-0.5 text-[10px] leading-tight font-semibold">
               <span className="block truncate" style={{ maxWidth: SEAT - 6 }}>

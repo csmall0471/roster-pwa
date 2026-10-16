@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import type { PersonVM, SeatVM, ZoneVM } from "../types";
-import SeatNode from "./SeatNode";
+import SeatNode, { type ZoomTier } from "./SeatNode";
 import PersonChip from "./PersonChip";
 
 type Props = {
@@ -11,7 +11,7 @@ type Props = {
   occupantBySeat: Map<string, PersonVM>;
   sroPeople: PersonVM[]; // occupants of this zone when kind === "sro"
   mode: "assign" | "edit";
-  zoomedOut: boolean;
+  zoom: ZoomTier;
   selected: boolean;
   selectedPersonId: string | null;
   selectedSeatId: string | null;
@@ -30,7 +30,7 @@ function ZoneNode({
   occupantBySeat,
   sroPeople,
   mode,
-  zoomedOut,
+  zoom,
   selected,
   selectedPersonId,
   selectedSeatId,
@@ -159,7 +159,7 @@ function ZoneNode({
             key={s.id}
             seat={s}
             occupant={occupant}
-            zoomedOut={zoomedOut}
+            zoom={zoom}
             rotation={zone.rotation}
             eligible={eligibleSeatIds.has(s.id)}
             selected={s.id === selectedSeatId}

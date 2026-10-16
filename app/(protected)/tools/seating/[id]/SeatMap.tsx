@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PersonVM, SeatVM, ZoneVM } from "../types";
+import type { DerivedStatus, PersonVM, PickVM, SeatVM, ZoneVM } from "../types";
 import {
   VIRTUAL_W,
   VIRTUAL_H,
@@ -13,7 +13,7 @@ import {
   worldPos,
 } from "../layout-seed";
 import ZoneNode from "./ZoneNode";
-import SeatNode from "./SeatNode";
+import SeatNode, { type ZoomTier } from "./SeatNode";
 import PersonChip from "./PersonChip";
 
 // Imperative surface SeatingTool hands to the Toolbar ("+ Add" at center, zoom
@@ -34,6 +34,8 @@ type Props = {
   seats: SeatVM[];
   people: PersonVM[];
   occupantBySeat: Map<string, PersonVM>;
+  picks: PickVM[];
+  teamNames: Record<string, string>;
   selectedPersonId: string | null;
   selectedZoneId: string | null;
   selectedSeatId: string | null;
@@ -85,6 +87,8 @@ export default function SeatMap({
   seats,
   people,
   occupantBySeat,
+  picks,
+  teamNames,
   selectedPersonId,
   selectedZoneId,
   selectedSeatId,
@@ -126,6 +130,10 @@ export default function SeatMap({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
   const [dragging, setDragging] = useState<{ person: PersonVM; x: number; y: number } | null>(null);
+  // Instant hover details (mouse): the occupied seat under the cursor.
+  const [hover, setHover] = useState<{ person: PersonVM; seat: SeatVM; cx: number; cy: number } | null>(
+    null
+  );
 
   // Fresh copies for callbacks that live outside the render cycle (fit on
   // resize, the native wheel listener).
@@ -137,6 +145,8 @@ export default function SeatMap({
   }, [zones, seats]);
 
   const centers = useMemo(() => seatWorldCenters(zones, seats), [zones, seats]);
+  const seatById = useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats]);
+  const peopleById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
   const seatsByZone = useMemo(() => {
     const m = new Map<string, SeatVM[]>();
     for (const s of seats) {
@@ -160,7 +170,7 @@ export default function SeatMap({
     );
   }, [mode, selectedPersonId, seats, occupantBySeat]);
 
-  const zoomedOut = viewState.s < 0.7;
+  const zoom: ZoomTier = viewState.s < 0.7 ? "out" : viewState.s < 1.1 ? "mid" : "in";
 
   // ── Viewport: fit / zoom / conversions ─────────────────────────────────────
 
@@ -209,10 +219,16 @@ export default function SeatMap({
   }, [pushView]);
 
   // Initial mount + container resizes → fit (ResizeObserver fires on observe).
+  // Also mirrors the container width into state for render-time positioning
+  // (e.g. clamping the hover card) without touching refs during render.
+  const [containerW, setContainerW] = useState(800);
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => fit());
+    const ro = new ResizeObserver(() => {
+      setContainerW(el.clientWidth);
+      fit();
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, [fit]);
@@ -384,7 +400,38 @@ export default function SeatMap({
 
   // ── Container pointer handlers (pan / pinch / drag resolution) ─────────────
 
+  // Instant hover card (mouse only — touch never fires real mousemoves): find
+  // the occupied seat under the cursor geometrically, same hit-test as drops.
+  function onMouseMove(e: React.MouseEvent) {
+    if (gesture.current || dragging) {
+      if (hover) setHover(null);
+      return;
+    }
+    const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+    let bestId: string | null = null;
+    let bestC: { cx: number; cy: number } | null = null;
+    let bestD = SEAT_HIT_RADIUS;
+    for (const [id, c] of centers) {
+      const d = Math.hypot(c.cx - wx, c.cy - wy);
+      if (d < bestD) {
+        bestD = d;
+        bestId = id;
+        bestC = c;
+      }
+    }
+    const person = bestId ? occupantBySeat.get(bestId) : undefined;
+    const seat = bestId ? seatById.get(bestId) : undefined;
+    if (person && seat && bestC) {
+      if (hover?.seat.id !== seat.id || hover.person.id !== person.id) {
+        setHover({ person, seat, cx: bestC.cx, cy: bestC.cy });
+      }
+    } else if (hover) {
+      setHover(null);
+    }
+  }
+
   function onPointerDown(e: React.PointerEvent) {
+    if (hover) setHover(null);
     const el = containerRef.current;
     if (!el) return;
     try {
@@ -653,11 +700,13 @@ export default function SeatMap({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onMouseMove={onMouseMove}
+        onMouseLeave={() => setHover(null)}
         className="relative overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-gray-950 select-none"
         style={{ touchAction: "none", height: "calc(100dvh - 240px)", minHeight: 420 }}
       >
         <div
-          data-zoom={zoomedOut ? "out" : "in"}
+          data-zoom={zoom}
           className="bg-stone-100 dark:bg-gray-900/60"
           style={{
             width: VIRTUAL_W,
@@ -744,7 +793,7 @@ export default function SeatMap({
                   occupantBySeat={occupantBySeat}
                   sroPeople={z.kind === "sro" ? sroPeople : NO_PEOPLE}
                   mode={mode}
-                  zoomedOut={zoomedOut}
+                  zoom={zoom}
                   selected={z.id === selectedZoneId}
                   selectedPersonId={selectedPersonId}
                   selectedSeatId={selectedSeatId}
@@ -770,7 +819,7 @@ export default function SeatMap({
                 key={s.id}
                 seat={s}
                 occupant={occ}
-                zoomedOut={zoomedOut}
+                zoom={zoom}
                 rotation={0}
                 eligible={eligibleSeatIds.has(s.id)}
                 selected={s.id === selectedSeatId}
@@ -839,6 +888,62 @@ export default function SeatMap({
               ? "Tap a glowing seat to place — or tap Standing Room"
               : "Drag a person onto a seat · pinch or scroll to zoom"}
         </div>
+
+        {/* Instant hover card — person details for the seat under the cursor.
+            Positioned in SCREEN space from the seat's world center so it never
+            scales with the canvas zoom. */}
+        {hover &&
+          !dragging &&
+          (() => {
+            const sx = viewState.vx + hover.cx * viewState.s;
+            const sy = viewState.vy + hover.cy * viewState.s;
+            const half = (SEAT / 2) * viewState.s;
+            const above = sy - half - 10 > 150;
+            const p = hover.person;
+            const teams = p.teamIds.map((id) => teamNames[id] ?? "Team").join(", ");
+            const meta = [HOVER_KIND[p.kind] ?? p.kind, teams || null, p.age != null ? `Age ${p.age}` : null]
+              .filter(Boolean)
+              .join(" · ");
+            const wants = picks
+              .filter((pk) => pk.fromPersonId === p.id)
+              .map((pk) => peopleById.get(pk.toPersonId)?.displayName)
+              .filter(Boolean) as string[];
+            return (
+              <div
+                className="pointer-events-none absolute z-40 w-60 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2.5 shadow-xl"
+                style={{
+                  left: Math.min(Math.max(sx, 130), containerW - 130),
+                  top: above ? sy - half - 10 : sy + half + 10,
+                  transform: above ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+                }}
+              >
+                <p className="text-sm font-bold text-gray-900 dark:text-white">
+                  {p.displayName}
+                  {p.locked && <span className="ml-1 text-xs">🔒</span>}
+                </p>
+                {meta && <p className="text-[11px] text-gray-500 dark:text-gray-400">{meta}</p>}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${HOVER_STATUS[p.status]}`}
+                  >
+                    {p.status === "yes" ? "Going" : p.status === "no" ? "Not going" : p.status}
+                    {p.statusSource === "manual" && " ✎"}
+                  </span>
+                  <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
+                    {hover.seat.label}
+                  </span>
+                </div>
+                {wants.length > 0 && (
+                  <p className="mt-1.5 text-[11px] text-gray-600 dark:text-gray-300">
+                    <span className="font-semibold">Sit by:</span> {wants.join(", ")}
+                  </p>
+                )}
+                {p.rsvpNote && (
+                  <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">{p.rsvpNote}</p>
+                )}
+              </div>
+            );
+          })()}
       </div>
 
       {/* Drag ghost follows the pointer above everything. */}
@@ -853,3 +958,18 @@ export default function SeatMap({
     </>
   );
 }
+
+// Status pill styles for the hover card (events-dashboard idiom).
+const HOVER_STATUS: Record<DerivedStatus, string> = {
+  planning: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
+  invited: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+  opened: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+  yes: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+  no: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+};
+const HOVER_KIND: Record<string, string> = {
+  player: "Player",
+  sibling: "Sibling",
+  parent: "Parent",
+  guest: "Guest",
+};

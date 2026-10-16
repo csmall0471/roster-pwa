@@ -25,6 +25,11 @@ type Props = {
   onOpenLink: () => void;
   onAdd: (kind: AddKind) => void;
   onResetLayout: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onClearAll: () => void;
 };
 
 const btn =
@@ -98,6 +103,11 @@ export default function Toolbar({
   onOpenLink,
   onAdd,
   onResetLayout,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onClearAll,
 }: Props) {
   const seatsOver = seated > seatsAvailable;
   const sroOver = sroCap != null && sro > sroCap;
@@ -136,6 +146,38 @@ export default function Toolbar({
           +
         </button>
       </div>
+
+      {/* Undo / redo / clear */}
+      <div className="flex overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="Undo (Cmd/Ctrl+Z)"
+          aria-label="Undo"
+          className="bg-white dark:bg-gray-900 px-2.5 py-1.5 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-35"
+        >
+          ↩
+        </button>
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (Shift+Cmd/Ctrl+Z)"
+          aria-label="Redo"
+          className="border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-35"
+        >
+          ↪
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={onClearAll}
+        title="Unassign every seat (locked included) — undoable"
+        className={btn}
+      >
+        Clear seats
+      </button>
 
       {/* Capacity chips */}
       <span
