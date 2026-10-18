@@ -7,7 +7,10 @@ import PersonChip, { isKid } from "./PersonChip";
 
 export type StatusFilter = DerivedStatus | "all";
 export type KindFilter = "all" | "kids" | "adults" | "player" | "sibling" | "parent" | "guest";
-type GroupBy = "assignment" | "team" | "kind" | "age";
+type GroupBy = "assignment" | "family" | "team" | "kind" | "age";
+
+// Inside a family group: kids first, then adults, then by status/name.
+const KIND_RANK: Record<string, number> = { player: 0, sibling: 1, guest: 2, parent: 3 };
 
 const KIND_LABEL: Record<string, string> = {
   player: "Player",
@@ -184,6 +187,69 @@ export default function PeoplePanel({
       ].filter((g) => g.list.length > 0);
     }
 
+    if (groupBy === "family") {
+      // familyKey = sorted parent ids. Two sibling players can carry different
+      // keys when one kid is linked to both parents and the other to just one,
+      // so union-find over shared parent ids merges those into one household.
+      // (A sibling who is also a player is a single row and needs no merging.)
+      const root = new Map<string, string>();
+      const find = (x: string): string => {
+        const r = root.get(x);
+        if (r == null || r === x) return x;
+        const top = find(r);
+        root.set(x, top);
+        return top;
+      };
+      const union = (a: string, b: string) => {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra !== rb) root.set(ra, rb);
+      };
+      for (const p of people) {
+        if (!p.familyKey) continue;
+        const ids = p.familyKey.split("+");
+        for (let i = 1; i < ids.length; i++) union(ids[0], ids[i]);
+      }
+
+      const byFamily = new Map<string, PersonVM[]>();
+      const noFamily: PersonVM[] = [];
+      for (const p of filtered) {
+        if (!p.familyKey) {
+          noFamily.push(p);
+          continue;
+        }
+        const famId = find(p.familyKey.split("+")[0]);
+        (byFamily.get(famId) ?? byFamily.set(famId, []).get(famId)!).push(p);
+      }
+
+      // Label a family by its members' most common last name(s) — kids' names
+      // first so a household reads as the players' family, not the parents'.
+      const lastNameOf = (name: string) => {
+        const parts = name.trim().split(/\s+/);
+        return parts[parts.length - 1] || name;
+      };
+      const familyLabel = (list: PersonVM[]) => {
+        const source = list.some(isKid) ? list.filter(isKid) : list;
+        const counts = new Map<string, number>();
+        for (const p of source) {
+          const ln = lastNameOf(p.displayName);
+          counts.set(ln, (counts.get(ln) ?? 0) + 1);
+        }
+        const names = [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .map(([n]) => n);
+        return `${names.slice(0, 2).join(" / ")} family`;
+      };
+
+      const byFamilyOrder = (a: PersonVM, b: PersonVM) =>
+        (KIND_RANK[a.kind] ?? 9) - (KIND_RANK[b.kind] ?? 9) || byName(a, b);
+      const out = [...byFamily.values()]
+        .map((list) => ({ label: familyLabel(list), list: list.sort(byFamilyOrder) }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+      if (noFamily.length) out.push({ label: "No family on file", list: noFamily.sort(byName) });
+      return out;
+    }
+
     if (groupBy === "kind") {
       const order: PersonVM["kind"][] = ["player", "sibling", "parent", "guest"];
       return order
@@ -225,7 +291,7 @@ export default function PeoplePanel({
       .sort((a, b) => a.label.localeCompare(b.label));
     if (teamless.length) out.push({ label: "No team", list: teamless.sort(byName) });
     return out;
-  }, [filtered, groupBy, effTeamsById, teamNames]);
+  }, [filtered, groupBy, effTeamsById, teamNames, people]);
 
   const inviteIds = filtered.filter((p) => p.status === "planning").map((p) => p.id);
 
@@ -325,6 +391,7 @@ export default function PeoplePanel({
             aria-label="Group people by"
           >
             <option value="assignment">Assignment</option>
+            <option value="family">Family</option>
             <option value="team">Team</option>
             <option value="kind">Type</option>
             <option value="age">Age</option>
