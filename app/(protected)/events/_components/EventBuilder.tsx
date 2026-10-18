@@ -783,6 +783,17 @@ export default function EventBuilder({
                           </option>
                         ))}
                       </select>
+                      <label
+                        className="flex shrink-0 cursor-pointer items-center gap-1 text-xs text-gray-600 dark:text-gray-400"
+                        title="Parents must answer this for each attendee (only while the question is shown)"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={tf.required}
+                          onChange={(e) => updateTierField(t.key, tf.key, { required: e.target.checked })}
+                        />
+                        Req.
+                      </label>
                       <button
                         type="button"
                         onClick={() => removeTierField(t.key, tf.key)}
