@@ -150,6 +150,92 @@ const label = "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1";
 let keySeq = 0;
 const newKey = () => `k${keySeq++}`;
 
+// Per-question "Help & images" editor: an explanation plus example photos
+// (e.g. the custom-jersey design options) shown under the question on the
+// signup form. Collapsed behind a toggle so field rows stay compact.
+function FieldHelpEditor({
+  helpText,
+  images,
+  onChange,
+}: {
+  helpText: string;
+  images: string[];
+  onChange: (patch: { help_text: string; help_images: string[] }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const hasContent = helpText.trim() !== "" || images.length > 0;
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    setUploading(true);
+    const supabase = createClient();
+    const uploaded: string[] = [];
+    for (const file of files) {
+      const ext = file.name.split(".").pop() ?? "jpg";
+      const path = `events/help-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("event-images").upload(path, file);
+      if (!upErr) {
+        const { data } = supabase.storage.from("event-images").getPublicUrl(path);
+        uploaded.push(data.publicUrl);
+      }
+    }
+    if (uploaded.length) onChange({ help_text: helpText, help_images: [...images, ...uploaded] });
+    setUploading(false);
+    e.target.value = "";
+  }
+
+  return (
+    <div className="pl-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`text-xs font-medium ${
+          hasContent ? "text-blue-600 hover:text-blue-800" : "text-gray-400 hover:text-gray-600"
+        }`}
+      >
+        ⓘ Help &amp; images{hasContent ? ` (${[helpText.trim() && "text", images.length && `${images.length} 📷`].filter(Boolean).join(", ")})` : ""} {open ? "▴" : "▾"}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 p-2.5">
+          <textarea
+            className={input + " text-xs"}
+            rows={2}
+            placeholder="Explain this question for parents (shown under it on the form)…"
+            value={helpText}
+            onChange={(e) => onChange({ help_text: e.target.value, help_images: images })}
+          />
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {images.map((url, i) => (
+                <div key={url + i} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt="" className="h-16 w-20 rounded-md object-cover" />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChange({ help_text: helpText, help_images: images.filter((_, j) => j !== i) })
+                    }
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-700 text-[10px] text-white hover:bg-red-600"
+                    aria-label="Remove image"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-blue-600 hover:text-blue-800">
+            <input type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} />
+            {uploading ? "Uploading…" : "+ Add example images"}
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // parentKey → positional parent_index for the save payload. Drops the
 // dependency when the parent row is gone or its type can no longer gate.
 function depPayload(
@@ -261,6 +347,8 @@ export default function EventBuilder({
       required: f.required,
       parentKey: f.parent_field_id ? keyByDbId.get(f.parent_field_id) ?? null : null,
       parent_value: f.parent_value ?? "",
+      help_text: f.help_text ?? "",
+      help_images: f.help_images ?? [],
     }));
   });
   const [tiers, setTiers] = useState<TierRow[]>(() => {
@@ -288,6 +376,8 @@ export default function EventBuilder({
           option_prices: (f.options ?? []).map((_, i) => f.option_prices?.[i] ?? 0),
           parentKey: f.parent_field_id ? keyByDbId.get(f.parent_field_id) ?? null : null,
           parent_value: f.parent_value ?? "",
+          help_text: f.help_text ?? "",
+          help_images: f.help_images ?? [],
         }));
       })(),
     }));
@@ -334,7 +424,7 @@ export default function EventBuilder({
   const addField = () =>
     setFields((f) => [
       ...f,
-      { key: newKey(), label: "", field_type: "text", options: [], required: false, parentKey: null, parent_value: "" },
+      { key: newKey(), label: "", field_type: "text", options: [], required: false, parentKey: null, parent_value: "", help_text: "", help_images: [] },
     ]);
   const updateField = (key: string, patch: Partial<FieldRow>) =>
     setFields((f) => f.map((x) => (x.key === key ? { ...x, ...patch } : x)));
@@ -383,7 +473,7 @@ export default function EventBuilder({
               ...x,
               fields: [
                 ...x.fields,
-                { key: newKey(), label: "", field_type: "text", options: [], required: false, price_adjust_cents: 0, option_prices: [], parentKey: null, parent_value: "" },
+                { key: newKey(), label: "", field_type: "text", options: [], required: false, price_adjust_cents: 0, option_prices: [], parentKey: null, parent_value: "", help_text: "", help_images: [] },
               ],
             }
           : x
@@ -464,6 +554,8 @@ export default function EventBuilder({
         field_type: f.field_type,
         options: f.field_type === "select" ? f.options.filter((o) => o.trim()) : [],
         required: f.required,
+        help_text: f.help_text || null,
+        help_images: f.help_images ?? [],
         ...depPayload(f, fields),
       })),
       tiers: tiers.map((t) => ({
@@ -491,6 +583,8 @@ export default function EventBuilder({
             required: f.required,
             price_adjust_cents: f.price_adjust_cents ?? 0,
             option_prices: pairs.map((x) => x.p),
+            help_text: f.help_text || null,
+            help_images: f.help_images ?? [],
             ...depPayload(f, t.fields),
           };
         }),
@@ -883,6 +977,11 @@ export default function EventBuilder({
                       parentValue={tf.parent_value ?? ""}
                       onChange={(patch) => updateTierField(t.key, tf.key, patch)}
                     />
+                    <FieldHelpEditor
+                      helpText={tf.help_text ?? ""}
+                      images={tf.help_images ?? []}
+                      onChange={(patch) => updateTierField(t.key, tf.key, patch)}
+                    />
                   </div>
                 ))}
                 <button
@@ -962,6 +1061,11 @@ export default function EventBuilder({
               rows={fields}
               row={f}
               parentValue={f.parent_value ?? ""}
+              onChange={(patch) => updateField(f.key, patch)}
+            />
+            <FieldHelpEditor
+              helpText={f.help_text ?? ""}
+              images={f.help_images ?? []}
               onChange={(patch) => updateField(f.key, patch)}
             />
           </div>

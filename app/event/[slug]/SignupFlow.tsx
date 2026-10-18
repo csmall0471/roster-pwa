@@ -42,6 +42,9 @@ type GenericField = {
   // lib/events/field-visibility).
   parent_field_id?: string | null;
   parent_value?: string | null;
+  // Optional explanation + example images rendered under the question.
+  help_text?: string | null;
+  help_images?: string[];
 };
 
 type AttendeeDraft = {
@@ -121,6 +124,24 @@ export default function SignupFlow({
   // their current status, while leaving the form ready to change to "going".
   const [priorDeclined, setPriorDeclined] = useState(false);
 
+  // Guided form: the form step is a stack of collapsible cards ("Your info",
+  // one per attendee tier, "Questions"). One is expanded at a time; Continue
+  // collapses it, opens the next, and auto-scrolls there. Validation errors
+  // jump back to the offending card.
+  const [openSection, setOpenSection] = useState<string>("contact");
+  const sectionRefs = useRef(new Map<string, HTMLElement | null>());
+  const setSectionRef = useCallback((id: string, el: HTMLElement | null) => {
+    sectionRefs.current.set(id, el);
+  }, []);
+  const goToSection = useCallback((id: string) => {
+    setOpenSection(id);
+    // Wait a beat so the newly-expanded card has its height before scrolling.
+    setTimeout(() => {
+      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      sectionRefs.current.get(id)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    }, 90);
+  }, []);
+
   const tiers = useMemo(
     () =>
       [...(event.event_price_tiers ?? [])]
@@ -138,6 +159,8 @@ export default function SignupFlow({
               optionPrices: f.option_prices ?? [],
               parent_field_id: f.parent_field_id ?? null,
               parent_value: f.parent_value ?? null,
+              help_text: f.help_text ?? null,
+              help_images: f.help_images ?? [],
             }));
           // Common-attribute pseudo-fields (grade/shirt size/birthdate) for any
           // tier. Keyed by their label so the stored value is self-describing
@@ -358,6 +381,74 @@ export default function SignupFlow({
     return sum;
   }, [tiers, attendees, counts]);
 
+  // ── Guided-card plumbing: order, completeness, summaries ────────────────────
+  const collectTiers = useMemo(() => tiers.filter((t) => t.collect_attendees), [tiers]);
+  const qtyTiers = useMemo(() => tiers.filter((t) => !t.collect_attendees), [tiers]);
+  const sectionOrder = useMemo(
+    () => [
+      "contact",
+      ...collectTiers.map((t) => `tier-${t.id}`),
+      ...(qtyTiers.length ? ["extras"] : []),
+      ...((event.event_fields ?? []).length ? ["questions"] : []),
+      "review",
+    ],
+    [collectTiers, qtyTiers, event.event_fields]
+  );
+  const nextSection = (id: string) => sectionOrder[sectionOrder.indexOf(id) + 1] ?? "review";
+
+  const filledVal = (v: unknown) => !(v === undefined || v === null || v === "" || v === false);
+
+  function tierSubtotal(t: (typeof tiers)[number]): number {
+    let sum = 0;
+    for (const a of attendees[t.id] ?? []) {
+      if (a.status === "declined") continue;
+      let adj = 0;
+      for (const f of t.attendeeFields) {
+        if (!fieldVisible(f, a.attributes, t.fieldsById)) continue;
+        if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes[f.id] === true) {
+          adj += f.priceAdjustCents ?? 0;
+        } else if (f.field_type === "select" && (f.optionPrices?.length ?? 0) > 0) {
+          const idx = f.options.indexOf(a.attributes[f.id] as string);
+          if (idx >= 0) adj += f.optionPrices![idx] ?? 0;
+        }
+      }
+      sum += Math.max(0, t.amount_cents + adj);
+    }
+    return sum;
+  }
+
+  function tierComplete(t: (typeof tiers)[number]): boolean {
+    return (attendees[t.id] ?? []).every(
+      (a) =>
+        a.status === "declined" ||
+        (a.name.trim() !== "" &&
+          t.attendeeFields.every(
+            (f) =>
+              !f.required ||
+              !fieldVisible(f, a.attributes, t.fieldsById) ||
+              filledVal(a.attributes[f.id])
+          ))
+    );
+  }
+
+  function tierSummary(t: (typeof tiers)[number]): string {
+    const list = attendees[t.id] ?? [];
+    const going = list.filter((a) => a.status !== "declined").length;
+    const out = list.length - going;
+    if (list.length === 0) return "Tap to add";
+    const parts = [`${going} attending`];
+    if (out > 0) parts.push(`${out} out`);
+    const sub = tierSubtotal(t);
+    if (sub > 0) parts.push(money(sub));
+    return parts.join(" · ");
+  }
+
+  const visibleEventFields = (event.event_fields ?? []).filter((f) =>
+    fieldVisible(f, responses, eventFieldsById)
+  );
+  const questionsComplete = visibleEventFields.every((f) => !f.required || filledVal(responses[f.id]));
+  const questionsAnswered = visibleEventFields.filter((f) => filledVal(responses[f.id])).length;
+
   async function sendCode() {
     setAuthError(null);
     setAuthBusy(true);
@@ -425,8 +516,14 @@ export default function SignupFlow({
 
   async function handleSubmit() {
     setSubmitError(null);
+    // On a validation miss, surface the message AND open + scroll to the card
+    // it belongs to so phone users land right where the fix goes.
+    const fail = (section: string, msg: string) => {
+      setSubmitError(msg);
+      goToSection(section);
+    };
     if (!name.trim()) {
-      setSubmitError("Please enter your name.");
+      fail("contact", "Please enter your name.");
       return;
     }
     // Required event fields (dependent fields only count while shown)
@@ -435,7 +532,7 @@ export default function SignupFlow({
       if (!fieldVisible(f, responses, eventFieldsById)) continue;
       const v = responses[f.id];
       if (v === undefined || v === null || v === "" || v === false) {
-        setSubmitError(`"${f.label}" is required.`);
+        fail("questions", `"${f.label}" is required.`);
         return;
       }
     }
@@ -446,7 +543,7 @@ export default function SignupFlow({
       for (const a of attendees[t.id] ?? []) {
         if (a.status === "declined") continue;
         if (!a.name.trim()) {
-          setSubmitError(`Please enter a name for each ${t.label}.`);
+          fail(`tier-${t.id}`, `Please enter a name for each ${t.label}.`);
           return;
         }
         for (const f of t.attendeeFields) {
@@ -454,7 +551,7 @@ export default function SignupFlow({
           if (!fieldVisible(f, a.attributes, t.fieldsById)) continue;
           const v = a.attributes[f.id];
           if (v === undefined || v === null || v === "" || v === false) {
-            setSubmitError(`"${f.label}" is required for ${a.name || t.label}.`);
+            fail(`tier-${t.id}`, `"${f.label}" is required for ${a.name || t.label}.`);
             return;
           }
         }
@@ -529,6 +626,7 @@ export default function SignupFlow({
     setSubmitError(null);
     if (!name.trim()) {
       setSubmitError("Please enter your name first.");
+      goToSection("contact");
       return;
     }
     setSubmitting(true);
@@ -553,7 +651,7 @@ export default function SignupFlow({
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 via-white to-white">
-      <div className="mx-auto max-w-lg px-4 py-8">
+      <div className={`mx-auto max-w-lg px-4 py-8 ${!checking && step === "form" ? "pb-32" : ""}`}>
         {/* Photo carousel */}
         <EventGallery images={event.image_urls ?? []} />
         <h1 className="text-2xl font-bold text-gray-900">{event.title}</h1>
@@ -579,8 +677,14 @@ export default function SignupFlow({
         {/* Who's coming */}
         <WhoIsComing attendance={attendance} />
 
-        {/* Step card */}
-        <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        {/* Step card (the form step renders as its own card stack instead) */}
+        <div
+          className={
+            !checking && step === "form"
+              ? "mt-6"
+              : "mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+          }
+        >
           {checking && (
             <div className="py-8 text-center text-sm text-gray-400">Loading…</div>
           )}
@@ -659,45 +763,61 @@ export default function SignupFlow({
           )}
 
           {step === "form" && (
-            <div className="space-y-5">
+            <div className="space-y-3">
               {priorDeclined && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   You&rsquo;re currently marked <strong>not attending</strong>. Change your mind below and tap
                   <strong> Sign up</strong> to RSVP.
                 </div>
               )}
-              <div className="space-y-4">
-                <h2 className="text-lg font-semibold text-gray-900">Your info</h2>
-                <div>
-                  <label className={labelCls}>Name *</label>
-                  <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className={labelCls}>Email</label>
-                    <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Phone</label>
-                    <input className={inputCls} type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
-                  </div>
-                </div>
-              </div>
 
-              {/* Tiers / attendees */}
-              {tiers.map((t) => (
-                <div key={t.id} className="rounded-xl border border-gray-200 p-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-gray-900">
-                      {t.label} <span className="text-gray-400">· {money(t.amount_cents)}</span>
-                    </p>
-                    {!t.collect_attendees && (
-                      <QtyStepper value={counts[t.id] ?? 0} onChange={(n) => setCount(t.id, n)} />
-                    )}
+              {/* 1 · Your info */}
+              <SectionCard
+                id="contact"
+                index={1}
+                title="Your info"
+                summary={name.trim() || "Name & contact"}
+                complete={name.trim() !== ""}
+                open={openSection === "contact"}
+                onToggle={() => setOpenSection(openSection === "contact" ? "" : "contact")}
+                onContinue={() => goToSection(nextSection("contact"))}
+                setRef={setSectionRef}
+              >
+                <div className="space-y-4">
+                  <div>
+                    <label className={labelCls}>Name *</label>
+                    <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
                   </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className={labelCls}>Email</label>
+                      <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Phone</label>
+                      <input className={inputCls} type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              </SectionCard>
 
-                  {t.collect_attendees && (
-                    <div className="mt-2 space-y-3">
+              {/* One card per attendee tier */}
+              {collectTiers.map((t, ti) => (
+                <SectionCard
+                  key={t.id}
+                  id={`tier-${t.id}`}
+                  index={2 + ti}
+                  title={`${t.label}${t.amount_cents ? ` · ${money(t.amount_cents)} each` : ""}`}
+                  summary={tierSummary(t)}
+                  complete={(attendees[t.id] ?? []).length > 0 && tierComplete(t)}
+                  open={openSection === `tier-${t.id}`}
+                  onToggle={() =>
+                    setOpenSection(openSection === `tier-${t.id}` ? "" : `tier-${t.id}`)
+                  }
+                  onContinue={() => goToSection(nextSection(`tier-${t.id}`))}
+                  setRef={setSectionRef}
+                >
+                    <div className="space-y-3">
                       {(attendees[t.id] ?? []).map((a) => {
                         const declined = a.status === "declined";
                         // Roster players (prefilled from the family) are fixed: name
@@ -799,41 +919,90 @@ export default function SignupFlow({
                         + Add {t.label.toLowerCase()}
                       </button>
                     </div>
-                  )}
-                </div>
+                </SectionCard>
               ))}
 
-              {total > 0 && (
-                <div className="flex justify-between rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-900">
+              {/* Quantity-only tiers grouped into one card */}
+              {qtyTiers.length > 0 && (
+                <SectionCard
+                  id="extras"
+                  index={2 + collectTiers.length}
+                  title={collectTiers.length ? "Anyone else?" : "Attendees"}
+                  summary={
+                    qtyTiers.reduce((s, t) => s + (counts[t.id] ?? 0), 0) > 0
+                      ? qtyTiers
+                          .filter((t) => (counts[t.id] ?? 0) > 0)
+                          .map((t) => `${counts[t.id]} × ${t.label}`)
+                          .join(" · ")
+                      : "Tap to add"
+                  }
+                  complete={qtyTiers.some((t) => (counts[t.id] ?? 0) > 0)}
+                  open={openSection === "extras"}
+                  onToggle={() => setOpenSection(openSection === "extras" ? "" : "extras")}
+                  onContinue={() => goToSection(nextSection("extras"))}
+                  setRef={setSectionRef}
+                >
+                  <div className="space-y-3">
+                    {qtyTiers.map((t) => (
+                      <div key={t.id} className="flex items-center justify-between">
+                        <p className="text-sm text-gray-800">
+                          {t.label} <span className="text-gray-400">· {money(t.amount_cents)}</span>
+                        </p>
+                        <QtyStepper value={counts[t.id] ?? 0} onChange={(n) => setCount(t.id, n)} />
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Event-level questions */}
+              {(event.event_fields ?? []).length > 0 && (
+                <SectionCard
+                  id="questions"
+                  index={2 + collectTiers.length + (qtyTiers.length ? 1 : 0)}
+                  title="Questions"
+                  summary={
+                    visibleEventFields.length
+                      ? `${questionsAnswered}/${visibleEventFields.length} answered`
+                      : "A few quick questions"
+                  }
+                  complete={questionsComplete && questionsAnswered > 0}
+                  open={openSection === "questions"}
+                  onToggle={() => setOpenSection(openSection === "questions" ? "" : "questions")}
+                  onContinue={() => goToSection(nextSection("questions"))}
+                  continueLabel="Done →"
+                  setRef={setSectionRef}
+                >
+                  <div className="space-y-4">
+                    {visibleEventFields.map((f) => (
+                      <FieldInput key={f.id} field={f} value={responses[f.id]} onChange={(v) => setResponse(f.id, v)} />
+                    ))}
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Review / decline — the sticky bar below carries the submit. */}
+              <div
+                ref={(el) => setSectionRef("review", el)}
+                className="scroll-mt-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-center justify-between text-sm font-semibold text-gray-900">
                   <span>Total</span>
                   <span>{money(total)}</span>
                 </div>
-              )}
-
-              {/* Event-level custom fields */}
-              {(event.event_fields ?? [])
-                .filter((f) => fieldVisible(f, responses, eventFieldsById))
-                .map((f) => (
-                  <FieldInput key={f.id} field={f} value={responses[f.id]} onChange={(v) => setResponse(f.id, v)} />
-                ))}
-
-              {submitError && <p className="text-sm text-red-600">{submitError}</p>}
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {submitting ? "Submitting…" : "Sign up"}
-              </button>
-              {!priorDeclined && (
-                <button
-                  onClick={handleDecline}
-                  disabled={submitting}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Can&rsquo;t make it
-                </button>
-              )}
+                <p className="mt-1 text-xs text-gray-500">
+                  All set? Tap <strong>Sign up</strong> below.
+                </p>
+                {!priorDeclined && (
+                  <button
+                    onClick={handleDecline}
+                    disabled={submitting}
+                    className="mt-3 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Can&rsquo;t make it
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -899,6 +1068,105 @@ export default function SignupFlow({
           )}
         </div>
       </div>
+
+      {/* Sticky total + submit: always reachable on phones while filling the
+          cards above. Validation errors show here (and auto-open their card). */}
+      {!checking && step === "form" && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur">
+          <div className="mx-auto max-w-lg px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+            {submitError && <p className="mb-2 text-sm text-red-600">{submitError}</p>}
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Total</p>
+                <p className="text-lg font-bold leading-tight text-gray-900">{money(total)}</p>
+              </div>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="rounded-xl bg-blue-600 px-8 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting ? "Submitting…" : "Sign up"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One numbered, collapsible card of the guided signup. Collapsed it shows a
+// one-line summary (and a green ✓ once complete); expanded it shows its fields
+// plus a Continue button that walks to the next card.
+function SectionCard({
+  id,
+  index,
+  title,
+  summary,
+  complete,
+  open,
+  onToggle,
+  onContinue,
+  continueLabel,
+  setRef,
+  children,
+}: {
+  id: string;
+  index: number;
+  title: string;
+  summary?: string;
+  complete: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onContinue?: () => void;
+  continueLabel?: string;
+  setRef: (id: string, el: HTMLElement | null) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      ref={(el) => setRef(id, el)}
+      className={`scroll-mt-3 overflow-hidden rounded-2xl border bg-white shadow-sm transition-colors ${
+        open ? "border-blue-200" : "border-gray-200"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+      >
+        <span
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+            complete
+              ? "bg-green-100 text-green-700"
+              : open
+                ? "bg-blue-600 text-white"
+                : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          {complete ? "✓" : index}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-gray-900">{title}</span>
+          {!open && summary && <span className="block truncate text-xs text-gray-500">{summary}</span>}
+        </span>
+        <span className="text-gray-400">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 px-4 pb-4 pt-3">
+          {children}
+          {onContinue && (
+            <button
+              type="button"
+              onClick={onContinue}
+              className="mt-4 w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+            >
+              {continueLabel ?? "Continue →"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1122,6 +1390,96 @@ function QtyStepper({ value, onChange }: { value: number; onChange: (n: number) 
   );
 }
 
+// Full-screen, swipeable viewer for a question's example images.
+function Lightbox({
+  images,
+  start,
+  title,
+  onClose,
+}: {
+  images: string[];
+  start: number;
+  title: string;
+  onClose: () => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [idx, setIdx] = useState(start);
+  useEffect(() => {
+    const el = trackRef.current;
+    if (el) el.scrollTo({ left: start * el.clientWidth });
+  }, [start]);
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/95" onClick={onClose}>
+      <div className="flex items-center justify-between px-4 py-3 text-white">
+        <span className="min-w-0 truncate text-sm font-medium">
+          {title}
+          {images.length > 1 && <span className="text-white/60"> · {idx + 1}/{images.length}</span>}
+        </span>
+        <button type="button" onClick={onClose} aria-label="Close" className="px-2 text-xl leading-none">
+          ✕
+        </button>
+      </div>
+      <div
+        ref={trackRef}
+        onScroll={() => {
+          const el = trackRef.current;
+          if (el && el.clientWidth) setIdx(Math.round(el.scrollLeft / el.clientWidth));
+        }}
+        onClick={(e) => e.stopPropagation()}
+        className="flex flex-1 snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {images.map((url, i) => (
+          <div key={url + i} className="flex w-full shrink-0 snap-center items-center justify-center p-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt="" className="max-h-full max-w-full rounded-lg object-contain" />
+          </div>
+        ))}
+      </div>
+      {images.length > 1 && (
+        <div className="flex justify-center gap-1.5 pb-6 pt-3">
+          {images.map((_, i) => (
+            <span key={i} className={`h-1.5 rounded-full ${i === idx ? "w-5 bg-white" : "w-1.5 bg-white/40"}`} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A question's coach-written explanation + example images (e.g. the custom
+// jersey design options): small text plus a swipeable thumbnail strip that
+// opens the full-screen Lightbox on tap. Compact by design — phones first.
+function FieldHelp({ field }: { field: GenericField }) {
+  const [lightbox, setLightbox] = useState<number | null>(null);
+  const text = field.help_text?.trim();
+  const imgs = field.help_images ?? [];
+  if (!text && imgs.length === 0) return null;
+  return (
+    <div className="mb-1.5 mt-0.5">
+      {text && <p className="whitespace-pre-wrap text-xs leading-relaxed text-gray-500">{text}</p>}
+      {imgs.length > 0 && (
+        <div className="mt-1.5 flex snap-x gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {imgs.map((url, i) => (
+            <button
+              type="button"
+              key={url + i}
+              onClick={() => setLightbox(i)}
+              className="shrink-0 snap-start"
+              aria-label={`View image ${i + 1}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt="" className="h-20 w-28 rounded-lg border border-gray-200 object-cover" />
+            </button>
+          ))}
+        </div>
+      )}
+      {lightbox != null && (
+        <Lightbox images={imgs} start={lightbox} title={field.label} onClose={() => setLightbox(null)} />
+      )}
+    </div>
+  );
+}
+
 function FieldInput({
   field,
   value,
@@ -1138,10 +1496,12 @@ function FieldInput({
     adj && (field.field_type === "yesno" || field.field_type === "checkbox")
       ? ` (${adj > 0 ? "+" : "−"}${money(Math.abs(adj))})`
       : "";
+  const help = <FieldHelp field={field} />;
   if (field.field_type === "textarea") {
     return (
       <div>
         <label className={labelCls}>{field.label}{req}</label>
+        {help}
         <textarea className={inputCls} rows={3} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />
       </div>
     );
@@ -1150,6 +1510,7 @@ function FieldInput({
     return (
       <div>
         <label className={labelCls}>{field.label}{req}</label>
+        {help}
         <input className={inputCls} type="number" value={(value as number | string) ?? ""} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))} />
       </div>
     );
@@ -1158,6 +1519,7 @@ function FieldInput({
     return (
       <div>
         <label className={labelCls}>{field.label}{req}</label>
+        {help}
         <input className={inputCls} type="date" value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />
       </div>
     );
@@ -1170,6 +1532,7 @@ function FieldInput({
     return (
       <div>
         <label className={labelCls}>{field.label}{req}</label>
+        {help}
         <select className={inputCls} value={cur} onChange={(e) => onChange(e.target.value)}>
           <option value="">— Select —</option>
           {opts.map((o) => {
@@ -1185,16 +1548,20 @@ function FieldInput({
   }
   if (field.field_type === "checkbox") {
     return (
-      <label className="flex items-center gap-2 text-sm text-gray-700">
-        <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-        {field.label}{req}{priceHint && <span className="text-gray-500">{priceHint}</span>}
-      </label>
+      <div>
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
+          {field.label}{req}{priceHint && <span className="text-gray-500">{priceHint}</span>}
+        </label>
+        {help}
+      </div>
     );
   }
   if (field.field_type === "yesno") {
     return (
       <div>
         <label className={labelCls}>{field.label}{req}{priceHint && <span className="text-gray-500">{priceHint}</span>}</label>
+        {help}
         <div className="flex gap-2">
           {[true, false].map((v) => (
             <button
@@ -1217,6 +1584,7 @@ function FieldInput({
   return (
     <div>
       <label className={labelCls}>{field.label}{req}</label>
+      {help}
       <input className={inputCls} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />
     </div>
   );

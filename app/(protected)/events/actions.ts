@@ -59,6 +59,9 @@ export type EventFieldInput = {
   // plus the parent answer that reveals it.
   parent_index?: number | null;
   parent_value?: string | null;
+  // Optional explanation + example images shown under the question.
+  help_text?: string | null;
+  help_images?: string[];
 };
 
 export type EventTierFieldInput = {
@@ -71,6 +74,8 @@ export type EventTierFieldInput = {
   option_prices: number[]; // for select fields: cents per option (index-aligned)
   parent_index?: number | null; // see EventFieldInput
   parent_value?: string | null;
+  help_text?: string | null;
+  help_images?: string[];
 };
 
 export type EventTierInput = {
@@ -242,49 +247,64 @@ export async function saveEvent(payload: EventPayload): Promise<SaveEventResult>
 
 // Second pass after syncChildren: resolve each field's positional parent_index
 // into the real parent_field_id (new fields only get ids on insert, so this
-// can't happen in the first pass). Runs AFTER the row sync so ids are final.
-// Pre-migration-065 the columns don't exist: a save with no dependencies must
-// keep working, so the clear-only update swallows the missing-column error,
-// while a save that actually sets a dependency surfaces it.
+// can't happen in the first pass), and write the help text/images. Runs AFTER
+// the row sync so ids are final. Pre-migration-065/066 the columns don't exist:
+// a save that doesn't use these features must keep working, so the clear-only
+// update swallows the missing-column error, while a save that actually sets a
+// dependency or help content surfaces it.
 async function syncFieldDeps(
   supabase: SupabaseClient,
   table: "event_fields" | "event_tier_fields",
   ids: string[],
-  items: { parent_index?: number | null; parent_value?: string | null }[]
+  items: {
+    parent_index?: number | null;
+    parent_value?: string | null;
+    help_text?: string | null;
+    help_images?: string[];
+  }[]
 ): Promise<string | null> {
+  const EMPTY = {
+    parent_field_id: null as string | null,
+    parent_value: null as string | null,
+    help_text: null as string | null,
+    help_images: [] as string[],
+  };
   const clearIds: string[] = [];
-  const sets: { id: string; parent_field_id: string; parent_value: string }[] = [];
+  const sets: { id: string; row: typeof EMPTY }[] = [];
   for (let i = 0; i < items.length; i++) {
-    const pi = items[i].parent_index;
-    if (pi != null && pi >= 0 && pi < ids.length && pi !== i) {
-      sets.push({ id: ids[i], parent_field_id: ids[pi], parent_value: items[i].parent_value ?? "" });
-    } else {
+    const it = items[i];
+    const pi = it.parent_index;
+    const hasDep = pi != null && pi >= 0 && pi < ids.length && pi !== i;
+    const helpText = it.help_text?.trim() || null;
+    const helpImages = (it.help_images ?? []).filter(Boolean);
+    if (!hasDep && !helpText && helpImages.length === 0) {
       clearIds.push(ids[i]);
+      continue;
     }
+    sets.push({
+      id: ids[i],
+      row: {
+        parent_field_id: hasDep ? ids[pi!] : null,
+        parent_value: hasDep ? it.parent_value ?? "" : null,
+        help_text: helpText,
+        help_images: helpImages,
+      },
+    });
   }
   const missingColumn = (msg: string) =>
-    /parent_field_id|parent_value/.test(msg) && /column|schema/i.test(msg);
+    /parent_field_id|parent_value|help_text|help_images/.test(msg) && /column|schema/i.test(msg);
+  const migrationMsg =
+    "Dependent questions and question help need a database update (migrations 065–066) before they can be saved.";
   if (clearIds.length) {
-    const { error } = await supabase
-      .from(table)
-      .update({ parent_field_id: null, parent_value: null })
-      .in("id", clearIds);
-    // Nothing to clear pre-migration — only fail when deps are actually in play.
+    const { error } = await supabase.from(table).update(EMPTY).in("id", clearIds);
+    // Nothing to clear pre-migration — only fail when the features are in play.
     if (error && !(sets.length === 0 && missingColumn(error.message))) {
-      if (missingColumn(error.message))
-        return "Dependent questions need a database update (migration 065) before they can be saved.";
-      return error.message;
+      return missingColumn(error.message) ? migrationMsg : error.message;
     }
   }
   for (const s of sets) {
-    const { error } = await supabase
-      .from(table)
-      .update({ parent_field_id: s.parent_field_id, parent_value: s.parent_value })
-      .eq("id", s.id);
-    if (error)
-      return missingColumn(error.message)
-        ? "Dependent questions need a database update (migration 065) before they can be saved."
-        : error.message;
+    const { error } = await supabase.from(table).update(s.row).eq("id", s.id);
+    if (error) return missingColumn(error.message) ? migrationMsg : error.message;
   }
   return null;
 }

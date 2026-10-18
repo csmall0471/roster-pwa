@@ -317,6 +317,9 @@ export interface EventField {
   // parent_value (yesno/checkbox → "yes"|"no"; select → the option text).
   parent_field_id?: string | null;
   parent_value?: string | null;
+  // Optional explanation + example images rendered under the question.
+  help_text?: string | null;
+  help_images?: string[];
 }
 
 export interface EventTierField {
@@ -337,6 +340,9 @@ export interface EventTierField {
   // parent_value (yesno/checkbox → "yes"|"no"; select → the option text).
   parent_field_id?: string | null;
   parent_value?: string | null;
+  // Optional explanation + example images rendered under the question.
+  help_text?: string | null;
+  help_images?: string[];
 }
 
 // Pickable values for the standard player/sibling attributes, so these are
