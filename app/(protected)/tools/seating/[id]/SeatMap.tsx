@@ -23,6 +23,7 @@ export type SeatMapApi = {
   getCenterWorld: () => { x: number; y: number };
   zoomIn: () => void;
   zoomOut: () => void;
+  rotate: (dir: 1 | -1) => void;
   fit: () => void;
 };
 
@@ -47,6 +48,7 @@ type Props = {
   onAssign: (personId: string, seatId: string) => void;
   onSwap: (personAId: string, personBId: string) => void;
   onSro: (personId: string) => void;
+  onUnassign: (person: PersonVM) => void;
   // Edit mode — preview = local-only while dragging; commit = server action
   onZonePreview: (zoneId: string, x: number, y: number) => void;
   onZoneCommit: (zoneId: string, x: number, y: number, origX: number, origY: number) => void;
@@ -68,7 +70,12 @@ type Gesture =
   | { type: "zone"; pointerId: number; zone: ZoneVM; startX: number; startY: number; origX: number; origY: number; moved: boolean }
   | { type: "seat"; pointerId: number; seat: SeatVM; zone: ZoneVM | null; startX: number; startY: number; origX: number; origY: number; moved: boolean };
 
-const INITIAL_VIEW = { vx: 40, vy: 40, s: 0.3 };
+// r = whole-view rotation in 45° steps; screen = v + s·R(r)·world.
+const INITIAL_VIEW = { vx: 40, vy: 40, s: 0.3, r: 0 };
+const rotXY = (x: number, y: number, deg: number) => {
+  const a = (deg * Math.PI) / 180;
+  return { x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) };
+};
 const clampS = (v: number) => Math.min(3, Math.max(0.15, v));
 // Stable empties so memo(ZoneNode) isn't defeated by fresh [] identities.
 const NO_SEATS: SeatVM[] = [];
@@ -99,6 +106,7 @@ export default function SeatMap({
   onAssign,
   onSwap,
   onSro,
+  onUnassign,
   onZonePreview,
   onZoneCommit,
   onSeatPreview,
@@ -184,7 +192,10 @@ export default function SeatMap({
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    const push = (x: number, y: number) => {
+    // Fit the ROTATED footprint: bbox of each point after the view rotation.
+    const r = view.current.r;
+    const push = (px: number, py: number) => {
+      const { x, y } = rotXY(px, py, r);
       if (x < minX) minX = x;
       if (y < minY) minY = y;
       if (x > maxX) maxX = x;
@@ -212,6 +223,7 @@ export default function SeatMap({
     const s = clampS(Math.min((cw - 80) / bw, (ch - 80) / bh));
     view.current = {
       s,
+      r,
       vx: (cw - bw * s) / 2 - minX * s,
       vy: (ch - bh * s) / 2 - minY * s,
     };
@@ -243,9 +255,28 @@ export default function SeatMap({
       const s2 = clampS(v.s * k);
       view.current = {
         s: s2,
+        r: v.r,
         vx: cx - (cx - v.vx) * (s2 / v.s),
         vy: cy - (cy - v.vy) * (s2 / v.s),
       };
+      pushView();
+    },
+    [pushView]
+  );
+
+  // Rotate the whole view in 45° steps around the viewport center (the world
+  // point under the center stays put).
+  const rotateView = useCallback(
+    (dir: 1 | -1) => {
+      const el = containerRef.current;
+      if (!el) return;
+      const cx = el.clientWidth / 2;
+      const cy = el.clientHeight / 2;
+      const v = view.current;
+      const w = rotXY((cx - v.vx) / v.s, (cy - v.vy) / v.s, -v.r); // world @ center
+      const r2 = ((v.r + dir * 45) % 360 + 360) % 360;
+      const p = rotXY(w.x, w.y, r2);
+      view.current = { s: v.s, r: r2, vx: cx - p.x * v.s, vy: cy - p.y * v.s };
       pushView();
     },
     [pushView]
@@ -266,6 +297,7 @@ export default function SeatMap({
       const s2 = clampS(v.s * k);
       view.current = {
         s: s2,
+        r: v.r,
         vx: cx - (cx - v.vx) * (s2 / v.s),
         vy: cy - (cy - v.vy) * (s2 / v.s),
       };
@@ -280,7 +312,8 @@ export default function SeatMap({
     if (!el) return { x: 0, y: 0 };
     const rect = el.getBoundingClientRect();
     const v = view.current;
-    return { x: (clientX - rect.left - v.vx) / v.s, y: (clientY - rect.top - v.vy) / v.s };
+    // Undo translate + scale, then the view rotation.
+    return rotXY((clientX - rect.left - v.vx) / v.s, (clientY - rect.top - v.vy) / v.s, -v.r);
   }, []);
 
   const getCenterWorld = useCallback(() => {
@@ -388,6 +421,7 @@ export default function SeatMap({
       getCenterWorld,
       zoomIn: () => zoomBy(1.2),
       zoomOut: () => zoomBy(1 / 1.2),
+      rotate: rotateView,
       fit,
     };
   });
@@ -491,6 +525,7 @@ export default function SeatMap({
       // midpoint's own travel pans the canvas.
       view.current = {
         s: s2,
+        r: view.current.r,
         vx: g.mx0 - (g.mx0 - g.vx0) * (s2 / g.s0) + (mx - g.mx0),
         vy: g.my0 - (g.my0 - g.vy0) * (s2 / g.s0) + (my - g.my0),
       };
@@ -518,9 +553,14 @@ export default function SeatMap({
       return;
     }
 
-    const s = view.current.s;
-    const wdx = (e.clientX - g.startX) / s;
-    const wdy = (e.clientY - g.startY) / s;
+    // Screen delta → world delta: unscale, then undo the view rotation.
+    const wd = rotXY(
+      (e.clientX - g.startX) / view.current.s,
+      (e.clientY - g.startY) / view.current.s,
+      -view.current.r
+    );
+    const wdx = wd.x;
+    const wdy = wd.y;
 
     if (g.type === "zone") {
       if (moved) g.moved = true;
@@ -554,7 +594,9 @@ export default function SeatMap({
       if (!person.inSro) onSro(person.id);
       return;
     }
-    // Dropped on nothing → revert (no-op).
+    // Dropped on open floor: someone dragged OFF their seat (or out of SRO)
+    // goes back to the panel's unassigned list; a sidebar chip just reverts.
+    if (person.seatId || person.inSro) onUnassign(person);
   }
 
   function handleCanvasTap(clientX: number, clientY: number) {
@@ -629,9 +671,14 @@ export default function SeatMap({
       return;
     }
 
-    const s = view.current.s;
-    const wdx = (e.clientX - g.startX) / s;
-    const wdy = (e.clientY - g.startY) / s;
+    // Screen delta → world delta: unscale, then undo the view rotation.
+    const wd = rotXY(
+      (e.clientX - g.startX) / view.current.s,
+      (e.clientY - g.startY) / view.current.s,
+      -view.current.r
+    );
+    const wdx = wd.x;
+    const wdy = wd.y;
 
     if (g.type === "zone") {
       if (!g.moved) {
@@ -683,9 +730,10 @@ export default function SeatMap({
     "rounded-md px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700";
 
   function miniBarAt(wx: number, wy: number): React.CSSProperties {
+    const p = rotXY(wx, wy, viewState.r);
     return {
-      left: Math.max(4, viewState.vx + wx * viewState.s),
-      top: Math.max(4, viewState.vy + wy * viewState.s - 42),
+      left: Math.max(4, viewState.vx + p.x * viewState.s),
+      top: Math.max(4, viewState.vy + p.y * viewState.s - 42),
       position: "absolute",
     };
   }
@@ -711,10 +759,13 @@ export default function SeatMap({
           style={{
             width: VIRTUAL_W,
             height: VIRTUAL_H,
-            transform: `translate(${viewState.vx}px, ${viewState.vy}px) scale(${viewState.s})`,
+            transform: `translate(${viewState.vx}px, ${viewState.vy}px) scale(${viewState.s}) rotate(${viewState.r}deg)`,
             transformOrigin: "0 0",
             position: "absolute",
             backgroundImage: GRID_BG,
+            // Counter-rotation for text that stays upright (seat names read
+            // this via calc() so rotating the view re-renders nothing).
+            ["--vr" as string]: `${viewState.r}deg`,
           }}
         >
           {/* Static venue ambience, under everything. The seat band wraps a
@@ -886,7 +937,7 @@ export default function SeatMap({
             ? "Drag zones & seats · tap to select · scroll or pinch to zoom"
             : selectedPersonId
               ? "Tap a glowing seat to place — or tap Standing Room"
-              : "Drag a person onto a seat · pinch or scroll to zoom"}
+              : "Drag a person onto a seat · drag off a seat to unassign · pinch or scroll to zoom"}
         </div>
 
         {/* Instant hover card — person details for the seat under the cursor.
@@ -895,8 +946,9 @@ export default function SeatMap({
         {hover &&
           !dragging &&
           (() => {
-            const sx = viewState.vx + hover.cx * viewState.s;
-            const sy = viewState.vy + hover.cy * viewState.s;
+            const rc = rotXY(hover.cx, hover.cy, viewState.r);
+            const sx = viewState.vx + rc.x * viewState.s;
+            const sy = viewState.vy + rc.y * viewState.s;
             const half = (SEAT / 2) * viewState.s;
             const above = sy - half - 10 > 150;
             const p = hover.person;

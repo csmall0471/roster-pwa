@@ -11,6 +11,7 @@ type Props = {
   onMode: (m: Mode) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onRotate: (dir: 1 | -1) => void;
   onFit: () => void;
   seated: number;
   seatsAvailable: number;
@@ -89,6 +90,7 @@ export default function Toolbar({
   onMode,
   onZoomIn,
   onZoomOut,
+  onRotate,
   onFit,
   seated,
   seatsAvailable,
@@ -144,6 +146,24 @@ export default function Toolbar({
         </button>
         <button type="button" onClick={onZoomIn} className="bg-white dark:bg-gray-900 px-2.5 py-1.5 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800" aria-label="Zoom in">
           +
+        </button>
+        <button
+          type="button"
+          onClick={() => onRotate(-1)}
+          title="Rotate view 45° counter-clockwise"
+          aria-label="Rotate view counter-clockwise"
+          className="border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          ⟲
+        </button>
+        <button
+          type="button"
+          onClick={() => onRotate(1)}
+          title="Rotate view 45° clockwise"
+          aria-label="Rotate view clockwise"
+          className="border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          ⟳
         </button>
       </div>
 

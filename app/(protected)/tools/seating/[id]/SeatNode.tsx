@@ -85,10 +85,11 @@ function SeatNode({
         backgroundImage: seat.unavailable ? STRIPES : undefined,
       }}
     >
-      {/* Counter-rotate the content so names stay upright inside rotated zones. */}
+      {/* Counter-rotate the content so names stay upright inside rotated zones
+          AND under the whole-view rotation (--vr, set on the canvas root). */}
       <div
         className="flex h-full w-full items-center justify-center"
-        style={rotation ? { transform: `rotate(${-rotation}deg)` } : undefined}
+        style={{ transform: `rotate(calc(${-rotation}deg - var(--vr, 0deg)))` }}
       >
         {occupant ? (
           zoomedOut ? (

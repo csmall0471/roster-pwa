@@ -908,6 +908,7 @@ export default function SeatingTool({
           onMode={setMode}
           onZoomIn={() => mapApi.current?.zoomIn()}
           onZoomOut={() => mapApi.current?.zoomOut()}
+          onRotate={(dir) => mapApi.current?.rotate(dir)}
           onFit={() => mapApi.current?.fit()}
           seated={seated}
           seatsAvailable={seatsAvailable}
@@ -946,6 +947,7 @@ export default function SeatingTool({
           onAssign={handleAssign}
           onSwap={handleSwap}
           onSro={handleSro}
+          onUnassign={handleUnassign}
           onZonePreview={previewZone}
           onZoneCommit={commitZoneMove}
           onSeatPreview={previewSeat}
