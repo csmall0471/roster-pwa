@@ -7,6 +7,7 @@
 // price identically. Prices always come from these authoritative tiers — never
 // from anything the client claims.
 import type { AttendeeStatus, SavedSibling, SignupAttendee } from "@/lib/types";
+import { stripHiddenValues } from "./field-visibility";
 
 export type PricingTierField = {
   id: string;
@@ -15,6 +16,10 @@ export type PricingTierField = {
   price_adjust_cents: number;
   options: string[];
   option_prices: number[];
+  // Dependent fields: answers only count (stored or priced) while the parent's
+  // answer reveals them.
+  parent_field_id?: string | null;
+  parent_value?: string | null;
 };
 
 export type PricingTier = {
@@ -55,10 +60,13 @@ export function buildPricedAttendees(
   for (const a of (isDecline ? [] : inputs).slice(0, 200)) {
     const t = tierById.get(a.tier_id);
     if (!t) continue;
+    // Answers for fields hidden by a dependency never count — not stored, not
+    // priced — regardless of what the client sent.
+    const attrs = stripHiddenValues(t.event_tier_fields ?? [], a.attributes ?? {});
     // Remap attribute keys from field id → label so stored data is self-describing.
     const fieldLabel = new Map((t.event_tier_fields ?? []).map((f) => [f.id, f.label]));
     const labeled: Record<string, string | number | boolean> = {};
-    for (const [fid, v] of Object.entries(a.attributes ?? {})) {
+    for (const [fid, v] of Object.entries(attrs)) {
       if (v === "" || v === null || v === undefined) continue;
       labeled[fieldLabel.get(fid) ?? fid] = v;
     }
@@ -68,10 +76,10 @@ export function buildPricedAttendees(
     // field answered yes/checked, or a priced select option (clamped at $0).
     let adjust = 0;
     for (const f of t.event_tier_fields ?? []) {
-      if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes?.[f.id] === true) {
+      if ((f.field_type === "yesno" || f.field_type === "checkbox") && attrs[f.id] === true) {
         adjust += f.price_adjust_cents ?? 0;
       } else if (f.field_type === "select" && (f.option_prices?.length ?? 0) > 0) {
-        const idx = (f.options ?? []).indexOf(a.attributes?.[f.id] as string);
+        const idx = (f.options ?? []).indexOf(attrs[f.id] as string);
         if (idx >= 0) adjust += f.option_prices[idx] ?? 0;
       }
     }

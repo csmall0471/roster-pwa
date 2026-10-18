@@ -34,8 +34,92 @@ function teamMeta(t: TeamOption): string {
   return [season, showYear ? year : "", t.age_group].filter(Boolean).join(" · ");
 }
 
-type FieldRow = EventFieldInput & { key: string };
-type TierFieldRow = EventTierFieldInput & { key: string };
+// parentKey references the parent QUESTION's row key (dependent fields: shown
+// on the form only when the parent's answer matches parent_value).
+type FieldRow = EventFieldInput & { key: string; parentKey: string | null };
+type TierFieldRow = EventTierFieldInput & { key: string; parentKey: string | null };
+
+// Field types whose answer can gate a dependent question.
+const PARENT_TYPES: EventFieldType[] = ["yesno", "checkbox", "select"];
+
+type DepRow = { key: string; label: string; field_type: EventFieldType; options: string[]; parentKey: string | null };
+
+// Walks parentKey chains so the picker never offers a field that (transitively)
+// depends on this one — that would be a cycle.
+function dependsOn(candidate: DepRow, target: string, rows: DepRow[]): boolean {
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  let cur: DepRow | undefined = candidate;
+  for (let hops = 0; cur && hops < 10; hops++) {
+    if (cur.parentKey === target) return true;
+    cur = cur.parentKey ? byKey.get(cur.parentKey) : undefined;
+  }
+  return false;
+}
+
+// "Show only when [question] is [answer]" — shared by event fields and tier
+// attendee fields.
+function DependsOnPicker({
+  rows,
+  row,
+  parentValue,
+  onChange,
+}: {
+  rows: DepRow[];
+  row: DepRow;
+  parentValue: string;
+  onChange: (patch: { parentKey: string | null; parent_value: string }) => void;
+}) {
+  const eligible = rows.filter(
+    (r) =>
+      r.key !== row.key &&
+      PARENT_TYPES.includes(r.field_type) &&
+      !dependsOn(r, row.key, rows)
+  );
+  if (eligible.length === 0 && !row.parentKey) return null;
+  const parent = rows.find((r) => r.key === row.parentKey) ?? null;
+  const valueChoices: string[] =
+    parent?.field_type === "select" ? parent.options.filter((o) => o.trim()) : ["yes", "no"];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pl-1 text-xs text-gray-600 dark:text-gray-400">
+      <span>Show only when</span>
+      <select
+        className={inputBase + " max-w-44 py-1 text-xs"}
+        value={row.parentKey ?? ""}
+        onChange={(e) => {
+          const pk = e.target.value || null;
+          const p = rows.find((r) => r.key === pk);
+          onChange({
+            parentKey: pk,
+            parent_value: !p ? "" : p.field_type === "select" ? p.options.find((o) => o.trim()) ?? "" : "yes",
+          });
+        }}
+      >
+        <option value="">— always shown —</option>
+        {eligible.map((r, i) => (
+          <option key={r.key} value={r.key}>
+            {r.label.trim() || `Question ${i + 1}`}
+          </option>
+        ))}
+      </select>
+      {parent && (
+        <>
+          <span>is</span>
+          <select
+            className={inputBase + " max-w-36 py-1 text-xs"}
+            value={parentValue}
+            onChange={(e) => onChange({ parentKey: row.parentKey, parent_value: e.target.value })}
+          >
+            {valueChoices.map((v) => (
+              <option key={v} value={v}>
+                {parent.field_type === "select" ? v : v === "yes" ? (parent.field_type === "checkbox" ? "Checked" : "Yes") : parent.field_type === "checkbox" ? "Unchecked" : "No"}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+    </div>
+  );
+}
 type TierRow = {
   key: string;
   id?: string;
@@ -65,6 +149,20 @@ const label = "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1";
 
 let keySeq = 0;
 const newKey = () => `k${keySeq++}`;
+
+// parentKey → positional parent_index for the save payload. Drops the
+// dependency when the parent row is gone or its type can no longer gate.
+function depPayload(
+  f: { parentKey: string | null; parent_value?: string | null },
+  list: { key: string; field_type: EventFieldType }[]
+): { parent_index: number | null; parent_value: string | null } {
+  const idx = f.parentKey ? list.findIndex((x) => x.key === f.parentKey) : -1;
+  const ok = idx >= 0 && PARENT_TYPES.includes(list[idx].field_type);
+  return {
+    parent_index: ok ? idx : null,
+    parent_value: ok ? f.parent_value ?? "" : null,
+  };
+}
 
 // timestamptz <-> <input type="datetime-local"> (which uses local wall time)
 function toLocalInput(iso: string | null): string {
@@ -151,16 +249,20 @@ export default function EventBuilder({
   }
   const [imageUrls, setImageUrls] = useState<string[]>(event?.image_urls ?? []);
 
-  const [fields, setFields] = useState<FieldRow[]>(
-    (event?.event_fields ?? []).map((f) => ({
-      key: newKey(),
+  const [fields, setFields] = useState<FieldRow[]>(() => {
+    const src = event?.event_fields ?? [];
+    const keyByDbId = new Map(src.map((f) => [f.id, newKey()]));
+    return src.map((f) => ({
+      key: keyByDbId.get(f.id)!,
       id: f.id,
       label: f.label,
       field_type: f.field_type,
       options: f.options ?? [],
       required: f.required,
-    }))
-  );
+      parentKey: f.parent_field_id ? keyByDbId.get(f.parent_field_id) ?? null : null,
+      parent_value: f.parent_value ?? "",
+    }));
+  });
   const [tiers, setTiers] = useState<TierRow[]>(() => {
     const existing: TierRow[] = (event?.event_price_tiers ?? []).map((t) => ({
       key: newKey(),
@@ -172,10 +274,11 @@ export default function EventBuilder({
       player_attributes: t.player_attributes ?? [],
       is_sibling: t.is_sibling,
       is_parent: t.is_parent ?? false,
-      fields: [...(t.event_tier_fields ?? [])]
-        .sort((a, b) => a.position - b.position)
-        .map((f) => ({
-          key: newKey(),
+      fields: (() => {
+        const src = [...(t.event_tier_fields ?? [])].sort((a, b) => a.position - b.position);
+        const keyByDbId = new Map(src.map((f) => [f.id, newKey()]));
+        return src.map((f) => ({
+          key: keyByDbId.get(f.id)!,
           id: f.id,
           label: f.label,
           field_type: f.field_type,
@@ -183,7 +286,10 @@ export default function EventBuilder({
           required: f.required,
           price_adjust_cents: f.price_adjust_cents ?? 0,
           option_prices: (f.options ?? []).map((_, i) => f.option_prices?.[i] ?? 0),
-        })),
+          parentKey: f.parent_field_id ? keyByDbId.get(f.parent_field_id) ?? null : null,
+          parent_value: f.parent_value ?? "",
+        }));
+      })(),
     }));
     // Every event always has a Player tier (kids map to it). Seed one for new
     // events or legacy events that predate the flag.
@@ -228,11 +334,16 @@ export default function EventBuilder({
   const addField = () =>
     setFields((f) => [
       ...f,
-      { key: newKey(), label: "", field_type: "text", options: [], required: false },
+      { key: newKey(), label: "", field_type: "text", options: [], required: false, parentKey: null, parent_value: "" },
     ]);
   const updateField = (key: string, patch: Partial<FieldRow>) =>
     setFields((f) => f.map((x) => (x.key === key ? { ...x, ...patch } : x)));
-  const removeField = (key: string) => setFields((f) => f.filter((x) => x.key !== key));
+  const removeField = (key: string) =>
+    setFields((f) =>
+      f
+        .filter((x) => x.key !== key)
+        .map((x) => (x.parentKey === key ? { ...x, parentKey: null, parent_value: "" } : x))
+    );
   const moveField = (key: string, dir: -1 | 1) =>
     setFields((f) => {
       const i = f.findIndex((x) => x.key === key);
@@ -272,7 +383,7 @@ export default function EventBuilder({
               ...x,
               fields: [
                 ...x.fields,
-                { key: newKey(), label: "", field_type: "text", options: [], required: false, price_adjust_cents: 0, option_prices: [] },
+                { key: newKey(), label: "", field_type: "text", options: [], required: false, price_adjust_cents: 0, option_prices: [], parentKey: null, parent_value: "" },
               ],
             }
           : x
@@ -286,10 +397,14 @@ export default function EventBuilder({
           : x
       )
     );
+  const removeTierFieldImpl = (fields: TierFieldRow[], fieldKey: string) =>
+    fields
+      .filter((f) => f.key !== fieldKey)
+      .map((f) => (f.parentKey === fieldKey ? { ...f, parentKey: null, parent_value: "" } : f));
   const removeTierField = (tierKey: string, fieldKey: string) =>
     setTiers((t) =>
       t.map((x) =>
-        x.key === tierKey ? { ...x, fields: x.fields.filter((f) => f.key !== fieldKey) } : x
+        x.key === tierKey ? { ...x, fields: removeTierFieldImpl(x.fields, fieldKey) } : x
       )
     );
   const togglePlayerAttr = (tierKey: string, attrKey: string) =>
@@ -349,6 +464,7 @@ export default function EventBuilder({
         field_type: f.field_type,
         options: f.field_type === "select" ? f.options.filter((o) => o.trim()) : [],
         required: f.required,
+        ...depPayload(f, fields),
       })),
       tiers: tiers.map((t) => ({
         id: t.id,
@@ -375,6 +491,7 @@ export default function EventBuilder({
             required: f.required,
             price_adjust_cents: f.price_adjust_cents ?? 0,
             option_prices: pairs.map((x) => x.p),
+            ...depPayload(f, t.fields),
           };
         }),
       })),
@@ -749,6 +866,12 @@ export default function EventBuilder({
                         <span className="text-gray-400">(negative = discount)</span>
                       </div>
                     )}
+                    <DependsOnPicker
+                      rows={t.fields}
+                      row={tf}
+                      parentValue={tf.parent_value ?? ""}
+                      onChange={(patch) => updateTierField(t.key, tf.key, patch)}
+                    />
                   </div>
                 ))}
                 <button
@@ -824,6 +947,12 @@ export default function EventBuilder({
                 </button>
               </div>
             </div>
+            <DependsOnPicker
+              rows={fields}
+              row={f}
+              parentValue={f.parent_value ?? ""}
+              onChange={(patch) => updateField(f.key, patch)}
+            />
           </div>
         ))}
       </section>

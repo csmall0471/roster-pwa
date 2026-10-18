@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { renderMarkdown, markdownClass } from "@/lib/markdown";
+import { fieldVisible, stripHiddenValues } from "@/lib/events/field-visibility";
 import {
   PLAYER_ATTRIBUTE_CATALOG,
   type AttendeeStatus,
@@ -37,6 +38,10 @@ type GenericField = {
   required: boolean;
   priceAdjustCents?: number; // +/- to the attendee's price when yes/checked (tier fields only)
   optionPrices?: number[]; // for select fields: cents per option, index-aligned with options
+  // Dependent fields: hidden until the parent field's answer matches (see
+  // lib/events/field-visibility).
+  parent_field_id?: string | null;
+  parent_value?: string | null;
 };
 
 type AttendeeDraft = {
@@ -131,6 +136,8 @@ export default function SignupFlow({
               required: f.required,
               priceAdjustCents: f.price_adjust_cents ?? 0,
               optionPrices: f.option_prices ?? [],
+              parent_field_id: f.parent_field_id ?? null,
+              parent_value: f.parent_value ?? null,
             }));
           // Common-attribute pseudo-fields (grade/shirt size/birthdate) for any
           // tier. Keyed by their label so the stored value is self-describing
@@ -146,9 +153,20 @@ export default function SignupFlow({
               required: false,
               priceAdjustCents: 0,
             }));
-          return { ...t, attendeeFields: [...commonFields, ...custom] };
+          const attendeeFields = [...commonFields, ...custom];
+          return {
+            ...t,
+            attendeeFields,
+            fieldsById: new Map(attendeeFields.map((f) => [f.id, f])),
+          };
         }),
     [event.event_price_tiers]
+  );
+
+  // Event-level fields, by id, for dependent-field visibility checks.
+  const eventFieldsById = useMemo(
+    () => new Map((event.event_fields ?? []).map((f) => [f.id, f])),
+    [event.event_fields]
   );
 
   // Build a kid's prefilled attributes (keyed by attribute label) for the
@@ -323,6 +341,7 @@ export default function SignupFlow({
           if (a.status === "declined") continue;
           let adj = 0;
           for (const f of t.attendeeFields) {
+            if (!fieldVisible(f, a.attributes, t.fieldsById)) continue; // hidden = unanswered
             if ((f.field_type === "yesno" || f.field_type === "checkbox") && a.attributes[f.id] === true) {
               adj += f.priceAdjustCents ?? 0;
             } else if (f.field_type === "select" && (f.optionPrices?.length ?? 0) > 0) {
@@ -410,9 +429,10 @@ export default function SignupFlow({
       setSubmitError("Please enter your name.");
       return;
     }
-    // Required event fields
+    // Required event fields (dependent fields only count while shown)
     for (const f of event.event_fields ?? []) {
       if (!f.required) continue;
+      if (!fieldVisible(f, responses, eventFieldsById)) continue;
       const v = responses[f.id];
       if (v === undefined || v === null || v === "" || v === false) {
         setSubmitError(`"${f.label}" is required.`);
@@ -431,6 +451,7 @@ export default function SignupFlow({
         }
         for (const f of t.attendeeFields) {
           if (!f.required) continue;
+          if (!fieldVisible(f, a.attributes, t.fieldsById)) continue;
           const v = a.attributes[f.id];
           if (v === undefined || v === null || v === "" || v === false) {
             setSubmitError(`"${f.label}" is required for ${a.name || t.label}.`);
@@ -451,7 +472,15 @@ export default function SignupFlow({
     for (const t of tiers) {
       if (t.collect_attendees) {
         for (const a of attendees[t.id] ?? []) {
-          out.push({ tier_id: t.id, name: a.name.trim(), player_id: a.playerId ?? null, attributes: a.attributes, status: a.status });
+          // Strip answers of fields currently hidden by their dependency so a
+          // flipped-back parent doesn't submit stale child values.
+          out.push({
+            tier_id: t.id,
+            name: a.name.trim(),
+            player_id: a.playerId ?? null,
+            attributes: stripHiddenValues(t.attendeeFields, a.attributes),
+            status: a.status,
+          });
         }
       } else {
         const n = counts[t.id] ?? 0;
@@ -481,7 +510,7 @@ export default function SignupFlow({
       name,
       email,
       phone: contactPhone,
-      responses,
+      responses: stripHiddenValues(event.event_fields ?? [], responses),
       attendees: out,
       sit_by: sitBy,
     });
@@ -747,14 +776,16 @@ export default function SignupFlow({
                             )}
                             {!declined && t.attendeeFields.length > 0 && (
                               <div className="mt-2 space-y-2">
-                                {t.attendeeFields.map((f) => (
-                                  <FieldInput
-                                    key={f.id}
-                                    field={f}
-                                    value={a.attributes[f.id]}
-                                    onChange={(v) => setAttr(t.id, a.key, f.id, v)}
-                                  />
-                                ))}
+                                {t.attendeeFields
+                                  .filter((f) => fieldVisible(f, a.attributes, t.fieldsById))
+                                  .map((f) => (
+                                    <FieldInput
+                                      key={f.id}
+                                      field={f}
+                                      value={a.attributes[f.id]}
+                                      onChange={(v) => setAttr(t.id, a.key, f.id, v)}
+                                    />
+                                  ))}
                               </div>
                             )}
                           </div>
@@ -780,9 +811,11 @@ export default function SignupFlow({
               )}
 
               {/* Event-level custom fields */}
-              {(event.event_fields ?? []).map((f) => (
-                <FieldInput key={f.id} field={f} value={responses[f.id]} onChange={(v) => setResponse(f.id, v)} />
-              ))}
+              {(event.event_fields ?? [])
+                .filter((f) => fieldVisible(f, responses, eventFieldsById))
+                .map((f) => (
+                  <FieldInput key={f.id} field={f} value={responses[f.id]} onChange={(v) => setResponse(f.id, v)} />
+                ))}
 
               {submitError && <p className="text-sm text-red-600">{submitError}</p>}
               <button

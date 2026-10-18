@@ -313,6 +313,10 @@ export interface EventField {
   options: string[];
   required: boolean;
   position: number;
+  // Dependent fields: shown only while the parent field's answer matches
+  // parent_value (yesno/checkbox → "yes"|"no"; select → the option text).
+  parent_field_id?: string | null;
+  parent_value?: string | null;
 }
 
 export interface EventTierField {
@@ -329,6 +333,10 @@ export interface EventTierField {
   // For select fields: cents per option, index-aligned with `options`. Picking
   // an option adds its amount to the attendee's price.
   option_prices: number[];
+  // Dependent fields: shown only while the parent field's answer matches
+  // parent_value (yesno/checkbox → "yes"|"no"; select → the option text).
+  parent_field_id?: string | null;
+  parent_value?: string | null;
 }
 
 // Pickable values for the standard player/sibling attributes, so these are

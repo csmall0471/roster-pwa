@@ -6,6 +6,7 @@ import { logActivity } from "@/lib/activity";
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay";
 import { sendSignupConfirmation } from "@/lib/events/signup-confirmation";
 import { buildPricedAttendees, type PricingTier } from "@/lib/events/signup-pricing";
+import { fieldVisible } from "@/lib/events/field-visibility";
 import type {
   AttendeeStatus,
   SavedSibling,
@@ -321,10 +322,13 @@ export async function submitSignup(input: SubmitSignupInput): Promise<SubmitSign
 
   const isDecline = input.decline === true;
 
-  // Validate required custom fields — but a decline skips the form entirely.
+  // Validate required custom fields — but a decline skips the form entirely,
+  // and a dependent field only counts while its parent's answer reveals it.
   if (!isDecline) {
+    const fieldsById = new Map((event.event_fields ?? []).map((f) => [f.id as string, f]));
     for (const f of event.event_fields ?? []) {
       if (!f.required) continue;
+      if (!fieldVisible(f, input.responses, fieldsById)) continue;
       const v = input.responses[f.id];
       const empty = v === undefined || v === null || v === "" || v === false;
       if (empty) return { error: `"${f.label}" is required.` };

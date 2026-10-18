@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { saveSignupAsCoach, type CoachAttendeeInput } from "../actions";
+import { fieldVisible, stripHiddenValues } from "@/lib/events/field-visibility";
 import { PLAYER_ATTRIBUTE_CATALOG } from "@/lib/types";
 import type {
   EventField,
@@ -25,7 +26,17 @@ export type RosterParentOption = {
 };
 
 type FieldVal = string | number | boolean;
-type EditorField = { id: string; label: string; field_type: EventFieldType; options: string[]; required: boolean };
+type EditorField = {
+  id: string;
+  label: string;
+  field_type: EventFieldType;
+  options: string[];
+  required: boolean;
+  // Dependent fields (see lib/events/field-visibility): hidden until the
+  // parent's answer matches.
+  parent_field_id?: string | null;
+  parent_value?: string | null;
+};
 // playerId links a roster kid (from the stored attendee or the family seed) and
 // is round-tripped on save so coach edits don't strip stored player links.
 type Row = { key: string; tierId: string; name: string; playerId: string | null; attrs: Record<string, FieldVal>; status: "attending" | "declined" };
@@ -42,7 +53,15 @@ const inputCls =
 function attendeeFieldsFor(t: EventPriceTierWithFields): EditorField[] {
   const custom: EditorField[] = [...(t.event_tier_fields ?? [])]
     .sort((a, b) => a.position - b.position)
-    .map((f) => ({ id: f.id, label: f.label, field_type: f.field_type, options: f.options ?? [], required: f.required }));
+    .map((f) => ({
+      id: f.id,
+      label: f.label,
+      field_type: f.field_type,
+      options: f.options ?? [],
+      required: f.required,
+      parent_field_id: f.parent_field_id ?? null,
+      parent_value: f.parent_value ?? null,
+    }));
   const common: EditorField[] = (t.player_attributes ?? [])
     .map((k) => PLAYER_ATTRIBUTE_CATALOG.find((c) => c.key === k))
     .filter((c): c is (typeof PLAYER_ATTRIBUTE_CATALOG)[number] => Boolean(c))
@@ -66,12 +85,14 @@ function kidAttrsForTier(t: EventPriceTierWithFields, kid: SignupPlayer): Record
 
 // Client-side price preview (server recomputes authoritatively on save).
 function unitPrice(t: EventPriceTierWithFields, attrs: Record<string, FieldVal>): number {
+  // Dependent fields whose parent answer hides them never price.
+  const vis = stripHiddenValues(t.event_tier_fields ?? [], attrs);
   let adjust = 0;
   for (const f of t.event_tier_fields ?? []) {
-    if ((f.field_type === "yesno" || f.field_type === "checkbox") && attrs[f.id] === true) {
+    if ((f.field_type === "yesno" || f.field_type === "checkbox") && vis[f.id] === true) {
       adjust += f.price_adjust_cents ?? 0;
     } else if (f.field_type === "select" && (f.option_prices?.length ?? 0) > 0) {
-      const i = (f.options ?? []).indexOf(attrs[f.id] as string);
+      const i = (f.options ?? []).indexOf(vis[f.id] as string);
       if (i >= 0) adjust += f.option_prices[i] ?? 0;
     }
   }
@@ -293,7 +314,8 @@ export default function SignupEditor({
             tier_id: r.tierId,
             name: collect ? r.name.trim() || null : null,
             player_id: r.playerId,
-            attributes: collect ? r.attrs : {},
+            // Hidden dependent answers are dropped (server strips too).
+            attributes: collect ? stripHiddenValues(t?.event_tier_fields ?? [], r.attrs) : {},
             status: r.status,
           };
         });
@@ -304,7 +326,7 @@ export default function SignupEditor({
       name,
       email,
       phone,
-      responses,
+      responses: stripHiddenValues(fields, responses),
       attendees,
       decline,
     });
@@ -379,6 +401,7 @@ export default function SignupEditor({
               {/* Tiers */}
               {sorted.map((t) => {
                 const aFields = fieldsByTier.get(t.id) ?? [];
+                const aFieldsById = new Map(aFields.map((f) => [f.id, f]));
                 const tierRows = rowsFor(t.id);
                 return (
                   <div key={t.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
@@ -443,14 +466,16 @@ export default function SignupEditor({
                             </div>
                             {aFields.length > 0 && (
                               <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                                {aFields.map((f) => (
-                                  <label key={f.id} className="block">
-                                    <span className="text-[11px] text-gray-500 dark:text-gray-400">{f.label}</span>
-                                    <div className="mt-0.5">
-                                      <FieldInput field={f} value={r.attrs[f.id]} onChange={(v) => setAttr(r.key, f.id, v)} />
-                                    </div>
-                                  </label>
-                                ))}
+                                {aFields
+                                  .filter((f) => fieldVisible(f, r.attrs, aFieldsById))
+                                  .map((f) => (
+                                    <label key={f.id} className="block">
+                                      <span className="text-[11px] text-gray-500 dark:text-gray-400">{f.label}</span>
+                                      <div className="mt-0.5">
+                                        <FieldInput field={f} value={r.attrs[f.id]} onChange={(v) => setAttr(r.key, f.id, v)} />
+                                      </div>
+                                    </label>
+                                  ))}
                               </div>
                             )}
                           </div>
@@ -475,6 +500,7 @@ export default function SignupEditor({
                   <div className="space-y-2">
                     {[...fields]
                       .sort((a, b) => a.position - b.position)
+                      .filter((f) => fieldVisible(f, responses, new Map(fields.map((x) => [x.id, x]))))
                       .map((f) => (
                         <label key={f.id} className="block">
                           <span className="text-sm text-gray-700 dark:text-gray-300">
