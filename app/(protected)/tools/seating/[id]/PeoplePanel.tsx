@@ -57,6 +57,7 @@ type Props = {
   onToggleLock: (p: PersonVM) => void;
   onUnassign: (p: PersonVM) => void;
   onRemove: (p: PersonVM) => void;
+  onRemoveFamily: (ids: string[], label: string) => void;
   onAddPick: (fromPersonId: string, toPersonId: string) => void;
   onRemovePick: (pickId: string) => void;
   onOpenAdd: () => void;
@@ -83,6 +84,7 @@ export default function PeoplePanel({
   onToggleLock,
   onUnassign,
   onRemove,
+  onRemoveFamily,
   onAddPick,
   onRemovePick,
   onOpenAdd,
@@ -164,7 +166,9 @@ export default function PeoplePanel({
     return c;
   }, [people]);
 
-  const groups = useMemo(() => {
+  // removeIds (family grouping only) = the FULL household, ignoring filters,
+  // so "remove family" never strands the members a filter was hiding.
+  const groups = useMemo<{ label: string; list: PersonVM[]; removeIds?: string[] }[]>(() => {
     if (groupBy === "assignment") {
       const unassignedKids: PersonVM[] = [];
       const seatedList: PersonVM[] = [];
@@ -221,6 +225,12 @@ export default function PeoplePanel({
         const famId = find(p.familyKey.split("+")[0]);
         (byFamily.get(famId) ?? byFamily.set(famId, []).get(famId)!).push(p);
       }
+      const fullFamilyIds = new Map<string, string[]>();
+      for (const p of people) {
+        if (!p.familyKey) continue;
+        const famId = find(p.familyKey.split("+")[0]);
+        (fullFamilyIds.get(famId) ?? fullFamilyIds.set(famId, []).get(famId)!).push(p.id);
+      }
 
       // Label a family by its members' most common last name(s) — kids' names
       // first so a household reads as the players' family, not the parents'.
@@ -243,8 +253,14 @@ export default function PeoplePanel({
 
       const byFamilyOrder = (a: PersonVM, b: PersonVM) =>
         (KIND_RANK[a.kind] ?? 9) - (KIND_RANK[b.kind] ?? 9) || byName(a, b);
-      const out = [...byFamily.values()]
-        .map((list) => ({ label: familyLabel(list), list: list.sort(byFamilyOrder) }))
+      const out: { label: string; list: PersonVM[]; removeIds?: string[] }[] = [
+        ...byFamily.entries(),
+      ]
+        .map(([famId, list]) => ({
+          label: familyLabel(list),
+          list: list.sort(byFamilyOrder),
+          removeIds: fullFamilyIds.get(famId) ?? list.map((p) => p.id),
+        }))
         .sort((a, b) => a.label.localeCompare(b.label));
       if (noFamily.length) out.push({ label: "No family on file", list: noFamily.sort(byName) });
       return out;
@@ -430,9 +446,21 @@ export default function PeoplePanel({
       )}
       {groups.map((g) => (
         <div key={g.label} className="mt-3">
-          <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            {g.label} · {g.list.length}
-          </p>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              {g.label} · {g.list.length}
+            </p>
+            {g.removeIds && (
+              <button
+                type="button"
+                onClick={() => onRemoveFamily(g.removeIds!, g.label)}
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+                title={`Remove the whole ${g.label} (${g.removeIds.length} people, including any hidden by filters)`}
+              >
+                ✕ remove
+              </button>
+            )}
+          </div>
           <div className="space-y-1">
             {g.list.map((p) => {
               const myPicks = picks.filter((pk) => pk.fromPersonId === p.id);

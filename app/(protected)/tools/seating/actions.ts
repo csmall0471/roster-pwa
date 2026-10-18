@@ -423,6 +423,28 @@ export async function removePerson(planId: string, personId: string): Promise<{ 
   }
 }
 
+// Bulk remove — the people-panel's "remove family" uses this so one confirm
+// drops the whole household (seat assignments and picks cascade via FKs).
+export async function removePeople(
+  planId: string,
+  personIds: string[]
+): Promise<{ error?: string }> {
+  try {
+    if (personIds.length === 0) return {};
+    const { supabase } = await requireSeating();
+    const { error } = await supabase
+      .from("seating_people")
+      .delete()
+      .in("id", personIds)
+      .eq("plan_id", planId);
+    if (error) return { error: error.message };
+    revalidatePlan(planId);
+    return {};
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
 export async function setManualStatus(
   planId: string,
   personId: string,

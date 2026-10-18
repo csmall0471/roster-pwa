@@ -25,6 +25,7 @@ import {
   addPeopleFromTeams,
   addGuest,
   removePerson,
+  removePeople,
   setManualStatus,
   setLocked,
   assignSeat,
@@ -391,6 +392,29 @@ export default function SeatingTool({
         ),
       }),
       () => removePerson(planId, person.id)
+    );
+  }
+
+  // Remove a whole household (family group ✕). ids is the FULL family, not
+  // just the rows visible under the current filters.
+  function handleRemoveFamily(ids: string[], label: string) {
+    const idSet = new Set(ids);
+    const names = plan.people.filter((p) => idSet.has(p.id)).map((p) => p.displayName);
+    if (names.length === 0) return;
+    const msg =
+      `Remove the ${label} (${names.length} ${names.length === 1 ? "person" : "people"}) from this plan?\n\n` +
+      names.join(", ");
+    if (!window.confirm(msg)) return;
+    if (selectedPersonId && idSet.has(selectedPersonId)) setSelectedPersonId(null);
+    void act(
+      (p) => ({
+        ...p,
+        people: p.people.filter((x) => !idSet.has(x.id)),
+        picks: p.picks.filter(
+          (pk) => !idSet.has(pk.fromPersonId) && !idSet.has(pk.toPersonId)
+        ),
+      }),
+      () => removePeople(planId, ids)
     );
   }
 
@@ -851,6 +875,7 @@ export default function SeatingTool({
             onToggleLock={handleToggleLock}
             onUnassign={handleUnassign}
             onRemove={handleRemove}
+            onRemoveFamily={handleRemoveFamily}
             onAddPick={handleAddPick}
             onRemovePick={handleRemovePick}
             onOpenAdd={() => setAddOpen(true)}
