@@ -1,16 +1,40 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import type { EventWithDetails, SignupAttendee } from "@/lib/types";
-import SignupFlow, { type AttendanceSummary } from "./SignupFlow";
+import SignupFlow, { type AttendanceSummary, type SignupPreview } from "./SignupFlow";
+import { buildIdentifiedParent } from "./identify";
 
 export const dynamic = "force-dynamic";
 
 export default async function PublicEventPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ preview?: string }>;
 }) {
   const { slug } = await params;
+  const { preview: previewParam } = await searchParams;
   const supabase = await createClient();
+
+  // Coach preview ("view as"): ?preview=<parentId> or ?preview=guest shows the
+  // form exactly as that family (or an unidentified guest) would see it.
+  // Server-verified: only an authenticated non-parent (a coach) gets it — for
+  // everyone else the param is silently ignored. Preview submissions never save
+  // (the client fakes the confirmation screen).
+  let isCoach = false;
+  if (previewParam) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      const { data: parentLink } = await supabase
+        .from("parent_auth")
+        .select("parent_id")
+        .eq("auth_user_id", user.id)
+        .maybeSingle();
+      isCoach = !parentLink;
+    }
+  }
 
   const { data: event } = await supabase
     .from("events")
@@ -18,8 +42,9 @@ export default async function PublicEventPage({
     .eq("slug", slug)
     .maybeSingle();
 
-  // Only published events are publicly viewable (RLS enforces this too).
-  if (!event || event.status !== "published") {
+  // Only published events are publicly viewable (RLS enforces this too) —
+  // except a coach previewing, who can also walk through a draft.
+  if (!event || (event.status !== "published" && !isCoach)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-orange-50 via-white to-white px-4 text-center">
         <div className="text-4xl mb-4">🏀</div>
@@ -126,5 +151,21 @@ export default async function PublicEventPage({
     }
   }
 
-  return <SignupFlow event={ev} attendance={attendance} sitByChoices={sitByChoices} />;
+  // Build the preview payload: the exact prefill that family would get.
+  let preview: SignupPreview | null = null;
+  if (previewParam && isCoach) {
+    if (previewParam === "guest") {
+      preview = { label: "a guest (no account)", parent: null };
+    } else {
+      const parent = await buildIdentifiedParent(service, previewParam, ev.id);
+      if (parent) {
+        preview = {
+          label: `${parent.first_name} ${parent.last_name}`.trim() || "this parent",
+          parent,
+        };
+      }
+    }
+  }
+
+  return <SignupFlow event={ev} attendance={attendance} sitByChoices={sitByChoices} preview={preview} />;
 }

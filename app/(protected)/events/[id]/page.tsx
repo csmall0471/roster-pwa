@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { renderMarkdown, markdownClass } from "@/lib/markdown";
 import type { EventSignup, EventWithDetails, SavedSibling, SignupPlayer } from "@/lib/types";
 import EventManageControls from "../_components/EventManageControls";
+import PreviewAsMenu from "../_components/PreviewAsMenu";
 import EventReminderPanel from "../_components/EventReminderPanel";
 import EventInviteButton from "../_components/EventInviteButton";
 import InviteRosterPanel from "../_components/InviteRosterPanel";
@@ -350,6 +351,14 @@ export default async function EventManagePage({
 
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-4">
         <EventManageControls eventId={ev.id} shareUrl={shareUrl} status={ev.status} />
+        <PreviewAsMenu
+          slug={ev.slug}
+          parents={rosterParents.map((p) => ({
+            id: p.id,
+            name: p.name,
+            players: p.players.map((k) => k.name),
+          }))}
+        />
         {ev.status === "published" && recipients.length > 0 && (
           <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-4">
             <EventInviteButton

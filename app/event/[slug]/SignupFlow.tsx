@@ -29,6 +29,14 @@ export type AttendanceSummary = {
   families: { lead: string; extras: string[] }[];
 };
 
+// Coach "view as" mode (server-verified on the page): the form renders exactly
+// as the given family (or a guest) would see it, phone verification is skipped,
+// and submit/decline fake their confirmation screens instead of saving.
+export type SignupPreview = {
+  label: string;
+  parent: IdentifiedParent | null; // null = previewing as an unidentified guest
+};
+
 // Shape shared by event fields and tier attendee fields.
 type GenericField = {
   id: string;
@@ -86,17 +94,19 @@ export default function SignupFlow({
   event,
   attendance,
   sitByChoices = [],
+  preview = null,
 }: {
   event: EventWithDetails;
   attendance: AttendanceSummary;
   // Active roster kids ("First L.") offered as "sit by" picks — empty/absent
   // when the event doesn't collect seating preferences.
   sitByChoices?: { id: string; name: string }[];
+  preview?: SignupPreview | null;
 }) {
-  const [step, setStep] = useState<Step>("identify");
+  const [step, setStep] = useState<Step>(preview ? "form" : "identify");
   // True until we've checked for an existing session (avoids flashing the phone
   // prompt at an already-logged-in parent).
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(!preview);
 
   // identify / otp
   const [phone, setPhone] = useState("");
@@ -341,8 +351,17 @@ export default function SignupFlow({
   );
 
   // On mount: log the open, and if the visitor already has a session, skip the
-  // phone prompt and jump straight to a pre-filled form.
+  // phone prompt and jump straight to a pre-filled form. Preview mode skips
+  // both (no view rows, no auth) and applies the previewed family instead.
   useEffect(() => {
+    if (preview) {
+      // step/checking already start in form mode; apply the previewed family's
+      // prefill on the next tick (same async shape as the identify path below).
+      const t = setTimeout(() => {
+        if (preview.parent) applyIdentified(preview.parent, null);
+      }, 0);
+      return () => clearTimeout(t);
+    }
     let key = localStorage.getItem("ev_visitor_key");
     if (!key) {
       key = crypto.randomUUID();
@@ -359,7 +378,7 @@ export default function SignupFlow({
       })
       .catch(() => {})
       .finally(() => setChecking(false));
-  }, [event.id, applyIdentified]);
+  }, [event.id, applyIdentified, preview]);
 
   const total = useMemo(() => {
     let sum = 0;
@@ -606,6 +625,19 @@ export default function SignupFlow({
       }
     }
 
+    // Preview: show the real confirmation screen without saving anything.
+    if (preview) {
+      setResult({
+        ok: true,
+        declined: false,
+        total_cents: total,
+        pay_url: event.pay_url,
+        pay_instructions: event.pay_instructions,
+      });
+      setStep("done");
+      return;
+    }
+
     setSubmitting(true);
     const res = await submitSignup({
       event_id: event.id,
@@ -635,6 +667,12 @@ export default function SignupFlow({
       setSubmitError("Please enter your name first.");
       return;
     }
+    // Preview: show the declined screen without recording anything.
+    if (preview) {
+      setResult({ ok: true, declined: true, total_cents: 0, pay_url: null, pay_instructions: null });
+      setStep("done");
+      return;
+    }
     setSubmitting(true);
     const res = await submitSignup({
       event_id: event.id,
@@ -656,7 +694,20 @@ export default function SignupFlow({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-orange-50 via-white to-white">
+    <div className={`min-h-screen bg-gradient-to-b from-orange-50 via-white to-white ${preview ? "pt-10" : ""}`}>
+      {/* Coach preview banner: pinned so it's unmistakable this isn't live. */}
+      {preview && (
+        <div className="fixed inset-x-0 top-0 z-50 bg-violet-700 text-white">
+          <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-2 text-xs font-medium">
+            <span className="min-w-0 flex-1 truncate">
+              👁 Previewing as <strong>{preview.label}</strong> — nothing is saved
+            </span>
+            <a href={`/events/${event.id}`} className="shrink-0 rounded-md bg-white/15 px-2 py-1 font-semibold hover:bg-white/25">
+              Exit
+            </a>
+          </div>
+        </div>
+      )}
       <div className={`mx-auto max-w-lg px-4 py-8 ${!checking && step === "form" && rsvpChoice === "yes" ? "pb-32" : ""}`}>
         {/* Photo carousel */}
         <EventGallery images={event.image_urls ?? []} />
