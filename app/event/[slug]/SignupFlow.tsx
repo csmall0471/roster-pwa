@@ -123,6 +123,10 @@ export default function SignupFlow({
   // They previously declined this event — show a gentle banner so they know
   // their current status, while leaving the form ready to change to "going".
   const [priorDeclined, setPriorDeclined] = useState(false);
+  // Up-front RSVP gate: the first thing the form asks is "Can you make it?".
+  // null until they choose; "yes" reveals the guided cards, "no" shows the
+  // quick decline confirm. Prefilled from an existing signup.
+  const [rsvpChoice, setRsvpChoice] = useState<"yes" | "no" | null>(null);
 
   // Guided form: the form step is a stack of collapsible cards ("Your info",
   // one per attendee tier, "Questions"). One is expanded at a time; Continue
@@ -226,6 +230,7 @@ export default function SignupFlow({
       // but fall through to a fresh kid-prefill so changing to "going" is easy.
       if (existing && !existing.declined) {
         setPriorDeclined(false);
+        setRsvpChoice("yes"); // they already said yes — straight to the form
         setName(existing.name || `${parent.first_name} ${parent.last_name}`.trim());
         setEmail(existing.email ?? parent.email ?? "");
         setContactPhone(existing.phone ?? parent.phone ?? fallbackPhone ?? "");
@@ -266,6 +271,7 @@ export default function SignupFlow({
       }
 
       setPriorDeclined(Boolean(existing?.declined));
+      setRsvpChoice(existing?.declined ? "no" : null);
       setName(`${parent.first_name} ${parent.last_name}`.trim());
       setEmail(parent.email ?? "");
       setContactPhone(parent.phone ?? fallbackPhone ?? "");
@@ -624,9 +630,9 @@ export default function SignupFlow({
   // form. Only the name is needed (it's prefilled for identified parents).
   async function handleDecline() {
     setSubmitError(null);
+    // The decline panel carries its own name input, so no card-jumping needed.
     if (!name.trim()) {
       setSubmitError("Please enter your name first.");
-      goToSection("contact");
       return;
     }
     setSubmitting(true);
@@ -651,7 +657,7 @@ export default function SignupFlow({
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 via-white to-white">
-      <div className={`mx-auto max-w-lg px-4 py-8 ${!checking && step === "form" ? "pb-32" : ""}`}>
+      <div className={`mx-auto max-w-lg px-4 py-8 ${!checking && step === "form" && rsvpChoice === "yes" ? "pb-32" : ""}`}>
         {/* Photo carousel */}
         <EventGallery images={event.image_urls ?? []} />
         <h1 className="text-2xl font-bold text-gray-900">{event.title}</h1>
@@ -764,10 +770,80 @@ export default function SignupFlow({
 
           {step === "form" && (
             <div className="space-y-3">
+              {/* The first question: are you coming at all? "Yes" reveals the
+                  guided cards; "No" is a one-tap decline. Stays visible as a
+                  toggle so changing your answer later is obvious. */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <p className="text-sm font-semibold text-gray-900">Can you make it?</p>
+                <div className="mt-2.5 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSubmitError(null);
+                      setRsvpChoice("yes");
+                      if (rsvpChoice !== "yes") goToSection(openSection || "contact");
+                    }}
+                    className={`rounded-xl border px-3 py-3 text-sm font-semibold ${
+                      rsvpChoice === "yes"
+                        ? "border-green-500 bg-green-50 text-green-700"
+                        : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    🎉 Yes, we&rsquo;re in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSubmitError(null);
+                      setRsvpChoice("no");
+                    }}
+                    className={`rounded-xl border px-3 py-3 text-sm font-semibold ${
+                      rsvpChoice === "no"
+                        ? "border-red-400 bg-red-50 text-red-700"
+                        : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    😢 Can&rsquo;t make it
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick decline confirm */}
+              {rsvpChoice === "no" && (
+                <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                  {priorDeclined ? (
+                    <p className="text-sm text-gray-600">
+                      You&rsquo;re marked as <strong>not attending</strong>. Change of plans? Tap{" "}
+                      <strong>Yes, we&rsquo;re in</strong> above.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-gray-600">
+                        Sorry you&rsquo;ll miss it! Leave your name so the coach knows who&rsquo;s out.
+                      </p>
+                      <div>
+                        <label className={labelCls}>Your name *</label>
+                        <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+                      </div>
+                      {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+                      <button
+                        onClick={handleDecline}
+                        disabled={submitting || !name.trim()}
+                        className="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+                      >
+                        {submitting ? "Sending…" : "Confirm — we can't make it"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {rsvpChoice === "yes" && (
+                <>
               {priorDeclined && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  You&rsquo;re currently marked <strong>not attending</strong>. Change your mind below and tap
-                  <strong> Sign up</strong> to RSVP.
+                  You&rsquo;re currently marked <strong>not attending</strong> — fill this out and tap
+                  <strong> Sign up</strong> to change that.
                 </div>
               )}
 
@@ -993,16 +1069,9 @@ export default function SignupFlow({
                 <p className="mt-1 text-xs text-gray-500">
                   All set? Tap <strong>Sign up</strong> below.
                 </p>
-                {!priorDeclined && (
-                  <button
-                    onClick={handleDecline}
-                    disabled={submitting}
-                    className="mt-3 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Can&rsquo;t make it
-                  </button>
-                )}
               </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1017,6 +1086,7 @@ export default function SignupFlow({
                 onClick={() => {
                   setResult(null);
                   setPriorDeclined(true);
+                  setRsvpChoice("yes"); // they tapped "changed my mind" — open the form
                   setStep("form");
                 }}
                 className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
@@ -1071,7 +1141,7 @@ export default function SignupFlow({
 
       {/* Sticky total + submit: always reachable on phones while filling the
           cards above. Validation errors show here (and auto-open their card). */}
-      {!checking && step === "form" && (
+      {!checking && step === "form" && rsvpChoice === "yes" && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur">
           <div className="mx-auto max-w-lg px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             {submitError && <p className="mb-2 text-sm text-red-600">{submitError}</p>}
