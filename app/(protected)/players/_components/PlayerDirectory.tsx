@@ -12,6 +12,7 @@ import {
   bulkRemoveFromTeam,
   setPlayerGender,
 } from "../actions";
+import { addPlayersToInterestList, createInterestList } from "../../email/actions";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -59,10 +60,12 @@ export default function PlayerDirectory({
   players,
   primaryPhotos = {},
   teams = [],
+  interestLists = [],
 }: {
   players: PlayerWithParents[];
   primaryPhotos?: Record<string, string>;
   teams?: { id: string; name: string; season: string }[];
+  interestLists?: { id: string; name: string }[];
 }) {
   // Filter / sort state
   const [query,       setQuery]       = useState("");
@@ -84,7 +87,13 @@ export default function PlayerDirectory({
   // Bulk operation state
   const [bulkTeam,    setBulkTeam]    = useState("");
   const [bulkError,   setBulkError]   = useState<string | null>(null);
+  const [bulkNotice,  setBulkNotice]  = useState<string | null>(null);
   const [pending,     startTransition] = useTransition();
+
+  // Interest-list bulk state. Lists created inline land here so the picker
+  // updates without a reload.
+  const [lists,       setLists]       = useState(interestLists);
+  const [bulkList,    setBulkList]    = useState("");
 
   // Message composer state
   const [messageChannel, setMessageChannel] = useState<"email" | "text" | null>(null);
@@ -237,6 +246,34 @@ export default function PlayerDirectory({
     startTransition(async () => {
       const result = await bulkRemoveFromTeam([...selected], bulkTeam);
       if (result.error) { setBulkError(result.error); return; }
+      clearSelection();
+    });
+  }
+
+  // "＋ New list…" in the picker prompts for a name, creates it, and selects it.
+  async function handleListPick(value: string) {
+    if (value !== "__new") { setBulkList(value); return; }
+    const name = window.prompt("Name the new interest list")?.trim();
+    if (!name) return;
+    const res = await createInterestList(name);
+    if (res.error || !res.list) { setBulkError(res.error ?? "Failed to create list"); return; }
+    setLists(prev => [...prev, { id: res.list!.id, name: res.list!.name }].sort((a, b) => a.name.localeCompare(b.name)));
+    setBulkList(res.list.id);
+  }
+
+  function handleBulkInterest() {
+    if (!bulkList) return;
+    setBulkError(null);
+    setBulkNotice(null);
+    const listName = lists.find(l => l.id === bulkList)?.name ?? "list";
+    startTransition(async () => {
+      const result = await addPlayersToInterestList(bulkList, [...selected]);
+      if (result.error) { setBulkError(result.error); return; }
+      const added = result.entries?.length ?? 0;
+      setBulkNotice(
+        `Added ${added} to “${listName}”${result.skipped ? ` (${result.skipped} already on it)` : ""}`
+      );
+      setTimeout(() => setBulkNotice(null), 4000);
       clearSelection();
     });
   }
@@ -573,6 +610,28 @@ export default function PlayerDirectory({
 
             <div className="w-px h-5 bg-gray-700 shrink-0" />
 
+            {/* Interest list */}
+            <select
+              value={bulkList}
+              onChange={(e) => void handleListPick(e.target.value)}
+              className="rounded-lg bg-gray-800 border border-gray-700 px-2 py-1 text-sm text-white focus:outline-none focus:border-gray-500"
+            >
+              <option value="">Interest list…</option>
+              {lists.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+              <option value="__new">＋ New list…</option>
+            </select>
+            <button
+              onClick={handleBulkInterest}
+              disabled={!bulkList || pending}
+              className="text-sm px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 transition-colors"
+            >
+              Add to list
+            </button>
+
+            <div className="w-px h-5 bg-gray-700 shrink-0" />
+
             {/* Delete */}
             <button
               onClick={handleBulkDelete}
@@ -587,6 +646,16 @@ export default function PlayerDirectory({
               <p className="w-full text-xs text-red-400 mt-1">{bulkError}</p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Success toast — rendered outside the bulk bar because adding to a
+          list clears the selection (which hides the bar). */}
+      {bulkNotice && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
+          <p className="rounded-xl bg-green-700 px-4 py-2.5 text-sm font-medium text-white shadow-2xl">
+            {bulkNotice}
+          </p>
         </div>
       )}
 

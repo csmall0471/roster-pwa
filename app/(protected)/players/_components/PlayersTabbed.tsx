@@ -13,12 +13,14 @@ export default function PlayersTabbed({
   teams,
   rankPlayers,
   ratings,
+  interestLists = [],
 }: {
   players: PlayerWithParents[];
   primaryPhotos: Record<string, string>;
   teams: { id: string; name: string; season: string }[];
   rankPlayers: RankPlayer[];
   ratings: Record<string, RatingValues>;
+  interestLists?: { id: string; name: string }[];
 }) {
   const [tab, setTab] = useState<Tab>("directory");
 
@@ -41,7 +43,7 @@ export default function PlayersTabbed({
       </div>
 
       {tab === "directory" ? (
-        <PlayerDirectory players={players} primaryPhotos={primaryPhotos} teams={teams} />
+        <PlayerDirectory players={players} primaryPhotos={primaryPhotos} teams={teams} interestLists={interestLists} />
       ) : (
         <PlayerRanking players={rankPlayers} initialRatings={ratings} />
       )}

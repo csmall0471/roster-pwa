@@ -6,7 +6,7 @@ import PlayersTabbed from "./_components/PlayersTabbed";
 
 export default async function PlayersPage() {
   const supabase = await createClient();
-  const [{ data, error }, { data: photoRows }, { data: teamRows }, { data: ratingRows }] =
+  const [{ data, error }, { data: photoRows }, { data: teamRows }, { data: ratingRows }, { data: listRows }] =
     await Promise.all([
       supabase
         .from("players")
@@ -26,6 +26,8 @@ export default async function PlayersPage() {
       supabase
         .from("player_ratings")
         .select("player_id, good_person, coachable, personality, teammate, hard_working"),
+      // Pre-migration-067 this table doesn't exist; errors just mean no lists.
+      supabase.from("interest_list_groups").select("id, name").order("name"),
     ]);
 
   const primaryPhotos: Record<string, string> = {};
@@ -124,6 +126,7 @@ export default async function PlayersPage() {
         teams={(teamRows ?? []) as { id: string; name: string; season: string }[]}
         rankPlayers={rankPlayers}
         ratings={ratings}
+        interestLists={(listRows ?? []) as { id: string; name: string }[]}
       />
     </div>
   );
