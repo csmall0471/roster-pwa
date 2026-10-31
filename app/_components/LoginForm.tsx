@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { checkPhoneAccess } from "@/app/actions/phone-access";
+import { usPhoneE164 } from "@/lib/phone";
 
 // The phone-OTP sign-in card, shared by the family login (/login) and the roster
 // admin login (/roster-login). The ONLY difference between those entries is the
@@ -13,12 +15,18 @@ export default function LoginForm({ defaultNext }: { defaultNext: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const normalize = () => (phone.trim().startsWith("+") ? phone.trim() : `+1${phone.replace(/\D/g, "")}`);
+  const normalize = () => usPhoneE164(phone) ?? phone.trim();
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    const access = await checkPhoneAccess(phone).catch(() => ({ error: "We couldn't check that number. Please try again." }));
+    if (access.error) {
+      setLoading(false);
+      setError(access.error);
+      return;
+    }
     const supabase = createClient();
     const { error: authError } = await supabase.auth.signInWithOtp({ phone: normalize() });
     setLoading(false);

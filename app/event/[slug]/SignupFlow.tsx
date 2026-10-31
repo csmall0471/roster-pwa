@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { renderMarkdown, markdownClass } from "@/lib/markdown";
 import { fieldVisible, stripHiddenValues } from "@/lib/events/field-visibility";
+import { checkPhoneAccess } from "@/app/actions/phone-access";
+import { usPhoneE164 } from "@/lib/phone";
 import {
   PLAYER_ATTRIBUTE_CATALOG,
   type AttendeeStatus,
@@ -82,8 +84,7 @@ let keySeq = 0;
 const newKey = () => `a${keySeq++}`;
 
 function normalizePhone(raw: string): string {
-  const t = raw.trim();
-  return t.startsWith("+") ? t : `+1${t.replace(/\D/g, "")}`;
+  return usPhoneE164(raw) ?? raw.trim();
 }
 
 const inputCls =
@@ -477,6 +478,12 @@ export default function SignupFlow({
   async function sendCode() {
     setAuthError(null);
     setAuthBusy(true);
+    const access = await checkPhoneAccess(phone).catch(() => ({ error: "We couldn't check that number. Please try again." }));
+    if (access.error) {
+      setAuthBusy(false);
+      setAuthError(access.error);
+      return;
+    }
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({ phone: normalizePhone(phone) });
     setAuthBusy(false);
