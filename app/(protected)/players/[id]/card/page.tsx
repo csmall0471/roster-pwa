@@ -162,7 +162,7 @@ export default async function PlayerCardPage({
   const returnHref = teamId ? `/teams/${teamId}` : `/players/${id}`;
 
   return (
-    <div className="max-w-2xl unfolded:max-w-none lg:max-w-none">
+    <div className="max-w-2xl lg:max-w-none">
       <Link
         href={returnHref}
         className="text-sm text-blue-600 dark:text-blue-400 hover:underline"

@@ -75,12 +75,12 @@ export default async function CardCreatorPage({
   }
 
   return (
-    <div className="max-w-2xl unfolded:max-w-none lg:max-w-none">
+    <div className="max-w-2xl lg:max-w-none">
       <Link href="/teams" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
         ← Back
       </Link>
 
-      <div className={`mt-3 mb-5 lg:max-w-2xl ${draftId ? "unfolded:hidden" : ""}`}>
+      <div className="mt-3 mb-5 lg:max-w-2xl">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Card Creator</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
           Build a player card from any photo, then save it to your photos, assign it to a player
@@ -98,11 +98,9 @@ export default async function CardCreatorPage({
 
       {/* Streamed so the editor paints immediately (its own query can be heavy). */}
       {isOwner && (
-        <div className="unfolded:hidden">
-          <Suspense fallback={null}>
-            <SeasonCardsSection />
-          </Suspense>
-        </div>
+        <Suspense fallback={null}>
+          <SeasonCardsSection />
+        </Suspense>
       )}
 
       <CardEditor
@@ -117,7 +115,7 @@ export default async function CardCreatorPage({
         lastName=""
         jersey={null}
         playerAge={null}
-        returnHref="/teams"
+        returnHref={draftId ? "/tools/card-creator" : "/teams"}
         assignTargets={assignTargets}
         teammatesByTeam={teammatesByTeam}
         allowDrafts={isOwner}

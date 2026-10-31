@@ -71,6 +71,9 @@ const LOGO_BASE_WIDTH = 0.28;
 // saved value; clear the field on the card to drop it.
 const DEFAULT_HEAD_COACH = "Connor Small";
 
+// Must match the `unfolded` variant in globals.css.
+const UNFOLDED_QUERY = "(min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px)";
+
 // The 2" sticker export is hidden for now; flip this to bring it back.
 const SHOW_STICKER: boolean = false;
 
@@ -538,8 +541,12 @@ export default function CardEditor({
   const [originalPhoto, setOriginalPhoto] = useState<File | null>(null);
   const [savingOriginal, setSavingOriginal] = useState(false);
   // Sport, shape and group-card tools start tucked away on large touch screens,
-  // so kids editing their own card see only what they need.
-  const [moreOpen, setMoreOpen] = useState(false);
+  // so kids editing their own card see only what they need. A saved group card
+  // needs its teammate tools, so it starts open.
+  const [moreOpen, setMoreOpen] = useState(!!initialDesign?.extra_subjects?.length);
+  // The options panel is the only part that scrolls on large touch screens, so
+  // switching tabs or sides sends it back to the top.
+  const optionsScrollRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
   const [uploadingBg, setUploadingBg] = useState(false);
   // Save failure (network stall / timeout / server error). When set, a blocking
@@ -582,6 +589,11 @@ export default function CardEditor({
       (defaultSport && defaultSport !== "basketball"
         ? { type: "template", id: SPORTS[defaultSport].defaultBackgroundId }
         : { type: "template", id: TEMPLATES[0].id })
+  );
+  // Which background group is expanded on large touch screens (one at a time,
+  // so the list stays short). Starts on the group holding the current background.
+  const [openBgGroup, setOpenBgGroup] = useState<string | null>(() =>
+    bg.type === "template" ? getTemplate(bg.id).category : null
   );
   // Transform stored as fractions of stage dimensions so it scales across screen sizes.
   const [tx, setTx] = useState(initialDesign?.transform.x ?? 0);
@@ -779,6 +791,7 @@ export default function CardEditor({
   // Bring the card preview to the top of the screen (used after a photo loads and
   // when a background is picked, so the change is visible without scrolling up).
   function scrollToPreview() {
+    if (window.matchMedia(UNFOLDED_QUERY).matches) return; // the card is always in view
     setTimeout(
       () => stageWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
       80
@@ -2501,14 +2514,14 @@ export default function CardEditor({
   // simply doesn't render there.
   const playerPicker =
     standalone && assignTargets.length > 0 ? (
-      <label className="block mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <label className="block mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 unfolded:mb-2 unfolded:flex unfolded:shrink-0 unfolded:items-center unfolded:gap-3 unfolded:px-3 unfolded:py-1.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 unfolded:whitespace-nowrap">
           Whose card is this?
         </span>
         <select
           value={assignTargetKey}
           onChange={(e) => selectTarget(e.target.value)}
-          className="mt-1.5 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+          className="mt-1.5 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white unfolded:mt-0 unfolded:min-w-0 unfolded:flex-1 unfolded:text-base"
         >
           <option value="">— No player (save to photos) —</option>
           {assignTargets.map((t) => (
@@ -2518,11 +2531,27 @@ export default function CardEditor({
             </option>
           ))}
         </select>
-        <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+        <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 unfolded:hidden">
           Fills in the name, team, and stats automatically — you can still edit anything.
         </p>
       </label>
     ) : null;
+
+  // Tap-to-expand heading for a group of backgrounds on large touch screens.
+  function bgGroupToggle(key: string, label: string) {
+    const open = openBgGroup === key;
+    return (
+      <button
+        type="button"
+        onClick={() => setOpenBgGroup(open ? null : key)}
+        aria-expanded={open}
+        className="hidden w-full items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 unfolded:flex"
+      >
+        {label}
+        <span aria-hidden>{open ? "▾" : "▸"}</span>
+      </button>
+    );
+  }
 
   // ── Render ──────────────────────────────────────────────────
 
@@ -2588,9 +2617,9 @@ export default function CardEditor({
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
   return (
-    <div className="w-full max-w-md unfolded:max-w-none lg:max-w-none mx-auto overflow-x-hidden unfolded:overflow-x-visible lg:overflow-x-visible">
+    <div className="card-fullscreen w-full max-w-md lg:max-w-none mx-auto overflow-x-hidden lg:overflow-x-visible unfolded:fixed unfolded:inset-0 unfolded:z-40 unfolded:flex unfolded:h-dvh unfolded:max-w-none unfolded:flex-col unfolded:overflow-hidden unfolded:bg-gray-50 unfolded:p-3 unfolded:dark:bg-gray-950">
       {error && (
-        <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
+        <p className="text-sm text-red-500 dark:text-red-400 mb-3 unfolded:mb-2 unfolded:shrink-0">{error}</p>
       )}
 
       {/* Whose card is this? — pinned to the top so it's the first choice made. */}
@@ -2600,10 +2629,10 @@ export default function CardEditor({
           the right; it stacks back to a single column on phones. The preview
           column grows with the viewport (clamp) up to a cap; the controls cap so
           sliders don't stretch; the pair centers once both maxed out. */}
-      <div className="unfolded:landscape:grid unfolded:landscape:grid-cols-[auto_minmax(0,1fr)] unfolded:landscape:gap-6 unfolded:landscape:items-start lg:grid lg:justify-center lg:gap-8 lg:items-start lg:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
-        {/* Preview column — sticky on desktop and large touch screens so the card
-            stays in view while editing. */}
-        <div className="unfolded:sticky unfolded:top-14 unfolded:z-[5] unfolded:self-start unfolded:bg-gray-50 unfolded:py-2 unfolded:dark:bg-gray-950 lg:sticky lg:top-16 lg:self-start">
+      <div className="unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col unfolded:landscape:grid unfolded:landscape:grid-cols-[auto_minmax(0,1fr)] unfolded:landscape:grid-rows-[minmax(0,1fr)] unfolded:landscape:gap-4 lg:grid lg:justify-center lg:gap-8 lg:items-start lg:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
+        {/* Preview column — sticky on desktop so it stays in view while editing. On
+            large touch screens the editor fills the screen, so nothing scrolls past it. */}
+        <div className="unfolded:shrink-0 lg:sticky lg:top-16 lg:self-start">
       {/* Side toggle */}
       <div className="flex gap-1 mb-3 unfolded:mb-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
         {(["front", "back"] as const).map((s) => (
@@ -2612,6 +2641,7 @@ export default function CardEditor({
             onClick={() => {
               if (s !== side) {
                 setSide(s);
+                optionsScrollRef.current?.scrollTo({ top: 0 });
                 track("card_side_switched", { side: s });
                 logClientActivity("card_side_switched", { side: s }).catch(() => {});
               }
@@ -2634,8 +2664,8 @@ export default function CardEditor({
         ref={stageWrapRef}
         className={`relative w-full overflow-hidden scroll-mt-20 mx-auto ${
           landscape
-            ? "unfolded:portrait:w-[min(100%,calc(40dvh*7/5))] unfolded:landscape:w-[min(46vw,calc((100dvh-9rem)*7/5))]"
-            : "unfolded:portrait:w-[calc(40dvh*5/7)] unfolded:landscape:w-[calc((100dvh-9rem)*5/7)]"
+            ? "unfolded:portrait:w-[min(100%,calc(40dvh*7/5))] unfolded:landscape:w-[min(46vw,calc((100dvh-9.75rem)*7/5))]"
+            : "unfolded:portrait:w-[calc(40dvh*5/7)] unfolded:landscape:w-[calc((100dvh-9.75rem)*5/7)]"
         }`}
       >
         {/* Back stage (offscreen when not active). Relative when active so the
@@ -3071,16 +3101,25 @@ export default function CardEditor({
         {/* end preview column */}
 
         {/* Controls column */}
-        <div className="card-touch min-w-0">
+        <div className="card-touch min-w-0 unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col">
       <button
         type="button"
         onClick={() => setMoreOpen((open) => !open)}
         aria-expanded={moreOpen}
-        className="mt-2 hidden w-full rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-left text-sm font-medium text-gray-600 dark:text-gray-300 unfolded:block"
+        className="hidden w-full shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-left text-sm font-medium text-gray-600 dark:text-gray-300 unfolded:block unfolded:portrait:mt-2"
       >
-        {moreOpen ? "▾" : "▸"} Card options: sport, shape, add a teammate
+        {moreOpen ? "▾" : "▸"} Card options: sport, shape, teammate, limited edition
       </button>
-      <div className={moreOpen || isDuo ? "" : "unfolded:hidden"}>
+      <div className={moreOpen ? "unfolded:max-h-[40dvh] unfolded:shrink-0 unfolded:overflow-y-auto unfolded:overscroll-contain" : "unfolded:hidden"}>
+      {!isParent && (
+        <button
+          onClick={handleDownloadCard}
+          disabled={!cutoutDataUrl || step === "saving" || downloading}
+          className="mt-2 hidden w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 disabled:opacity-50 unfolded:block"
+        >
+          {downloading ? "Preparing…" : "⬇︎ Download front & back"}
+        </button>
+      )}
       {/* Sport — governs backgrounds, positions, the questionnaire wording, and
           the "plays like" match for the whole card. */}
       <div className="mt-4 flex items-center gap-2">
@@ -3305,13 +3344,16 @@ export default function CardEditor({
       </div>
 
       {/* Toolbar — different content for front vs back. */}
-      <div className="mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden unfolded:mt-2 unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col">
         {side === "front" && (
-        <div className="flex border-b border-gray-200 dark:border-gray-700">
+        <div className="flex border-b border-gray-200 dark:border-gray-700 unfolded:shrink-0">
           {(["photo", "bg", "text"] as const).map((t) => (
             <button
               key={t}
-              onClick={() => setTab(t)}
+              onClick={() => {
+                setTab(t);
+                optionsScrollRef.current?.scrollTo({ top: 0 });
+              }}
               className={`flex-1 px-3 py-2 unfolded:py-3 text-xs font-semibold uppercase tracking-wide transition-colors ${
                 tab === t
                   ? "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
@@ -3324,6 +3366,7 @@ export default function CardEditor({
         </div>
         )}
 
+        <div ref={optionsScrollRef} className="unfolded:min-h-0 unfolded:flex-1 unfolded:overflow-y-auto unfolded:overscroll-contain">
         {side === "front" && (
         <div className="p-3">
           {tab === "photo" && (
@@ -3500,10 +3543,11 @@ export default function CardEditor({
               {/* Frame — a decorative border with the team/player name on plates,
                   layered over whichever background is chosen. */}
               <div className="space-y-1.5">
-                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 unfolded:hidden">
                   Frame
                 </h4>
-                <div className="grid grid-cols-3 unfolded:grid-cols-4 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
+                {bgGroupToggle("frame", "Frame")}
+                <div className={`grid grid-cols-3 unfolded:grid-cols-4 ${openBgGroup === "frame" ? "" : "unfolded:hidden"} gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]`}>
                   <button
                     onClick={() => {
                       setFrameId(NO_FRAME);
@@ -3584,10 +3628,11 @@ export default function CardEditor({
                 if (items.length === 0) return null;
                 return (
                   <div key={cat.key} className="space-y-1.5">
-                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 unfolded:hidden">
                       {cat.label}
                     </h4>
-                    <div className="grid grid-cols-3 unfolded:grid-cols-4 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
+                    {bgGroupToggle(cat.key, cat.label)}
+                    <div className={`grid grid-cols-3 unfolded:grid-cols-4 ${openBgGroup === cat.key ? "" : "unfolded:hidden"} gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]`}>
                 {items.map((t) => {
                   const selected = bg.type === "template" && bg.id === t.id;
                   const lightText = t.textColor === "light";
@@ -3992,6 +4037,7 @@ export default function CardEditor({
               </div>
 
               {/* Circulation — limited-edition run size, serialized on the front. */}
+              <div className={moreOpen ? "" : "unfolded:hidden"}>
               <Field label="Cards in circulation (optional)">
                 <input
                   type="number"
@@ -4019,6 +4065,7 @@ export default function CardEditor({
                   </button>
                 )}
               </Field>
+              </div>
             </div>
           )}
         </div>
@@ -4491,16 +4538,19 @@ export default function CardEditor({
           </div>
         )}
       </div>
+      </div>
 
-      {/* Assign / Save — pinned to the bottom on large touch screens, so finishing
-          never means scrolling past every option. */}
+      {/* Assign / Save — one row under the options on large touch screens, so
+          finishing never means scrolling past every option. */}
       <div className="mt-4 space-y-2 unfolded:contents">
-        <div className="space-y-2 unfolded:mt-4 unfolded:sticky unfolded:bottom-0 unfolded:z-[4] unfolded:border-t unfolded:border-gray-200 unfolded:bg-gray-50 unfolded:py-2 unfolded:pb-[calc(0.5rem+env(safe-area-inset-bottom))] unfolded:dark:border-gray-800 unfolded:dark:bg-gray-950">
+        <div className={`space-y-2 unfolded:mt-2 unfolded:grid unfolded:shrink-0 unfolded:gap-2 unfolded:space-y-0 unfolded:pb-[env(safe-area-inset-bottom)] ${
+          allowDrafts ? "unfolded:grid-cols-[auto_1fr_1fr]" : "unfolded:grid-cols-[auto_1fr]"
+        }`}>
         {notice && (
-          <p className="text-sm text-green-600 dark:text-green-400">{notice}</p>
+          <p className="text-sm text-green-600 dark:text-green-400 unfolded:col-span-full">{notice}</p>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 unfolded:contents">
           <button
             onClick={() => router.push(returnHref)}
             className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -4543,7 +4593,7 @@ export default function CardEditor({
           <button
             onClick={handleDownloadCard}
             disabled={!cutoutDataUrl || step === "saving" || downloading}
-            className="w-full unfolded:mt-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 unfolded:hidden"
           >
             {downloading ? "Preparing…" : "⬇︎ Download front & back"}
           </button>

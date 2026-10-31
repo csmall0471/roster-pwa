@@ -212,9 +212,12 @@ body {
   animation: tb-indeterminate 1.1s ease-in-out infinite;
 }
 
-/* Card editor controls on large touch screens: bigger text and touch targets.
+/* Card editor on large touch screens: bigger text and touch targets.
    16px fields also stop iOS zooming the page when one is tapped. */
 @media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px) {
+  /* The editor fills the screen here, so the page behind it must not scroll. */
+  html:has(.card-fullscreen),
+  html:has(.card-fullscreen) body { overflow: hidden; }
   .card-touch .text-xs { font-size: 0.875rem; line-height: 1.25rem; }
   .card-touch .text-\[11px\] { font-size: 0.8125rem; line-height: 1.15rem; }
   .card-touch button.rounded-lg { min-height: 44px; }
