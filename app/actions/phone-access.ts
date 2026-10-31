@@ -5,7 +5,7 @@ import { phoneKey, usPhoneE164 } from "@/lib/phone";
 
 const NOT_RECOGNIZED =
   "We don't recognize that number. Use the phone number your coach has on file, or contact your coach.";
-const CHECK_FAILED = "We couldn't check that number. Please try again.";
+const CHECK_FAILED = "We couldn't check that number. Please refresh the page and try again.";
 const PAGE_SIZE = 1000;
 
 // Runs before a sign-in text goes out: only a parent on file or an invited tool

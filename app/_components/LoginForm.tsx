@@ -21,7 +21,7 @@ export default function LoginForm({ defaultNext }: { defaultNext: string }) {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const access = await checkPhoneAccess(phone).catch(() => ({ error: "We couldn't check that number. Please try again." }));
+    const access = await checkPhoneAccess(phone).catch(() => ({ error: "We couldn't check that number. Please refresh the page and try again." }));
     if (access.error) {
       setLoading(false);
       setError(access.error);

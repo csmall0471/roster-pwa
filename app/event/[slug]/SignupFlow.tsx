@@ -478,7 +478,7 @@ export default function SignupFlow({
   async function sendCode() {
     setAuthError(null);
     setAuthBusy(true);
-    const access = await checkPhoneAccess(phone).catch(() => ({ error: "We couldn't check that number. Please try again." }));
+    const access = await checkPhoneAccess(phone).catch(() => ({ error: "We couldn't check that number. Please refresh the page and try again." }));
     if (access.error) {
       setAuthBusy(false);
       setAuthError(access.error);

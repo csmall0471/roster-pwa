@@ -93,7 +93,7 @@ export async function addToolUser({
   const key = phone.trim() ? phoneKey(phone) : "";
   const cleanEmail = email.trim().toLowerCase() || null;
   if (!key && !cleanEmail) return { error: "Enter a phone number or an email." };
-  if (key && key.length < 10) return { error: "Enter a valid 10-digit phone number." };
+  if (key && key.length !== 10) return { error: "Enter a 10-digit US or Canadian phone number." };
 
   const grant = tools.filter((t) => VALID_TOOLS.has(t));
   if (grant.length === 0) return { error: "Pick at least one tool to grant." };

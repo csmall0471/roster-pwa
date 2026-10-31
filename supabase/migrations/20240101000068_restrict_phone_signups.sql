@@ -20,10 +20,9 @@ BEGIN
     RETURN '{}'::jsonb;
   END IF;
 
-  key := CASE
-    WHEN length(digits) = 11 AND left(digits, 1) = '1' THEN right(digits, 10)
-    WHEN length(digits) = 10 THEN digits
-  END;
+  -- Supabase passes full international digits, so 10 digits is not a US number
+  -- missing its country code: "+6232039378" is Indonesia, not (623) 203-9378.
+  key := CASE WHEN digits ~ '^1[0-9]{10}$' THEN right(digits, 10) END;
 
   IF key IS NOT NULL AND (
     EXISTS (SELECT 1 FROM tool_access WHERE phone_key = key)
