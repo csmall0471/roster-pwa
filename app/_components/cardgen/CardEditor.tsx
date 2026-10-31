@@ -72,7 +72,8 @@ const LOGO_BASE_WIDTH = 0.28;
 const DEFAULT_HEAD_COACH = "Connor Small";
 
 // Must match the `unfolded` variant in globals.css.
-const UNFOLDED_QUERY = "(min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px)";
+const UNFOLDED_QUERY =
+  "(min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px), (min-width: 1024px) and (min-height: 480px) and (pointer: coarse)";
 
 // The 2" sticker export is hidden for now; flip this to bring it back.
 const SHOW_STICKER: boolean = false;
@@ -2617,7 +2618,7 @@ export default function CardEditor({
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
   return (
-    <div className="card-fullscreen w-full max-w-md lg:max-w-none mx-auto overflow-x-hidden lg:overflow-x-visible unfolded:fixed unfolded:inset-0 unfolded:z-40 unfolded:flex unfolded:h-dvh unfolded:max-w-none unfolded:flex-col unfolded:overflow-hidden unfolded:bg-gray-50 unfolded:p-3 unfolded:dark:bg-gray-950">
+    <div className="card-fullscreen w-full max-w-md desktop:max-w-none mx-auto overflow-x-hidden desktop:overflow-x-visible unfolded:fixed unfolded:inset-0 unfolded:z-40 unfolded:flex unfolded:h-dvh unfolded:max-w-none unfolded:flex-col unfolded:overflow-hidden unfolded:bg-gray-50 unfolded:p-3 unfolded:dark:bg-gray-950">
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3 unfolded:mb-2 unfolded:shrink-0">{error}</p>
       )}
@@ -2629,10 +2630,10 @@ export default function CardEditor({
           the right; it stacks back to a single column on phones. The preview
           column grows with the viewport (clamp) up to a cap; the controls cap so
           sliders don't stretch; the pair centers once both maxed out. */}
-      <div className="unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col unfolded:landscape:grid unfolded:landscape:grid-cols-[auto_minmax(0,1fr)] unfolded:landscape:grid-rows-[minmax(0,1fr)] unfolded:landscape:gap-4 lg:grid lg:justify-center lg:gap-8 lg:items-start lg:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
+      <div className="unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col unfolded:landscape:grid unfolded:landscape:grid-cols-[auto_minmax(0,1fr)] unfolded:landscape:grid-rows-[minmax(0,1fr)] unfolded:landscape:gap-4 desktop:grid desktop:justify-center desktop:gap-8 desktop:items-start desktop:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
         {/* Preview column — sticky on desktop so it stays in view while editing. On
             large touch screens the editor fills the screen, so nothing scrolls past it. */}
-        <div className="unfolded:shrink-0 lg:sticky lg:top-16 lg:self-start">
+        <div className="unfolded:shrink-0 desktop:sticky desktop:top-16 desktop:self-start">
       {/* Side toggle */}
       <div className="flex gap-1 mb-3 unfolded:mb-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
         {(["front", "back"] as const).map((s) => (
@@ -3547,7 +3548,7 @@ export default function CardEditor({
                   Frame
                 </h4>
                 {bgGroupToggle("frame", "Frame")}
-                <div className={`grid grid-cols-3 unfolded:grid-cols-4 ${openBgGroup === "frame" ? "" : "unfolded:hidden"} gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]`}>
+                <div className={`grid grid-cols-3 unfolded:grid-cols-4 ${openBgGroup === "frame" ? "" : "unfolded:hidden"} gap-2 desktop:gap-3 desktop:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]`}>
                   <button
                     onClick={() => {
                       setFrameId(NO_FRAME);
@@ -3632,7 +3633,7 @@ export default function CardEditor({
                       {cat.label}
                     </h4>
                     {bgGroupToggle(cat.key, cat.label)}
-                    <div className={`grid grid-cols-3 unfolded:grid-cols-4 ${openBgGroup === cat.key ? "" : "unfolded:hidden"} gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]`}>
+                    <div className={`grid grid-cols-3 unfolded:grid-cols-4 ${openBgGroup === cat.key ? "" : "unfolded:hidden"} gap-2 desktop:gap-3 desktop:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]`}>
                 {items.map((t) => {
                   const selected = bg.type === "template" && bg.id === t.id;
                   const lightText = t.textColor === "light";

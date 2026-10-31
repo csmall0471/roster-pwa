@@ -6,9 +6,20 @@
    toggle on top. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Large touch screens: the iPhone Duo unfolded (and iPads), but not desktops, the
-   folded Duo, or a regular phone turned sideways (too short). */
-@custom-variant unfolded (@media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px));
+/* Large touch screens: the iPhone Duo unfolded and every iPad in either direction,
+   but not desktops, the folded Duo, or a regular phone turned sideways (too short).
+   Width alone can't separate a large iPad from a desktop, so above 1024px it takes
+   a touch screen. Keep in sync with UNFOLDED_QUERY in CardEditor.tsx. */
+@custom-variant unfolded {
+  @media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px),
+    (min-width: 1024px) and (min-height: 480px) and (pointer: coarse) {
+    @slot;
+  }
+}
+
+/* The side-by-side desktop editor. `lg:` would also match a large iPad, where its
+   rules leak into the `unfolded` layout. */
+@custom-variant desktop (@media (min-width: 1024px) and (pointer: fine));
 
 :root {
   --background: #ffffff;
@@ -214,7 +225,8 @@ body {
 
 /* Card editor on large touch screens: bigger text and touch targets.
    16px fields also stop iOS zooming the page when one is tapped. */
-@media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px) {
+@media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px),
+  (min-width: 1024px) and (min-height: 480px) and (pointer: coarse) {
   /* The editor fills the screen here, so the page behind it must not scroll. */
   html:has(.card-fullscreen),
   html:has(.card-fullscreen) body { overflow: hidden; }
