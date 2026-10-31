@@ -154,6 +154,12 @@ export default function TeamCards({
         >
           Upload cards →
         </Link>
+        <Link
+          href={`/tools/card-creator/bulk?team=${teamId}`}
+          className="mt-2 block text-sm text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          Upload photos as drafts →
+        </Link>
       </div>
     );
   }
@@ -162,7 +168,7 @@ export default function TeamCards({
 
   return (
     <>
-      <div className="mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
         <button
           onClick={handleSaveAll}
           disabled={saving}
@@ -172,6 +178,12 @@ export default function TeamCards({
             ? "Saving…"
             : `↓ Save all ${photos.length} card${photos.length !== 1 ? "s" : ""}${hasBacks ? " (front & back)" : ""}`}
         </button>
+        <Link
+          href={`/tools/card-creator/bulk?team=${teamId}`}
+          className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          Upload photos as drafts →
+        </Link>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {photos.map((photo) => (

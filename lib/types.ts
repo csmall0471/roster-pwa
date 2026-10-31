@@ -177,6 +177,9 @@ export interface CardLogo {
 
 export interface CardDesign {
   cutout_url: string;
+  // Raw photo on a draft saved from the bulk upload, before any design work.
+  // cutout_url stays "" until the editor removes this photo's background.
+  source_photo_url?: string | null;
   sport?: CardSport;
   // Card shape. Absent = portrait (2.5×3.5, the original). Landscape is 3.5×2.5.
   orientation?: CardOrientation;

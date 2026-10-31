@@ -34,6 +34,7 @@ export type ActivityEvent =
   | "card_signature_added"
   | "card_headshot_added"
   | "card_draft_saved"
+  | "card_drafts_bulk_created"
   | "card_bg_options_exported"
   | "card_serials_exported"
   | "card_flipped"

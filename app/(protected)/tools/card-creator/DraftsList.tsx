@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { track } from "@vercel/analytics";
 import { deleteCardDraft } from "./draft-actions";
@@ -17,6 +17,8 @@ export type DraftRow = {
   updated_at: string;
   // Set when the draft is earmarked for a kid (still off their profile).
   player_name?: string | null;
+  // Raw photo on a draft from the bulk upload; front_url is null until designed.
+  source_photo_url?: string | null;
 };
 
 function draftFileName(d: DraftRow, side: "front" | "back") {
@@ -45,9 +47,21 @@ export default function DraftsList({
     startNav(() => router.push(`/tools/card-creator?draft=${id}`));
   }
 
+  // The route's loading screen uses up the browser's #drafts scroll before this
+  // list has streamed in, so "View drafts" scrolls from here.
+  useEffect(() => {
+    if (window.location.hash === "#drafts") {
+      document.getElementById("drafts")?.scrollIntoView();
+    }
+  }, []);
+
   if (drafts.length === 0) return null;
 
-  const allSelected = selected.size === drafts.length;
+  // Photo-only drafts have no rendered card to download yet.
+  const selectable = drafts.filter((d) => d.front_url);
+  // Derived so a deleted or published draft can't linger in the count.
+  const selectedRows = selectable.filter((d) => selected.has(d.id));
+  const allSelected = selectable.length > 0 && selectedRows.length === selectable.length;
 
   function remove(id: string) {
     start(async () => {
@@ -67,16 +81,16 @@ export default function DraftsList({
   }
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(drafts.map((d) => d.id)));
+    setSelected(allSelected ? new Set() : new Set(selectable.map((d) => d.id)));
   }
 
   // Save each selected draft's front (and back when present) to the device —
   // share sheet on phones (Save to Photos/Files), sequential downloads on desktop.
   async function downloadSelected() {
-    if (saving || selected.size === 0) return;
+    if (saving || selectedRows.length === 0) return;
     setSaving(true);
     try {
-      const chosen = drafts.filter((d) => selected.has(d.id));
+      const chosen = selectedRows;
       const files: File[] = [];
       for (const d of chosen) {
         if (d.front_url) files.push(await fetchCardForPrint(d.front_url, draftFileName(d, "front")));
@@ -115,19 +129,20 @@ export default function DraftsList({
         <div className="flex items-center gap-3">
           <button
             onClick={toggleAll}
-            className="text-xs text-gray-500 dark:text-gray-400 hover:underline"
+            disabled={selectable.length === 0}
+            className="text-xs text-gray-500 dark:text-gray-400 hover:underline disabled:opacity-40 disabled:no-underline"
           >
             {allSelected ? "Clear" : "Select all"}
           </button>
           <button
             onClick={downloadSelected}
-            disabled={saving || selected.size === 0}
+            disabled={saving || selectedRows.length === 0}
             className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-40 disabled:no-underline"
           >
             {saving
               ? "Saving…"
-              : selected.size
-                ? `↓ Download ${selected.size} (front & back)`
+              : selectedRows.length
+                ? `↓ Download ${selectedRows.length} (front & back)`
                 : "↓ Download selected"}
           </button>
         </div>
@@ -144,6 +159,7 @@ export default function DraftsList({
                   : "border-gray-200 dark:border-gray-800"
             }`}
           >
+            {d.front_url && (
             <button
               type="button"
               onClick={() => toggle(d.id)}
@@ -157,6 +173,7 @@ export default function DraftsList({
             >
               ✓
             </button>
+            )}
             <Link
               href={`/tools/card-creator?draft=${d.id}`}
               onClick={(e) => {
@@ -166,11 +183,12 @@ export default function DraftsList({
               className="block"
             >
               <div className="relative">
-                {d.front_url ? (
+                {d.front_url || d.source_photo_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={d.front_url}
+                    src={d.front_url ?? d.source_photo_url ?? ""}
                     alt=""
+                    loading="lazy"
                     className="w-full aspect-[5/7] object-cover rounded-lg bg-gray-100 dark:bg-gray-800"
                   />
                 ) : (
@@ -179,6 +197,11 @@ export default function DraftsList({
                 {d.player_name && (
                   <span className="absolute top-1.5 left-1.5 max-w-[85%] truncate rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                     For {d.player_name}
+                  </span>
+                )}
+                {!d.front_url && d.source_photo_url && (
+                  <span className="absolute bottom-1.5 left-1.5 rounded-full bg-gray-900/80 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    Photo only · tap to design
                   </span>
                 )}
               </div>

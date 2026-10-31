@@ -25,7 +25,9 @@ export default async function DraftsSection({ activeId }: { activeId: string | n
   // applied yet, so existing drafts still show.
   const rich = await supabase
     .from("card_drafts")
-    .select("id, label, team_name, season, front_url, back_url, updated_at, player_id")
+    .select(
+      "id, label, team_name, season, front_url, back_url, updated_at, player_id, source_photo_url:card_design->>source_photo_url"
+    )
     .order("updated_at", { ascending: false });
   const rows = rich.error
     ? (

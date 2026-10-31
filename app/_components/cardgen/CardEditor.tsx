@@ -21,7 +21,11 @@ import {
   type DuoLookalikeOption,
 } from "@/app/actions/cardgen";
 import { savePlayerPhoto, saveCardForPlayers } from "@/app/(protected)/players/photo-actions";
-import { saveCardDraft, deleteCardDraft } from "@/app/(protected)/tools/card-creator/draft-actions";
+import {
+  saveCardDraft,
+  deleteCardDraft,
+  attachDraftCutout,
+} from "@/app/(protected)/tools/card-creator/draft-actions";
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplate, type Template } from "./templates";
 import {
   FRAMES,
@@ -52,6 +56,7 @@ import {
 } from "./card-raster";
 import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign, CardSubject, CardOrientation } from "@/lib/types";
+import { normalizePhotoForUpload } from "./photo-normalize";
 
 // Signature width on the sticker, as a fraction of the sticker's width, at
 // scale 1 (the resize slider multiplies it). Shared by the preview + export.
@@ -175,42 +180,6 @@ function formatHeight(raw: string): string {
 function fileExt(name: string) {
   const parts = name.split(".");
   return parts.length > 1 ? parts.pop()!.toLowerCase() : "jpg";
-}
-
-// iPhone photos arrive with EXIF "rotate 90°" tags that downstream image
-// processors (like the Replicate bg-removal model) ignore — so the cutout
-// comes back sideways. Decode through createImageBitmap with from-image,
-// downscale, and re-encode as JPEG so the bytes themselves are upright.
-async function normalizePhotoForUpload(
-  file: File,
-  maxDim = 1600
-): Promise<Blob> {
-  const bitmap = await createImageBitmap(file, {
-    imageOrientation: "from-image",
-  });
-  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
-  const w = Math.max(1, Math.round(bitmap.width * scale));
-  const h = Math.max(1, Math.round(bitmap.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    bitmap.close();
-    throw new Error("Canvas not supported in this browser");
-  }
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (b) =>
-        b
-          ? resolve(b)
-          : reject(new Error("Could not encode photo — try JPEG or PNG")),
-      "image/jpeg",
-      0.92
-    );
-  });
 }
 
 // Mirror a remote image URL into a data URL (returns an effect cleanup). When
@@ -505,7 +474,7 @@ export default function CardEditor({
   initialPhotoId,
   audience = "admin",
   standalone = false,
-  assignTargets = [],
+  assignTargets: assignTargetsProp = [],
   allowDrafts = false,
   draftId,
   initialAssignKey,
@@ -535,8 +504,13 @@ export default function CardEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A draft saved from the bulk photo upload holds the raw photo but no cutout
+  // yet: its background gets removed the first time the draft is opened.
+  const pendingSourcePhoto = initialDesign?.cutout_url
+    ? null
+    : initialDesign?.source_photo_url ?? null;
   const [step, setStep] = useState<Step>(
-    initialDesign?.cutout_url ? "edit" : "upload"
+    initialDesign?.cutout_url ? "edit" : pendingSourcePhoto ? "processing" : "upload"
   );
   const [error, setError] = useState<string | null>(null);
   // Standalone assign-to-player: which player to attach to ("" = export only),
@@ -545,6 +519,15 @@ export default function CardEditor({
   // here — the design is already loaded from initialDesign, so we only want the
   // dropdown selected, not the fields overwritten.
   const [assignTargetKey, setAssignTargetKey] = useState(initialAssignKey ?? "");
+  // An out-of-season draft's player is only offered while the draft row exists.
+  // Keep them once publishing deletes it, so a second save still has a target.
+  const [earmarkTarget] = useState(() =>
+    assignTargetsProp.find((t) => t.key === initialAssignKey)
+  );
+  const assignTargets =
+    earmarkTarget && !assignTargetsProp.some((t) => t.key === earmarkTarget.key)
+      ? [...assignTargetsProp, earmarkTarget]
+      : assignTargetsProp;
   const [notice, setNotice] = useState<string | null>(null);
   // The full-res photo the user just picked/took, kept so they can save it back
   // to their device before we downscale it for background removal. Null when the
@@ -1296,6 +1279,34 @@ export default function CardEditor({
     return result.cutoutUrl!;
   }
 
+  async function cutoutFromSourcePhoto(sourceUrl: string) {
+    const result = await removeBackground(sourceUrl).catch((e: unknown) => ({
+      error: e instanceof Error ? e.message : String(e),
+      cutoutUrl: undefined,
+    }));
+    if (result.error || !result.cutoutUrl) {
+      track("card_bg_removal_failed", { error: result.error ?? "no cutout" });
+      logClientActivity("card_bg_removal_failed", { error: result.error }).catch(() => {});
+      setError(result.error ?? "Background removal failed");
+      setStep("upload");
+      return;
+    }
+    logClientActivity("card_bg_removed").catch(() => {});
+    setCutoutUrl(result.cutoutUrl);
+    setStep("edit");
+    // Keep the cutout on the draft so reopening doesn't pay for removal again.
+    if (draftId) attachDraftCutout(draftId, result.cutoutUrl).catch(() => {});
+  }
+
+  const sourcePhotoStarted = useRef(false);
+  useEffect(() => {
+    if (!pendingSourcePhoto || sourcePhotoStarted.current) return;
+    sourcePhotoStarted.current = true;
+    void cutoutFromSourcePhoto(pendingSourcePhoto);
+    // Mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handlePhotoSelected(file: File) {
     setStep("processing");
     setError(null);
@@ -1304,6 +1315,7 @@ export default function CardEditor({
     setOriginalPhoto(file);
     try {
       const cutout = await photoToCutout(file);
+      setCutoutDataUrl(null);
       setCutoutUrl(cutout);
       setTx(0);
       setTy(0);
@@ -1928,7 +1940,7 @@ export default function CardEditor({
   // circle by the hidden sticker stage. Share sheet on phones, download on desktop.
   async function handleDownloadSticker() {
     if (!stickerStageRef.current || !stickerBgRef.current || !stickerOverlayRef.current) return;
-    if (!cutoutUrl || stickerBusy) return;
+    if (!cutoutDataUrl || stickerBusy) return;
     setStickerBusy(true);
     setError(null);
     setNotice(null);
@@ -2019,7 +2031,7 @@ export default function CardEditor({
   // (flushSync so the DOM is committed before we snapshot); a covering overlay
   // hides the flicker while it runs.
   async function exportAllBackgrounds() {
-    if (!stageRef.current || !cutoutUrl || exportingAll) return;
+    if (!stageRef.current || !cutoutDataUrl || exportingAll) return;
     const originalBg = bg;
     setExportingAll(true);
     setExportProgress(0);
@@ -2099,7 +2111,7 @@ export default function CardEditor({
     const total = Math.floor(Number(circulation));
     if (
       !stageRef.current ||
-      !cutoutUrl ||
+      !cutoutDataUrl ||
       exportingSerials ||
       !circulation.trim() ||
       !Number.isFinite(total) ||
@@ -2513,6 +2525,19 @@ export default function CardEditor({
       <div className="max-w-md mx-auto overflow-x-hidden">
         {error && (
           <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
+        )}
+        {pendingSourcePhoto && (
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setStep("processing");
+              void cutoutFromSourcePhoto(pendingSourcePhoto);
+            }}
+            className="mb-3 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            Try the saved photo again
+          </button>
         )}
         <div
           onClick={() => fileRef.current?.click()}
@@ -3672,7 +3697,7 @@ export default function CardEditor({
                 <div className="space-y-1">
                   <button
                     onClick={exportAllBackgrounds}
-                    disabled={exportingAll}
+                    disabled={exportingAll || !cutoutDataUrl}
                     className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
                   >
                     {exportingAll
@@ -3960,7 +3985,7 @@ export default function CardEditor({
                 {circulation.trim() && Number.isFinite(Number(circulation)) && Number(circulation) >= 1 && (
                   <button
                     onClick={exportSerializedSet}
-                    disabled={exportingSerials}
+                    disabled={exportingSerials || !cutoutDataUrl}
                     className="mt-2 w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
                   >
                     {exportingSerials
@@ -4457,7 +4482,7 @@ export default function CardEditor({
           </button>
           <button
             onClick={() => handleSave(standalone ? assignTargetKey || undefined : undefined)}
-            disabled={!cutoutUrl || step === "saving" || downloading}
+            disabled={!cutoutDataUrl || step === "saving" || downloading}
             className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {step === "saving"
@@ -4475,7 +4500,7 @@ export default function CardEditor({
         {!isParent && (
           <button
             onClick={handleDownloadCard}
-            disabled={!cutoutUrl || step === "saving" || downloading}
+            disabled={!cutoutDataUrl || step === "saving" || downloading}
             className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
           >
             {downloading ? "Preparing…" : "⬇︎ Download front & back"}
@@ -4794,7 +4819,7 @@ export default function CardEditor({
 
           <button
             onClick={handleDownloadSticker}
-            disabled={!cutoutUrl || stickerBusy}
+            disabled={!cutoutDataUrl || stickerBusy}
             className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
           >
             {stickerBusy ? "Preparing…" : '⬇︎ Export 2" sticker'}
@@ -4805,7 +4830,7 @@ export default function CardEditor({
         {allowDrafts && (
           <button
             onClick={handleSaveDraft}
-            disabled={!cutoutUrl || step === "saving" || downloading}
+            disabled={!cutoutDataUrl || step === "saving" || downloading}
             className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
           >
             {draftId

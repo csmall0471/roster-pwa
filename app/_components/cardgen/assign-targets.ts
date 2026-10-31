@@ -28,7 +28,7 @@ type RosterRow = {
   } | null;
 };
 
-function ageFromDob(dob: string | null): string {
+export function ageFromDob(dob: string | null): string {
   if (!dob) return "";
   const birth = new Date(dob + "T00:00:00");
   const today = new Date();
