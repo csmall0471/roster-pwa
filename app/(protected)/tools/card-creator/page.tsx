@@ -75,7 +75,7 @@ export default async function CardCreatorPage({
   }
 
   return (
-    <div className="max-w-2xl lg:max-w-none">
+    <div className="max-w-2xl unfolded:max-w-none lg:max-w-none">
       <Link href="/teams" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
         ← Back
       </Link>
@@ -98,9 +98,11 @@ export default async function CardCreatorPage({
 
       {/* Streamed so the editor paints immediately (its own query can be heavy). */}
       {isOwner && (
-        <Suspense fallback={null}>
-          <SeasonCardsSection />
-        </Suspense>
+        <div className="unfolded:hidden">
+          <Suspense fallback={null}>
+            <SeasonCardsSection />
+          </Suspense>
+        </div>
       )}
 
       <CardEditor

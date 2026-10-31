@@ -6,6 +6,10 @@
    toggle on top. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Large touch screens: the iPhone Duo unfolded (and iPads), but not desktops, the
+   folded Duo, or a regular phone turned sideways (too short). */
+@custom-variant unfolded (@media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -207,3 +211,16 @@ body {
   border-radius: 9999px;
   animation: tb-indeterminate 1.1s ease-in-out infinite;
 }
+
+/* Card editor controls on large touch screens: bigger text and touch targets.
+   16px fields also stop iOS zooming the page when one is tapped. */
+@media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px) {
+  .card-touch .text-xs { font-size: 0.875rem; line-height: 1.25rem; }
+  .card-touch .text-\[11px\] { font-size: 0.8125rem; line-height: 1.15rem; }
+  .card-touch button.rounded-lg { min-height: 44px; }
+  .card-touch input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"]),
+  .card-touch select,
+  .card-touch textarea { font-size: 1rem; min-height: 44px; }
+  .card-touch input[type="range"] { height: 44px; }
+}
+

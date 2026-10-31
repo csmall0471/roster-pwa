@@ -71,6 +71,9 @@ const LOGO_BASE_WIDTH = 0.28;
 // saved value; clear the field on the card to drop it.
 const DEFAULT_HEAD_COACH = "Connor Small";
 
+// The 2" sticker export is hidden for now; flip this to bring it back.
+const SHOW_STICKER: boolean = false;
+
 // ── Types ────────────────────────────────────────────────────
 
 type Step = "upload" | "processing" | "edit" | "saving" | "saved";
@@ -534,6 +537,9 @@ export default function CardEditor({
   // editor is reopened on a saved design (we never had the original file).
   const [originalPhoto, setOriginalPhoto] = useState<File | null>(null);
   const [savingOriginal, setSavingOriginal] = useState(false);
+  // Sport, shape and group-card tools start tucked away on large touch screens,
+  // so kids editing their own card see only what they need.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [uploadingBg, setUploadingBg] = useState(false);
   // Save failure (network stall / timeout / server error). When set, a blocking
@@ -2582,7 +2588,7 @@ export default function CardEditor({
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
   return (
-    <div className="w-full max-w-md lg:max-w-none mx-auto overflow-x-hidden lg:overflow-x-visible">
+    <div className="w-full max-w-md unfolded:max-w-none lg:max-w-none mx-auto overflow-x-hidden unfolded:overflow-x-visible lg:overflow-x-visible">
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
       )}
@@ -2594,11 +2600,12 @@ export default function CardEditor({
           the right; it stacks back to a single column on phones. The preview
           column grows with the viewport (clamp) up to a cap; the controls cap so
           sliders don't stretch; the pair centers once both maxed out. */}
-      <div className="lg:grid lg:justify-center lg:gap-8 lg:items-start lg:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
-        {/* Preview column — sticky on desktop so it stays in view while editing. */}
-        <div className="lg:sticky lg:top-16 lg:self-start">
+      <div className="unfolded:landscape:grid unfolded:landscape:grid-cols-[auto_minmax(0,1fr)] unfolded:landscape:gap-6 unfolded:landscape:items-start lg:grid lg:justify-center lg:gap-8 lg:items-start lg:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
+        {/* Preview column — sticky on desktop and large touch screens so the card
+            stays in view while editing. */}
+        <div className="unfolded:sticky unfolded:top-14 unfolded:z-[5] unfolded:self-start unfolded:bg-gray-50 unfolded:py-2 unfolded:dark:bg-gray-950 lg:sticky lg:top-16 lg:self-start">
       {/* Side toggle */}
-      <div className="flex gap-1 mb-3 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+      <div className="flex gap-1 mb-3 unfolded:mb-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
         {(["front", "back"] as const).map((s) => (
           <button
             key={s}
@@ -2609,7 +2616,7 @@ export default function CardEditor({
                 logClientActivity("card_side_switched", { side: s }).catch(() => {});
               }
             }}
-            className={`flex-1 py-1.5 text-xs font-semibold uppercase tracking-wide rounded-md transition-colors ${
+            className={`flex-1 py-1.5 unfolded:py-2.5 text-xs unfolded:text-sm font-semibold uppercase tracking-wide rounded-md transition-colors ${
               side === s
                 ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm"
                 : "text-gray-500 dark:text-gray-400"
@@ -2623,7 +2630,14 @@ export default function CardEditor({
       {/* Stage container — both sides rendered; inactive is offscreen but
           rasterizable. overflow-hidden contains the offscreen stage so the page
           can't scroll sideways. scroll-mt offsets the sticky header on auto-scroll. */}
-      <div ref={stageWrapRef} className="relative w-full overflow-hidden scroll-mt-20">
+      <div
+        ref={stageWrapRef}
+        className={`relative w-full overflow-hidden scroll-mt-20 mx-auto ${
+          landscape
+            ? "unfolded:portrait:w-[min(100%,calc(40dvh*7/5))] unfolded:landscape:w-[min(46vw,calc((100dvh-9rem)*7/5))]"
+            : "unfolded:portrait:w-[calc(40dvh*5/7)] unfolded:landscape:w-[calc((100dvh-9rem)*5/7)]"
+        }`}
+      >
         {/* Back stage (offscreen when not active). Relative when active so the
             back-logo overlay can position over the card. */}
         <div
@@ -3057,7 +3071,16 @@ export default function CardEditor({
         {/* end preview column */}
 
         {/* Controls column */}
-        <div className="min-w-0">
+        <div className="card-touch min-w-0">
+      <button
+        type="button"
+        onClick={() => setMoreOpen((open) => !open)}
+        aria-expanded={moreOpen}
+        className="mt-2 hidden w-full rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-left text-sm font-medium text-gray-600 dark:text-gray-300 unfolded:block"
+      >
+        {moreOpen ? "▾" : "▸"} Card options: sport, shape, add a teammate
+      </button>
+      <div className={moreOpen || isDuo ? "" : "unfolded:hidden"}>
       {/* Sport — governs backgrounds, positions, the questionnaire wording, and
           the "plays like" match for the whole card. */}
       <div className="mt-4 flex items-center gap-2">
@@ -3279,6 +3302,8 @@ export default function CardEditor({
       </div>
       )}
 
+      </div>
+
       {/* Toolbar — different content for front vs back. */}
       <div className="mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
         {side === "front" && (
@@ -3287,7 +3312,7 @@ export default function CardEditor({
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
+              className={`flex-1 px-3 py-2 unfolded:py-3 text-xs font-semibold uppercase tracking-wide transition-colors ${
                 tab === t
                   ? "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
                   : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -4467,8 +4492,10 @@ export default function CardEditor({
         )}
       </div>
 
-      {/* Assign / Save */}
+      {/* Assign / Save — pinned to the bottom on large touch screens, so finishing
+          never means scrolling past every option. */}
       <div className="mt-4 space-y-2">
+        <div className="space-y-2 unfolded:sticky unfolded:bottom-0 unfolded:z-[4] unfolded:border-t unfolded:border-gray-200 unfolded:bg-gray-50 unfolded:py-2 unfolded:pb-[calc(0.5rem+env(safe-area-inset-bottom))] unfolded:dark:border-gray-800 unfolded:dark:bg-gray-950">
         {notice && (
           <p className="text-sm text-green-600 dark:text-green-400">{notice}</p>
         )}
@@ -4497,6 +4524,21 @@ export default function CardEditor({
           </button>
         </div>
 
+        {allowDrafts && (
+          <button
+            onClick={handleSaveDraft}
+            disabled={!cutoutDataUrl || step === "saving" || downloading}
+            className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
+          >
+            {draftId
+              ? "💾 Update draft"
+              : assignTargetKey
+                ? `💾 Save as draft for ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
+                : "💾 Save as draft (no player yet)"}
+          </button>
+        )}
+        </div>
+
         {!isParent && (
           <button
             onClick={handleDownloadCard}
@@ -4512,7 +4554,7 @@ export default function CardEditor({
             square with bleed at 350 DPI; the printer cuts the 2" circle out. The
             preview's corners show what the die-cut removes. Single-subject only,
             so it's hidden on group (duo/trio) cards. Coach-only tool. */}
-        {!isDuo && !isParent && (
+        {SHOW_STICKER && !isDuo && !isParent && (
         <div className="w-full space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
@@ -4825,20 +4867,6 @@ export default function CardEditor({
             {stickerBusy ? "Preparing…" : '⬇︎ Export 2" sticker'}
           </button>
         </div>
-        )}
-
-        {allowDrafts && (
-          <button
-            onClick={handleSaveDraft}
-            disabled={!cutoutDataUrl || step === "saving" || downloading}
-            className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
-          >
-            {draftId
-              ? "💾 Update draft"
-              : assignTargetKey
-                ? `💾 Save as draft for ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
-                : "💾 Save as draft (no player yet)"}
-          </button>
         )}
       </div>
         </div>
