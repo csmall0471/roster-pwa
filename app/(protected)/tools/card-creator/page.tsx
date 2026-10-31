@@ -80,7 +80,7 @@ export default async function CardCreatorPage({
         ← Back
       </Link>
 
-      <div className="mt-3 mb-5 lg:max-w-2xl">
+      <div className={`mt-3 mb-5 lg:max-w-2xl ${draftId ? "unfolded:hidden" : ""}`}>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Card Creator</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
           Build a player card from any photo, then save it to your photos, assign it to a player

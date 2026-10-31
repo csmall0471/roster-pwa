@@ -3503,7 +3503,7 @@ export default function CardEditor({
                 <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                   Frame
                 </h4>
-                <div className="grid grid-cols-3 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
+                <div className="grid grid-cols-3 unfolded:grid-cols-4 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
                   <button
                     onClick={() => {
                       setFrameId(NO_FRAME);
@@ -3587,7 +3587,7 @@ export default function CardEditor({
                     <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                       {cat.label}
                     </h4>
-                    <div className="grid grid-cols-3 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
+                    <div className="grid grid-cols-3 unfolded:grid-cols-4 gap-2 lg:gap-3 lg:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
                 {items.map((t) => {
                   const selected = bg.type === "template" && bg.id === t.id;
                   const lightText = t.textColor === "light";
@@ -4494,8 +4494,8 @@ export default function CardEditor({
 
       {/* Assign / Save — pinned to the bottom on large touch screens, so finishing
           never means scrolling past every option. */}
-      <div className="mt-4 space-y-2">
-        <div className="space-y-2 unfolded:sticky unfolded:bottom-0 unfolded:z-[4] unfolded:border-t unfolded:border-gray-200 unfolded:bg-gray-50 unfolded:py-2 unfolded:pb-[calc(0.5rem+env(safe-area-inset-bottom))] unfolded:dark:border-gray-800 unfolded:dark:bg-gray-950">
+      <div className="mt-4 space-y-2 unfolded:contents">
+        <div className="space-y-2 unfolded:mt-4 unfolded:sticky unfolded:bottom-0 unfolded:z-[4] unfolded:border-t unfolded:border-gray-200 unfolded:bg-gray-50 unfolded:py-2 unfolded:pb-[calc(0.5rem+env(safe-area-inset-bottom))] unfolded:dark:border-gray-800 unfolded:dark:bg-gray-950">
         {notice && (
           <p className="text-sm text-green-600 dark:text-green-400">{notice}</p>
         )}
@@ -4543,7 +4543,7 @@ export default function CardEditor({
           <button
             onClick={handleDownloadCard}
             disabled={!cutoutDataUrl || step === "saving" || downloading}
-            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            className="w-full unfolded:mt-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
           >
             {downloading ? "Preparing…" : "⬇︎ Download front & back"}
           </button>
