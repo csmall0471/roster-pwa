@@ -8,6 +8,7 @@ import {
   hasFullAddress,
   mainParent,
   recipientFor,
+  senderContactReady,
   settingsReady,
   zip5,
   type NameOnLabel,
@@ -140,7 +141,9 @@ export default function ShipCards(props: {
     : !shippoReady
       ? "Add SHIPPO_API_KEY to the app's environment to connect Shippo."
       : !settingsReady(settings)
-        ? "Add your return address to get prices."
+        ? settings.from_street1.trim()
+          ? "Add your phone and email to the return address. USPS needs both to sell a label."
+          : "Add your return address to get prices."
         : null;
 
   // Kids in the current selection who share a mailing address (siblings).
@@ -879,6 +882,8 @@ function SettingsPanel({
     setDraft(res.settings);
     onSaved(res.settings);
     if (settingsReady(res.settings)) setOpen(false);
+    else if (!senderContactReady(res.settings)) setErr("Saved. Add a 10-digit phone number and an email; USPS needs both.");
+    else setErr("Saved. Fill in the rest of the return address and the box size.");
   }
 
   const fromLine = [
@@ -894,7 +899,7 @@ function SettingsPanel({
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3">
         <div className="min-w-0 text-sm">
           <p className="text-gray-900 dark:text-white">
-            <span className="font-medium">From:</span> {ready ? fromLine : "No return address yet"}
+            <span className="font-medium">From:</span> {fromLine || "No return address yet"}
           </p>
           <p className="text-gray-500 dark:text-gray-400">
             {settings.length_in}×{settings.width_in}×{settings.height_in} in · {settings.weight_oz} oz ·{" "}
@@ -958,9 +963,10 @@ function SettingsPanel({
         <div className="sm:col-span-3">{field("from_city", "City", { autoComplete: "address-level2" })}</div>
         <div className="sm:col-span-1">{field("from_state", "State", { autoComplete: "address-level1", maxLength: 20 })}</div>
         <div className="sm:col-span-2">{field("from_zip", "ZIP", { autoComplete: "postal-code", inputMode: "numeric" })}</div>
-        <div className="sm:col-span-3">{field("from_phone", "Phone (optional)", { autoComplete: "tel", inputMode: "tel" })}</div>
-        <div className="sm:col-span-3">{field("from_email", "Email (optional)", { autoComplete: "email", type: "email" })}</div>
+        <div className="sm:col-span-3">{field("from_phone", "Phone", { autoComplete: "tel", inputMode: "tel", type: "tel" })}</div>
+        <div className="sm:col-span-3">{field("from_email", "Email", { autoComplete: "email", type: "email" })}</div>
       </div>
+      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">USPS needs your phone and email to sell a label.</p>
 
       <h2 className="mt-6 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Box</h2>
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1054,7 +1060,7 @@ function BatchResult({
       {batch.failed.length > 0 && (
         <div className="mt-4">
           <p className="text-sm font-medium text-red-700 dark:text-red-300">
-            {batch.failed.length} didn&apos;t go through:
+            {`${batch.failed.length} didn't go through:`}
           </p>
           <ul className="mt-1 space-y-1 text-sm text-gray-700 dark:text-gray-300">
             {batch.failed.map((f, i) => (

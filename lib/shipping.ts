@@ -130,6 +130,11 @@ export function hasFullAddress(p: Pick<ShipPlayer, "street" | "city" | "state" |
   return !!(p.street?.trim() && p.city?.trim() && stateCode(p.state).length === 2 && zip5(p.zip));
 }
 
+// USPS refuses a label unless the sender has a phone and an email.
+export function senderContactReady(s: Pick<ShippingSettings, "from_phone" | "from_email">): boolean {
+  return (s.from_phone.match(/\d/g) ?? []).length >= 10 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.from_email.trim());
+}
+
 export function settingsReady(s: ShippingSettings): boolean {
   return !!(
     s.from_name.trim() &&
@@ -137,6 +142,7 @@ export function settingsReady(s: ShippingSettings): boolean {
     s.from_city.trim() &&
     stateCode(s.from_state).length === 2 &&
     zip5(s.from_zip) &&
+    senderContactReady(s) &&
     s.weight_oz > 0 &&
     s.length_in > 0 &&
     s.width_in > 0 &&
