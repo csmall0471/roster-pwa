@@ -8,6 +8,7 @@ import TeamMedia from "./_components/TeamMedia";
 import TeamPhotoBanner from "./_components/TeamPhotoBanner";
 import ScheduleTab, { type GameRow } from "./_components/ScheduleTab";
 import SeasonTab from "./_components/SeasonTab";
+import { canShip } from "./ship/data";
 
 function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
@@ -57,6 +58,9 @@ export default async function TeamDetailPage({
   const { id } = await params;
   const tab = (await searchParams).tab ?? "roster";
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const [{ data: team }, { data: roster }] = await Promise.all([
     supabase.from("teams").select("*").eq("id", id).single(),
@@ -208,6 +212,14 @@ export default async function TeamDetailPage({
             >
               Join on Mojo →
             </a>
+          )}
+          {canShip(user) && (
+            <Link
+              href={`/teams/${id}/ship`}
+              className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              Ship cards
+            </Link>
           )}
           <Link
             href={`/teams/${id}/edit`}
