@@ -1,4 +1,5 @@
 import { forwardRef, type CSSProperties } from "react";
+import type { TeamPalette } from "./front-designs/shared";
 import type { CardSport } from "@/lib/types";
 import { abbreviatePositionFor, getSport } from "./sports";
 
@@ -19,6 +20,8 @@ export type BackStats = {
 };
 
 type Props = {
+  // Team colors picked on the front (header chips). Absent = white/black.
+  teamPalette?: TeamPalette;
   bgStyle: CSSProperties;
   sport?: CardSport;
   landscape?: boolean;
@@ -46,6 +49,7 @@ type Props = {
 const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
   {
     bgStyle,
+    teamPalette,
     sport,
     landscape,
     teamText,
@@ -94,8 +98,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
       >
         <div
           style={{
-            background: "#fff",
-            color: "#0a0a0a",
+            background: teamPalette?.background ?? "#fff",
+            color: teamPalette?.color ?? "#0a0a0a",
             padding: "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
             clipPath: "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
             fontFamily: "var(--font-anton), Impact, sans-serif",
@@ -110,8 +114,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
         {(ageText || seasonText) && (
           <div
             style={{
-              background: "#0a0a0a",
-              color: "#fff",
+              background: teamPalette?.subBackground ?? "#0a0a0a",
+              color: teamPalette?.subColor ?? "#fff",
               padding: "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
               clipPath: "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
               fontFamily: "var(--font-geist-sans), system-ui, sans-serif",

@@ -4,6 +4,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useId,
   type CSSProperties,
 } from "react";
 import { flushSync } from "react-dom";
@@ -43,15 +44,20 @@ import { MAX_EXTRA, DEFAULT_DUO_QUESTIONS, joinNames } from "./card-duo";
 import { compositeFrontCanvas } from "./card-raster";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
 import {
-  TeamPlate,
-  TEAM_STYLES,
-  TEAM_COLORS,
-  DEFAULT_TEAM_STYLE,
-  AUTO_TEAM_COLORS,
+  FrontDesignLayer,
+  FRONT_DESIGNS,
+  DEFAULT_FRONT_DESIGN,
+  circulationPosition,
   resolveTeamPalette,
+  legacyTeamColors,
+  cardSize,
   cardWidthUnit,
   containerUnit,
-} from "./team-styles";
+  QUICK_TEAM_COLORS,
+  type CardUnit,
+  type FrontDesign,
+  type FrontDesignProps,
+} from "./front-designs";
 import CardBack, { type BackStats } from "./CardBack";
 import SignaturePad, { type SignatureResult } from "./SignaturePad";
 import {
@@ -722,17 +728,26 @@ export default function CardEditor({
     initialDesign?.frame ?? NO_FRAME
   );
   const frame = getFrame(frameId);
-  // Team-name treatment (top-left plate) and its colors. "auto" colors follow
-  // the frame's team plate, else the classic white/black.
-  const [teamStyle, setTeamStyle] = useState<string>(
-    initialDesign?.text.team_style ?? DEFAULT_TEAM_STYLE
+  // Card-front design (team block + jersey + name + coaches as one set) and the
+  // two team colors. No colors picked = follow the frame, else white/black.
+  // `team_colors` is the legacy preset-palette id from the first version.
+  const legacyColors = legacyTeamColors(initialDesign?.text.team_colors);
+  const [frontDesign, setFrontDesign] = useState<string>(
+    initialDesign?.text.team_style ?? DEFAULT_FRONT_DESIGN
   );
-  const [teamColors, setTeamColors] = useState<string>(
-    initialDesign?.text.team_colors ?? AUTO_TEAM_COLORS
+  const [teamPrimary, setTeamPrimary] = useState<string | null>(
+    initialDesign?.text.team_primary ?? legacyColors?.[0] ?? null
   );
-  const { palette: teamPalette, explicit: teamColorsExplicit } = resolveTeamPalette(
-    teamColors,
-    frame?.teamPlate
+  const [teamSecondary, setTeamSecondary] = useState<string | null>(
+    initialDesign?.text.team_secondary ?? legacyColors?.[1] ?? null
+  );
+  const [showCoachesFront, setShowCoachesFront] = useState<boolean>(
+    initialDesign?.text.front_coaches ?? false
+  );
+  const { palette: teamPalette, source: teamColorSource } = resolveTeamPalette(
+    teamPrimary,
+    teamSecondary,
+    frame
   );
   // Number of copies "in circulation" — a serialized limited-edition stamp on
   // the front. Kept as a string for the input; parsed to a number when saved.
@@ -1913,8 +1928,10 @@ export default function CardEditor({
         name_font: nameFont,
         name_size: nameSize,
         name_italic: nameItalic,
-        ...(teamStyle !== DEFAULT_TEAM_STYLE ? { team_style: teamStyle } : {}),
-        ...(teamColors !== AUTO_TEAM_COLORS ? { team_colors: teamColors } : {}),
+        ...(frontDesign !== DEFAULT_FRONT_DESIGN ? { team_style: frontDesign } : {}),
+        ...(teamPrimary ? { team_primary: teamPrimary } : {}),
+        ...(teamSecondary ? { team_secondary: teamSecondary } : {}),
+        ...(showCoachesFront ? { front_coaches: true } : {}),
       },
       circulation:
         circulation.trim() && Number.isFinite(Number(circulation))
@@ -2501,6 +2518,60 @@ export default function CardEditor({
     ? "0 2px 8px rgba(0,0,0,0.45)"
     : "0 1px 0 rgba(255,255,255,0.15)";
 
+  // Inputs for the card-front design. The live card uses card-width units; the
+  // design picker tiles and background swatches pass cqw units + compact.
+  const frontNameFont = getNameFont(nameFont);
+  function frontProps(o: {
+    u: CardUnit;
+    compact: boolean;
+    landscape?: boolean;
+    withFrame?: boolean;
+    textColor?: string;
+    textShadow?: string;
+  }): FrontDesignProps {
+    const land = o.landscape ?? landscape;
+    const f = o.withFrame === false ? null : frame;
+    return {
+      u: o.u,
+      landscape: land,
+      ...cardSize(land),
+      frame: f,
+      inset: f ? FRAME_PLATE_INSET_PCT : 0,
+      palette: teamPalette,
+      colorSource: teamColorSource,
+      team: teamText.trim(),
+      age: ageText.trim(),
+      season: seasonText.trim(),
+      // Designs add their own "#", so drop one the coach typed.
+      jersey: stats.jersey.trim().replace(/^#+\s*/, ""),
+      nameLines: isDuo
+        ? [(namesTitle || nameL1).trim().toUpperCase()]
+        : [nameL1.trim(), nameL2.trim()],
+      isGroup: isDuo,
+      nameFont: { family: frontNameFont.family, em: frontNameFont.em },
+      nameSize,
+      nameItalic,
+      coaches: showCoachesFront
+        ? { head: stats.coach ?? "", assistants: stats.assistant_coaches ?? "" }
+        : null,
+      textColor: o.textColor ?? titleColor,
+      textShadow: o.textShadow ?? titleShadow,
+      compact: o.compact,
+    };
+  }
+  const liveFront = frontProps({ u: cardWidthUnit, compact: false });
+  const circulationPos = circulationPosition(frontDesign, liveFront);
+
+  function pickFrontDesign(d: FrontDesign) {
+    if (d.id !== frontDesign) {
+      setFrontDesign(d.id);
+      // Each design suggests a name font; the font picker can still change it.
+      setNameFont(d.nameFont);
+    }
+    scrollToPreview();
+    track("card_front_design_picked", { design: d.id });
+  }
+
   // Sticker: effective (editable) photo transform + signature box.
   const hasSig = Boolean(sigDataUrl ?? sigUrl);
   const stkPhotoEff = stkPhoto ?? { x: tx, y: ty, scale, rotation };
@@ -2706,6 +2777,7 @@ export default function CardEditor({
             <CardBackDuo
               ref={backStageRef}
               bgStyle={bgStyle}
+              teamPalette={teamColorSource === "user" ? teamPalette : undefined}
               landscape={landscape}
               teamText={teamText}
               ageText={ageText}
@@ -2723,6 +2795,7 @@ export default function CardEditor({
             <CardBack
               ref={backStageRef}
               bgStyle={bgStyle}
+              teamPalette={teamColorSource === "user" ? teamPalette : undefined}
               sport={sport}
               landscape={landscape}
               teamText={teamText}
@@ -2875,99 +2948,9 @@ export default function CardEditor({
           </>
         )}
 
-        {/* Jersey number badge — top right. */}
-        {stats.jersey && (
-          <div
-            style={{
-              position: "absolute",
-              top: "6%",
-              right: "7%",
-              minWidth: "14%",
-              aspectRatio: "1 / 1",
-              borderRadius: "9999px",
-              background: "rgba(10,10,10,0.85)",
-              color: "#fff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "var(--font-anton), Impact, sans-serif",
-              fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
-              letterSpacing: "0.02em",
-              // drop-shadow (not box-shadow): box-shadow on a round element
-              // rasterizes to a rectangular shadow through html-to-image.
-              filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.4))",
-              pointerEvents: "none",
-            }}
-          >
-            #{stats.jersey}
-          </div>
-        )}
-
-        {/* Team name plate — style + colors from the Text tab (team-styles.tsx).
-            Bleed styles run flush to the left edge with the text inset so print
-            trim can't clip it; with a frame they tuck inside the border. */}
-        <TeamPlate
-          styleId={teamStyle}
-          team={teamText}
-          age={ageText}
-          season={seasonText}
-          palette={teamPalette}
-          explicitColors={teamColorsExplicit}
-          u={cardWidthUnit}
-          top={frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT + 1.2} / 100)` : "6.5%"}
-          framedLeft={frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : null}
-          textColor={titleColor}
-          textShadow={titleShadow}
-        />
-
-        {/* Player name — a colored plate bar when a frame is active, otherwise
-            plain title text over the photo. */}
-        <div
-          style={{
-            position: "absolute",
-            left: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : "8%",
-            right: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : "8%",
-            bottom: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT + 0.8} / 100)` : "7%",
-            pointerEvents: "none",
-            fontFamily: getNameFont(nameFont).family,
-            fontStyle: nameItalic ? "italic" : "normal",
-            color: frame?.namePlate ? frame.namePlate.color : titleColor,
-            textShadow: frame?.namePlate ? "none" : titleShadow,
-            lineHeight: 0.92,
-            letterSpacing: "0.01em",
-            ...(frame?.namePlate
-              ? {
-                  background: frame.namePlate.background,
-                  padding:
-                    "calc(var(--cardw, 22rem) * 1.6 / 100) calc(var(--cardw, 22rem) * 2.4 / 100)",
-                  borderRadius: "calc(var(--cardw, 22rem) * 1 / 100)",
-                  textAlign: "center" as const,
-                  filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.4))",
-                }
-              : {}),
-          }}
-        >
-          {isDuo ? (
-            // Shared name plate — all players on one line ("CJ & ALEX"). Force
-            // uppercase so every name matches the (already-uppercased) primary,
-            // however the teammate names were entered.
-            <div
-              style={{
-                fontSize: `calc(var(--cardw, 22rem) * ${8 * nameSize} / 100)`,
-                textTransform: "uppercase",
-              }}
-            >
-              {namesTitle || nameL1}
-            </div>
-          ) : (
-            <>
-              <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)` }}>{nameL1}</div>
-              <div style={{ fontSize: `calc(var(--cardw, 22rem) * ${11 * nameSize} / 100)`, marginTop: "2%" }}>
-                {nameL2}
-              </div>
-            </>
-          )}
-        </div>
+        {/* Card-front design — team block, jersey number, player name and
+            (optionally) coaches drawn as one matched set (front-designs/). */}
+        <FrontDesignLayer designId={frontDesign} {...liveFront} />
 
         {/* Circulation / limited-edition stamp — the classic serialized spot,
             tucked top-right under the jersey number (or at the top when there's
@@ -2976,8 +2959,8 @@ export default function CardEditor({
           <div
             style={{
               position: "absolute",
-              top: stats.jersey ? "18.5%" : "6.5%",
-              right: "7%",
+              top: circulationPos.top,
+              right: circulationPos.right,
               textAlign: "right",
               pointerEvents: "none",
               color: isLight ? "#fde047" : "#92400e",
@@ -3660,42 +3643,18 @@ export default function CardEditor({
                           }}
                         />
                       )}
-                      {/* Mini team plate (current team style + colors) */}
-                      <TeamPlate
-                        styleId={teamStyle}
-                        team={(teamText || "TEAM").slice(0, 10)}
-                        age=""
-                        season=""
-                        showSub={false}
-                        compact
-                        palette={teamPalette}
-                        explicitColors={teamColorsExplicit}
-                        u={containerUnit()}
-                        top="6%"
-                        framedLeft={null}
-                        textColor={lightText ? "#fff" : "#111"}
-                        textShadow={lightText ? "0 1px 3px rgba(0,0,0,0.55)" : "none"}
+                      {/* Mini card front (current design + colors) */}
+                      <FrontDesignLayer
+                        designId={frontDesign}
+                        {...frontProps({
+                          u: containerUnit(),
+                          compact: true,
+                          landscape: false,
+                          withFrame: false,
+                          textColor: lightText ? "#fff" : "#111",
+                          textShadow: lightText ? "0 1px 3px rgba(0,0,0,0.55)" : "none",
+                        })}
                       />
-                      {/* Mini player name */}
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: "8%",
-                          bottom: "6%",
-                          pointerEvents: "none",
-                          fontFamily: getNameFont(nameFont).family,
-                          fontStyle: nameItalic ? "italic" : "normal",
-                          color: lightText ? "#fff" : "#111",
-                          lineHeight: 0.9,
-                          fontSize: `${11 * nameSize}cqw`,
-                          textShadow: lightText
-                            ? "0 1px 3px rgba(0,0,0,0.55)"
-                            : "none",
-                        }}
-                      >
-                        {nameL1 && <div>{nameL1.slice(0, 8)}</div>}
-                        {nameL2 && <div>{nameL2.slice(0, 8)}</div>}
-                      </div>
                       {/* Option number (UI aid — not part of the card). */}
                       <span
                         style={{
@@ -3934,97 +3893,6 @@ export default function CardEditor({
                 </Field>
               </div>
 
-              {/* Team name style — each tile previews the style on this card's
-                  background with the real team/age/season text. */}
-              <Field label="Team name style">
-                <div className="grid grid-cols-2 gap-1.5 desktop:grid-cols-3">
-                  {TEAM_STYLES.map((ts) => {
-                    const selected = teamStyle === ts.id;
-                    return (
-                      <button
-                        key={ts.id}
-                        onClick={() => {
-                          setTeamStyle(ts.id);
-                          scrollToPreview();
-                          track("card_team_style_picked", { team_style: ts.id });
-                        }}
-                        aria-pressed={selected}
-                        aria-label={`${ts.name} team name style`}
-                        className={`relative overflow-hidden rounded-md border text-left transition-all ${
-                          selected
-                            ? "border-blue-500 ring-2 ring-blue-500"
-                            : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-500"
-                        }`}
-                      >
-                        <div
-                          className="relative w-full aspect-[16/10] overflow-hidden"
-                          style={{ ...bgStyle, containerType: "inline-size" }}
-                        >
-                          <TeamPlate
-                            styleId={ts.id}
-                            team={teamText}
-                            age={ageText}
-                            season={seasonText}
-                            compact
-                            palette={teamPalette}
-                            explicitColors={teamColorsExplicit}
-                            u={containerUnit(1.2)}
-                            top="11%"
-                            framedLeft={null}
-                            textColor={titleColor}
-                            textShadow={titleShadow}
-                          />
-                        </div>
-                        <div
-                          className={`px-2 py-1 text-[10px] font-medium truncate ${
-                            selected
-                              ? "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
-                              : "bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400"
-                          }`}
-                        >
-                          {ts.name}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </Field>
-
-              {/* Team name colors — "Auto" follows the frame (or white/black). */}
-              <Field label="Team name colors">
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => setTeamColors(AUTO_TEAM_COLORS)}
-                    aria-pressed={teamColors === AUTO_TEAM_COLORS}
-                    title={frame ? "Auto (match the frame)" : "Auto (white & black)"}
-                    className={`h-8 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${
-                      teamColors === AUTO_TEAM_COLORS
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
-                        : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    }`}
-                  >
-                    Auto
-                  </button>
-                  {TEAM_COLORS.map((c) => {
-                    const selected = teamColors === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        onClick={() => setTeamColors(c.id)}
-                        aria-pressed={selected}
-                        aria-label={`${c.name} team name colors`}
-                        title={c.name}
-                        className={`h-8 w-8 rounded-full overflow-hidden border border-gray-300 dark:border-gray-600 transition-all ${
-                          selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""
-                        }`}
-                        style={{
-                          background: `linear-gradient(135deg, ${c.palette.background} 0 58%, ${c.palette.subBackground} 58% 100%)`,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              </Field>
               <Field label="Name line 1">
                 <input
                   value={nameL1}
@@ -4040,8 +3908,152 @@ export default function CardEditor({
                 />
               </Field>
 
+              {/* Card design — each tile is a mini card front on this card's
+                  background, with the player cutout and the real text. */}
+              <FieldGroup label="Card design">
+                <div className={`grid gap-1.5 ${landscape ? "grid-cols-2" : "grid-cols-3"} desktop:grid-cols-4`}>
+                  {FRONT_DESIGNS.map((d) => {
+                    const selected = frontDesign === d.id;
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => pickFrontDesign(d)}
+                        aria-pressed={selected}
+                        aria-label={`${d.name} card design`}
+                        className={`relative overflow-hidden rounded-md border text-left transition-all ${
+                          selected
+                            ? "border-blue-500 ring-2 ring-blue-500"
+                            : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-500"
+                        }`}
+                      >
+                        <div
+                          className="relative w-full overflow-hidden"
+                          style={{ ...bgStyle, aspectRatio: cardAspect, containerType: "inline-size" }}
+                        >
+                          {cutoutDataUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={cutoutDataUrl}
+                              alt=""
+                              className="absolute inset-0 w-full h-full pointer-events-none"
+                              style={{
+                                objectFit: "contain",
+                                transform: `translate(${tx * 100}%, ${ty * 100}%) rotate(${rotation}deg) scale(${scale})`,
+                                transformOrigin: "center center",
+                              }}
+                            />
+                          )}
+                          {frame && (
+                            <>
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  inset: `${FRAME_INSET_PCT * (landscape ? 5 / 7 : 1)}cqw`,
+                                  border: `${FRAME_BAND_PCT * (landscape ? 5 / 7 : 1)}cqw solid ${frame.band}`,
+                                }}
+                              />
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  inset: `${(FRAME_INSET_PCT + FRAME_BAND_PCT) * (landscape ? 5 / 7 : 1)}cqw`,
+                                  border: `${FRAME_KEYLINE_PCT * (landscape ? 5 / 7 : 1)}cqw solid ${frame.keyline}`,
+                                }}
+                              />
+                            </>
+                          )}
+                          <FrontDesignLayer
+                            designId={d.id}
+                            {...frontProps({ u: containerUnit(landscape ? 5 / 7 : 1), compact: true })}
+                            nameFont={(() => {
+                              const f = getNameFont(d.nameFont);
+                              return { family: f.family, em: f.em };
+                            })()}
+                          />
+                        </div>
+                        <div
+                          className={`px-1.5 py-1 text-[10px] font-medium truncate ${
+                            selected
+                              ? "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
+                              : "bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400"
+                          }`}
+                        >
+                          {d.name}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </FieldGroup>
+
+              {/* Team colors — primary (main plates) + secondary (strips and
+                  accents). Text on each is picked automatically for contrast. */}
+              <FieldGroup label="Team colors">
+                <div className="space-y-2">
+                  <TeamColorRow
+                    label="Primary"
+                    value={teamPrimary}
+                    shown={teamPalette.background}
+                    onChange={setTeamPrimary}
+                  />
+                  <TeamColorRow
+                    label="Secondary"
+                    value={teamSecondary}
+                    shown={teamPalette.subBackground}
+                    onChange={setTeamSecondary}
+                  />
+                  {(teamPrimary || teamSecondary) && (
+                    <button
+                      onClick={() => {
+                        setTeamPrimary(null);
+                        setTeamSecondary(null);
+                      }}
+                      className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Reset to {frame ? "the frame's colors" : "white & black"}
+                    </button>
+                  )}
+                </div>
+              </FieldGroup>
+
+              {/* Coaches on the front — same names as the card back. */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Coaches on the front</span>
+                  <button
+                    onClick={() => setShowCoachesFront((v) => !v)}
+                    aria-pressed={showCoachesFront}
+                    className={`rounded-md border px-3 py-1 text-xs font-semibold transition-colors ${
+                      showCoachesFront
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
+                        : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    {showCoachesFront ? "On" : "Off"}
+                  </button>
+                </div>
+                {showCoachesFront && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Head coach">
+                      <input
+                        value={stats.coach}
+                        onChange={(e) => patchStats({ coach: e.target.value })}
+                        className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                      />
+                    </Field>
+                    <Field label="Assistant coaches">
+                      <input
+                        value={stats.assistant_coaches}
+                        onChange={(e) => patchStats({ assistant_coaches: e.target.value })}
+                        placeholder="Comma-separated"
+                        className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
+
               {/* Font picker */}
-              <Field label="Name font">
+              <FieldGroup label="Name font">
                 <div className="grid grid-cols-3 gap-1.5">
                   {NAME_FONTS.map((f) => {
                     const selected = nameFont === f.id;
@@ -4071,7 +4083,7 @@ export default function CardEditor({
                     );
                   })}
                 </div>
-              </Field>
+              </FieldGroup>
 
               {/* Size */}
               <Field label={`Size: ${Math.round(nameSize * 100)}%`}>
@@ -5258,5 +5270,81 @@ function Field({
       <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
+  );
+}
+
+// Labelled group for button pickers. Field wraps its child in a <label>, which
+// forwards a tap anywhere inside it (caption, gaps) to the FIRST button — fine
+// for one input, wrong for a grid of choices.
+function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  const id = useId();
+  return (
+    <div role="group" aria-labelledby={id}>
+      <span id={id} className="text-xs text-gray-500 dark:text-gray-400">
+        {label}
+      </span>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+// One team-color choice: quick swatches plus a custom color well. `value` is
+// the picked color (null = not picked); `shown` is what the card currently uses.
+function TeamColorRow({
+  label,
+  value,
+  shown,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  shown: string;
+  onChange: (hex: string) => void;
+}) {
+  const current = (value ?? "").toLowerCase();
+  const custom = Boolean(value) && !QUICK_TEAM_COLORS.some((c) => c.hex === current);
+  return (
+    <div className="flex items-start gap-2">
+      <span className="w-[4.25rem] shrink-0 pt-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+        {label}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {QUICK_TEAM_COLORS.map((c) => {
+          const selected = current === c.hex;
+          return (
+            <button
+              key={c.hex}
+              onClick={() => onChange(c.hex)}
+              aria-pressed={selected}
+              aria-label={`${label} color ${c.name}`}
+              title={c.name}
+              className={`h-7 w-7 rounded-full border border-gray-300 dark:border-gray-600 transition-all ${
+                selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""
+              }`}
+              style={{ background: c.hex }}
+            />
+          );
+        })}
+        <label
+          title="Custom color"
+          className={`relative h-7 w-7 cursor-pointer overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 ${
+            custom ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""
+          }`}
+          style={{
+            background: custom
+              ? value!
+              : "conic-gradient(#ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ef4444)",
+          }}
+        >
+          <span className="sr-only">{`${label} custom color`}</span>
+          <input
+            type="color"
+            value={value ?? shown}
+            onChange={(e) => onChange(e.target.value.toLowerCase())}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          />
+        </label>
+      </div>
+    </div>
   );
 }

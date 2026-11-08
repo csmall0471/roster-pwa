@@ -1,4 +1,5 @@
 import { forwardRef, type CSSProperties } from "react";
+import type { TeamPalette } from "./front-designs/shared";
 
 // The duo/trio card back: a shared name plate and a list of fun questions the
 // pair/trio answered together (no per-player stat columns). Pure presentational
@@ -6,6 +7,8 @@ import { forwardRef, type CSSProperties } from "react";
 // back — see compositeBack in card-raster.ts.
 
 type Props = {
+  // Team colors picked on the front (header chips). Absent = white/black.
+  teamPalette?: TeamPalette;
   bgStyle: CSSProperties;
   landscape?: boolean;
   teamText: string;
@@ -26,6 +29,7 @@ type Props = {
 const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
   {
     bgStyle,
+    teamPalette,
     landscape,
     teamText,
     ageText,
@@ -59,8 +63,8 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
       >
         <div
           style={{
-            background: "#fff",
-            color: "#0a0a0a",
+            background: teamPalette?.background ?? "#fff",
+            color: teamPalette?.color ?? "#0a0a0a",
             padding: "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
             clipPath: "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
             fontFamily: "var(--font-anton), Impact, sans-serif",
@@ -75,8 +79,8 @@ const CardBackDuo = forwardRef<HTMLDivElement, Props>(function CardBackDuo(
         {(ageText || seasonText) && (
           <div
             style={{
-              background: "#0a0a0a",
-              color: "#fff",
+              background: teamPalette?.subBackground ?? "#0a0a0a",
+              color: teamPalette?.subColor ?? "#fff",
               padding: "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
               clipPath: "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
               fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
