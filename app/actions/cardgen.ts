@@ -98,8 +98,12 @@ const SPORT_AI: Record<
 };
 
 // fal.ai BiRefNet — always-warm (no cold start), transparent PNG output. This is
-// the fast path; https://fal.ai/models/fal-ai/birefnet.
-const FAL_MODEL = "fal-ai/birefnet";
+// the fast path; https://fal.ai/models/fal-ai/birefnet/v2. The v1 endpoint's
+// default model kept bits of the backdrop (a floating piece of hoop net beside a
+// kid's head); v2's general model at 2048 drops them and keeps held balls, and
+// 2048 matches our 1600px uploads instead of shrinking them to 1024.
+const FAL_MODEL = "fal-ai/birefnet/v2";
+const FAL_OPTIONS = { model: "General Use (Light)", operating_resolution: "2048x2048" };
 
 // 851-labs/background-remover (InSPyReNet) on Replicate — the fallback when fal
 // is unconfigured or errors. Pinned version id from
@@ -121,7 +125,7 @@ async function falRemoveBackground(
     const res = await fetch(`https://fal.run/${FAL_MODEL}`, {
       method: "POST",
       headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ image_url: sourceUrl, output_format: "png" }),
+      body: JSON.stringify({ image_url: sourceUrl, output_format: "png", ...FAL_OPTIONS }),
     });
     if (!res.ok) {
       const detail = (await res.text()).slice(0, 200);
