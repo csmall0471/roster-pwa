@@ -9,7 +9,7 @@
 /* Large touch screens: the iPhone Duo unfolded and every iPad in either direction,
    but not desktops, the folded Duo, or a regular phone turned sideways (too short).
    Width alone can't separate a large iPad from a desktop, so above 1024px it takes
-   a touch screen. Keep in sync with UNFOLDED_QUERY in CardEditor.tsx. */
+   a touch screen. Keep in sync with UNFOLDED_QUERY in cardgen/duo-fold.ts. */
 @custom-variant unfolded {
   @media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px),
     (min-width: 1024px) and (min-height: 480px) and (pointer: coarse) {
@@ -237,5 +237,103 @@ body {
   .card-touch select,
   .card-touch textarea { font-size: 1rem; min-height: 44px; }
   .card-touch input[type="range"] { height: 44px; }
+
+  /* Safari paints the iPhone Duo's side strip (status bar, camera) with the page
+     background, so match the editor's. */
+  html:has(.card-fullscreen),
+  html:has(.card-fullscreen) body { background: var(--color-gray-50, #f9fafb); }
+  html.dark:has(.card-fullscreen),
+  html.dark:has(.card-fullscreen) body { background: var(--color-gray-950, #030712); }
+
+  /* ── The full-screen editor, laid out around the iPhone Duo's fold ──
+     CardEditor sets --fold-x (held wide) or --fold-y (held tall) from duo-fold.ts;
+     without them the fold is taken to be the middle of the screen. The card gets
+     one side of the fold to itself and everything else goes on the other. A
+     48px strip over the fold stays empty: the crease can be felt, and taps on
+     it are unreliable when the phone is partly folded. */
+  .card-fullscreen {
+    --pad: 12px;
+    --gutter: 48px;
+    /* Pinching anywhere but the card would zoom the whole page. */
+    touch-action: pan-x pan-y;
+  }
+  .duo-grid {
+    display: grid;
+    flex: 1 1 0%;
+    min-height: 0;
+    container-type: size;
+  }
+  .duo-head { grid-area: head; }
+  .duo-card { grid-area: card; justify-self: center; align-self: center; margin: 0; }
+  .duo-tools { grid-area: tools; min-height: 0; margin: 0; }
+  .duo-save { grid-area: save; margin-top: 8px; }
+  /* A pop-up moved to one side of the fold must fit the space left there, so
+     its list scrolls rather than running off the screen. */
+  .duo-modal > * { max-height: min(85vh, 100%); }
+
+  /* Held wide: the card on the left page, the tools on the right page. */
+  @media (orientation: landscape) {
+    .duo-grid {
+      grid-template-columns:
+        clamp(12rem, calc(var(--fold-x, 50vw) - var(--pad) - var(--gutter) / 2), calc(100% - var(--gutter) - 18rem))
+        minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      grid-template-areas: "card head" "card tools" "card save";
+      column-gap: var(--gutter);
+    }
+    .duo-head { margin-bottom: 8px; }
+    .duo-grid[data-shape="v"] .duo-card { width: min(100%, 100cqh * 5 / 7); }
+    .duo-grid[data-shape="h"] .duo-card { width: min(100%, 100cqh * 7 / 5); }
+    /* Pop-ups (signature pad, pickers) open on the tools' page, off the fold. */
+    .duo-modal { padding-left: calc(var(--fold-x, 50vw) + var(--gutter) / 2); }
+  }
+
+  /* Held tall: the card above the fold with Front/Back and Save beside it, the
+     tools below the fold. A wide card takes the whole top half instead. */
+  @media (orientation: portrait) {
+    .duo-grid {
+      /* Height of the part above the fold, measured from the top of the grid. */
+      --top: calc(var(--fold-y, 50dvh) - var(--pad) - var(--gutter) / 2);
+      column-gap: var(--pad);
+    }
+    .duo-grid[data-shape="v"] {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-rows:
+        auto minmax(0, 1fr) auto var(--gutter)
+        minmax(0, calc(100% - var(--top) - var(--gutter)));
+      grid-template-areas: "card head" "card ." "card save" ". ." "tools tools";
+    }
+    .duo-grid[data-shape="v"] .duo-card { width: calc(var(--top) * 5 / 7); align-self: start; }
+    .duo-grid[data-shape="h"] {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, var(--top)) var(--gutter) auto minmax(0, 1fr) auto;
+      grid-template-areas: "card" "." "head" "tools" "save";
+    }
+    .duo-grid[data-shape="h"] .duo-head { margin-bottom: 8px; }
+    .duo-grid[data-shape="h"] .duo-card { width: min(100%, var(--top) * 7 / 5); }
+    .duo-modal { padding-top: calc(var(--fold-y, 50dvh) + var(--gutter) / 2); }
+  }
+
+  /* On-screen keyboard up: the editor shrinks to the space above it, with a
+     smaller card beside the field being typed in. */
+  .card-fullscreen[data-kb] {
+    top: var(--kb-top);
+    bottom: auto;
+    height: var(--kb-h);
+  }
+  /* Held wide the fold columns stay; the hidden head and Save rows collapse.
+     Held tall the card moves beside the tools. */
+  @media (orientation: portrait) {
+    .card-fullscreen[data-kb] .duo-grid {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+      grid-template-areas: "card tools";
+      column-gap: var(--pad);
+    }
+  }
+  .card-fullscreen[data-kb] .duo-head,
+  .card-fullscreen[data-kb] .duo-save { display: none; }
+  .card-fullscreen[data-kb] .duo-grid .duo-card { width: min(45cqw, 100cqh * 5 / 7); align-self: center; }
+  .card-fullscreen[data-kb] .duo-grid[data-shape="h"] .duo-card { width: min(45cqw, 100cqh * 7 / 5); }
 }
 

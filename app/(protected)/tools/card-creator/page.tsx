@@ -8,6 +8,7 @@ import { buildPhotoDraftDesign } from "@/app/_components/cardgen/photo-draft-des
 import { loadAssignTargets, loadDraftEarmarkTarget } from "./load-targets";
 import DraftsSection from "./DraftsSection";
 import SeasonCardsSection from "./SeasonCardsSection";
+import HubGrid from "./HubGrid";
 
 // Standalone card creator (Tools → Card Creator). Build a card from any photo
 // without first picking a player; the finished card exports to the photo
@@ -75,7 +76,17 @@ export default async function CardCreatorPage({
   }
 
   return (
-    <div className="max-w-2xl lg:max-w-none">
+    // Large touch screens (the unfolded iPhone Duo, iPads): pick a photo on the
+    // left of the fold, season cards and drafts on the right. Each column stacks
+    // on its own; row 1 is sized by the header alone.
+    <HubGrid
+      className={`max-w-2xl lg:max-w-none ${
+        isOwner
+          ? "unfolded:grid unfolded:max-w-none unfolded:grid-cols-[clamp(16rem,calc(var(--fold-x,50vw)_-_40px),calc(100%_-_48px_-_16rem))_minmax(0,1fr)] unfolded:grid-rows-[auto_auto_1fr] unfolded:items-start unfolded:gap-x-12"
+          : ""
+      }`}
+    >
+      <div className="unfolded:col-start-1 unfolded:row-start-1">
       <Link href="/teams" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
         ← Back
       </Link>
@@ -95,14 +106,18 @@ export default async function CardCreatorPage({
           </Link>
         )}
       </div>
+      </div>
 
       {/* Streamed so the editor paints immediately (its own query can be heavy). */}
       {isOwner && (
-        <Suspense fallback={null}>
-          <SeasonCardsSection />
-        </Suspense>
+        <div className="unfolded:col-start-2 unfolded:row-span-2 unfolded:row-start-1">
+          <Suspense fallback={null}>
+            <SeasonCardsSection />
+          </Suspense>
+        </div>
       )}
 
+      <div className="unfolded:col-start-1 unfolded:row-span-2 unfolded:row-start-2">
       <CardEditor
         key={draftId ?? "new"}
         standalone
@@ -123,11 +138,12 @@ export default async function CardCreatorPage({
         initialDesign={initialDesign}
         initialAssignKey={initialAssignKey}
       />
+      </div>
 
       {/* Drafts stream in below the editor with a spinner, so the page shows
           right away instead of blocking on this query. */}
       {isOwner && (
-        <div id="drafts" className="scroll-mt-20">
+        <div id="drafts" className="scroll-mt-20 unfolded:col-start-2 unfolded:row-start-3">
         <Suspense
           fallback={
             <div className="mt-10 flex items-center justify-center gap-2 py-6 text-sm text-gray-400 dark:text-gray-500">
@@ -140,6 +156,6 @@ export default async function CardCreatorPage({
         </Suspense>
         </div>
       )}
-    </div>
+    </HubGrid>
   );
 }

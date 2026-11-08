@@ -133,7 +133,7 @@ export default function SignaturePad({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-3">
+    <div className="duo-modal fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-3">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 p-4 shadow-xl">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Sign with your finger</h3>

@@ -5,6 +5,7 @@ import {
   useRef,
   useEffect,
   useId,
+  useSyncExternalStore,
   type CSSProperties,
 } from "react";
 import { flushSync } from "react-dom";
@@ -73,6 +74,7 @@ import {
 import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign, CardSubject, CardOrientation } from "@/lib/types";
 import { normalizePhotoForUpload } from "./photo-normalize";
+import { useDuoFold, useKeyboard, duoDebugEnabled, duoDebugText, UNFOLDED_QUERY } from "./duo-fold";
 
 // Signature width on the sticker, as a fraction of the sticker's width, at
 // scale 1 (the resize slider multiplies it). Shared by the preview + export.
@@ -87,9 +89,8 @@ const LOGO_BASE_WIDTH = 0.28;
 // saved value; clear the field on the card to drop it.
 const DEFAULT_HEAD_COACH = "Connor Small";
 
-// Must match the `unfolded` variant in globals.css.
-const UNFOLDED_QUERY =
-  "(min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px), (min-width: 1024px) and (min-height: 480px) and (pointer: coarse)";
+
+const subscribeNever = () => () => {};
 
 // The 2" sticker export is hidden for now; flip this to bring it back.
 const SHOW_STICKER: boolean = false;
@@ -560,7 +561,36 @@ export default function CardEditor({
   // Sport, shape and group-card tools start tucked away on large touch screens,
   // so kids editing their own card see only what they need. A saved group card
   // needs its teammate tools, so it starts open.
-  const [moreOpen, setMoreOpen] = useState(!!initialDesign?.extra_subjects?.length);
+  // A reopened group card opens on its teammate tools for the coach. On large
+  // touch screens Card options replace the tools, so parents (who can't edit
+  // teammates) start on the tools.
+  const [moreOpen, setMoreOpen] = useState(!isParent && !!initialDesign?.extra_subjects?.length);
+
+  // Large touch screens: where the iPhone Duo's fold is, and the on-screen
+  // keyboard (duo-fold.ts). Both only change the layout through CSS variables.
+  const fold = useDuoFold();
+  const keyboard = useKeyboard();
+  const keyboardUp = keyboard !== null;
+  const duoDebug = useSyncExternalStore(subscribeNever, duoDebugEnabled, () => false);
+  const wasKeyboardUp = useRef(false);
+  useEffect(() => {
+    if (!window.matchMedia(UNFOLDED_QUERY).matches) return;
+    if (keyboardUp) {
+      wasKeyboardUp.current = true;
+      // The editor just shrank to the space above the keyboard; bring the field
+      // being typed in back into view inside its scrolling panel.
+      const raf = requestAnimationFrame(() => {
+        const el = document.activeElement;
+        if (el instanceof HTMLElement && el.closest(".card-fullscreen")) el.scrollIntoView({ block: "center" });
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+    if (wasKeyboardUp.current) {
+      wasKeyboardUp.current = false;
+      // iOS can leave the page scrolled after the keyboard closes.
+      window.scrollTo(0, 0);
+    }
+  }, [keyboardUp]);
   // The options panel is the only part that scrolls on large touch screens, so
   // switching tabs or sides sends it back to the top.
   const optionsScrollRef = useRef<HTMLDivElement>(null);
@@ -2608,28 +2638,50 @@ export default function CardEditor({
   // when there are targets; choosing a player auto-fills the card. Deep-linked
   // parent cards arrive non-standalone (the kid is already known), so the picker
   // simply doesn't render there.
+  const pickerOptions = (
+    <>
+      <option value="">— No player (save to photos) —</option>
+      {assignTargets.map((t) => (
+        <option key={t.key} value={t.key}>
+          {t.name}
+          {t.teamName ? ` · ${t.teamName}` : ""}
+        </option>
+      ))}
+    </>
+  );
   const playerPicker =
     standalone && assignTargets.length > 0 ? (
-      <label className="block mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 unfolded:mb-2 unfolded:flex unfolded:shrink-0 unfolded:items-center unfolded:gap-3 unfolded:px-3 unfolded:py-1.5">
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 unfolded:whitespace-nowrap">
+      <label className="block mb-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 unfolded:hidden">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           Whose card is this?
         </span>
         <select
           value={assignTargetKey}
           onChange={(e) => selectTarget(e.target.value)}
-          className="mt-1.5 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white unfolded:mt-0 unfolded:min-w-0 unfolded:flex-1 unfolded:text-base"
+          className="mt-1.5 w-full text-sm border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
         >
-          <option value="">— No player (save to photos) —</option>
-          {assignTargets.map((t) => (
-            <option key={t.key} value={t.key}>
-              {t.name}
-              {t.teamName ? ` · ${t.teamName}` : ""}
-            </option>
-          ))}
+          {pickerOptions}
         </select>
-        <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 unfolded:hidden">
+        <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500">
           Fills in the name, team, and stats automatically — you can still edit anything.
         </p>
+      </label>
+    ) : null;
+
+  // The same choice, compact, at the top of the tools on large touch screens.
+  const duoPlayerPicker =
+    standalone && assignTargets.length > 0 ? (
+      <label className="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-3">
+        <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Card for
+        </span>
+        <select
+          value={assignTargetKey}
+          onChange={(e) => selectTarget(e.target.value)}
+          className="min-w-0 flex-1 rounded-r-xl bg-transparent pr-2 text-gray-900 dark:text-white"
+        >
+          {pickerOptions}
+        </select>
       </label>
     ) : null;
 
@@ -2712,31 +2764,15 @@ export default function CardEditor({
 
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
-  return (
-    <div className="card-fullscreen w-full max-w-md desktop:max-w-none mx-auto overflow-x-hidden desktop:overflow-x-visible unfolded:fixed unfolded:inset-0 unfolded:z-40 unfolded:flex unfolded:h-dvh unfolded:max-w-none unfolded:flex-col unfolded:overflow-hidden unfolded:bg-gray-50 unfolded:p-3 unfolded:dark:bg-gray-950">
-      {error && (
-        <p className="text-sm text-red-500 dark:text-red-400 mb-3 unfolded:mb-2 unfolded:shrink-0">{error}</p>
-      )}
-
-      {/* Whose card is this? — pinned to the top so it's the first choice made. */}
-      {playerPicker}
-
-      {/* On wide screens the preview pins to the left and the controls scroll on
-          the right; it stacks back to a single column on phones. The preview
-          column grows with the viewport (clamp) up to a cap; the controls cap so
-          sliders don't stretch; the pair centers once both maxed out. */}
-      <div className="unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col unfolded:landscape:grid unfolded:landscape:grid-cols-[auto_minmax(0,1fr)] unfolded:landscape:grid-rows-[minmax(0,1fr)] unfolded:landscape:gap-4 desktop:grid desktop:justify-center desktop:gap-8 desktop:items-start desktop:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]">
-        {/* Preview column — sticky on desktop so it stays in view while editing. On
-            large touch screens the editor fills the screen, so nothing scrolls past it. */}
-        <div className="unfolded:shrink-0 desktop:sticky desktop:top-16 desktop:self-start">
-      {/* Side toggle */}
-      <div className="flex gap-1 mb-3 unfolded:mb-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+  const sideToggle = (className: string) => (
+    <div className={`flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg ${className}`}>
         {(["front", "back"] as const).map((s) => (
           <button
             key={s}
             onClick={() => {
               if (s !== side) {
                 setSide(s);
+                setMoreOpen(false);
                 optionsScrollRef.current?.scrollTo({ top: 0 });
                 track("card_side_switched", { side: s });
                 logClientActivity("card_side_switched", { side: s }).catch(() => {});
@@ -2751,18 +2787,68 @@ export default function CardEditor({
             {s}
           </button>
         ))}
-      </div>
+    </div>
+  );
+
+  // Large touch screens: the card has one side of the iPhone Duo's fold to
+  // itself and the tools the other (globals.css, .duo-grid). The fold's position
+  // and the on-screen keyboard come from duo-fold.ts.
+  const duoStyle = {
+    "--fold-x": fold.x === null ? undefined : `${fold.x}px`,
+    "--fold-y": fold.y === null ? undefined : `${fold.y}px`,
+    "--kb-top": keyboard ? `${keyboard.top}px` : undefined,
+    "--kb-h": keyboard ? `${keyboard.height}px` : undefined,
+  } as CSSProperties;
+
+  return (
+    <div
+      data-no-ptr
+      data-kb={keyboard ? "" : undefined}
+      style={duoStyle}
+      className="card-fullscreen w-full max-w-md desktop:max-w-none mx-auto overflow-x-hidden desktop:overflow-x-visible unfolded:fixed unfolded:inset-0 unfolded:z-40 unfolded:flex unfolded:h-dvh unfolded:max-w-none unfolded:flex-col unfolded:overflow-hidden unfolded:bg-gray-50 unfolded:p-3 unfolded:dark:bg-gray-950"
+    >
+      {error && (
+        <p className="text-sm text-red-500 dark:text-red-400 mb-3 unfolded:hidden">{error}</p>
+      )}
+
+      {/* ?debug=layout: the fold line and the numbers it came from, to check on a real device. */}
+      {duoDebug && (
+        <>
+          {fold.x !== null && (
+            <div aria-hidden className="pointer-events-none fixed inset-y-0 z-[60] w-px bg-red-500" style={{ left: fold.x }} />
+          )}
+          {fold.y !== null && (
+            <div aria-hidden className="pointer-events-none fixed inset-x-0 z-[60] h-px bg-red-500" style={{ top: fold.y }} />
+          )}
+          <pre className="pointer-events-none fixed bottom-2 left-2 z-[60] whitespace-pre rounded bg-black/80 p-2 text-[11px] leading-tight text-white">
+            {duoDebugText(fold, keyboard)}
+          </pre>
+        </>
+      )}
+
+      {/* Whose card is this? — pinned to the top so it's the first choice made. */}
+      {playerPicker}
+
+      {/* On wide screens the preview pins to the left and the controls scroll on
+          the right; it stacks back to a single column on phones. The preview
+          column grows with the viewport (clamp) up to a cap; the controls cap so
+          sliders don't stretch; the pair centers once both maxed out. */}
+      <div
+        data-shape={landscape ? "h" : "v"}
+        className="duo-grid desktop:grid desktop:justify-center desktop:gap-8 desktop:items-start desktop:[grid-template-columns:clamp(22rem,30vw,30rem)_minmax(0,46rem)]"
+      >
+        {/* Preview column — sticky on desktop so it stays in view while editing. On
+            large touch screens the editor fills the screen, so nothing scrolls past it. */}
+        <div className="unfolded:contents desktop:sticky desktop:top-16 desktop:self-start">
+      {/* Side toggle (on large touch screens it sits above the tools instead) */}
+      {sideToggle("mb-3 unfolded:hidden")}
 
       {/* Stage container — both sides rendered; inactive is offscreen but
           rasterizable. overflow-hidden contains the offscreen stage so the page
           can't scroll sideways. scroll-mt offsets the sticky header on auto-scroll. */}
       <div
         ref={stageWrapRef}
-        className={`relative w-full overflow-hidden scroll-mt-20 mx-auto ${
-          landscape
-            ? "unfolded:portrait:w-[min(100%,calc(40dvh*7/5))] unfolded:landscape:w-[min(46vw,calc((100dvh-9.75rem)*7/5))]"
-            : "unfolded:portrait:w-[calc(40dvh*5/7)] unfolded:landscape:w-[calc((100dvh-9.75rem)*5/7)]"
-        }`}
+        className="duo-card relative w-full overflow-hidden scroll-mt-20 mx-auto"
       >
         {/* Back stage (offscreen when not active). Relative when active so the
             back-logo overlay can position over the card. */}
@@ -3070,16 +3156,34 @@ export default function CardEditor({
         {/* end preview column */}
 
         {/* Controls column */}
-        <div className="card-touch min-w-0 unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col">
-      <button
-        type="button"
-        onClick={() => setMoreOpen((open) => !open)}
-        aria-expanded={moreOpen}
-        className="hidden w-full shrink-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-left text-sm font-medium text-gray-600 dark:text-gray-300 unfolded:block unfolded:portrait:mt-2"
+        <div className="card-touch min-w-0 unfolded:contents">
+      {/* Large touch screens: who it's for, which side, and the rarely used card
+          options, above the tools. Card options swap in for the tools. */}
+      <div className="duo-head hidden flex-col gap-2 unfolded:flex">
+        {duoPlayerPicker}
+        <div className="flex items-stretch gap-2">
+          {sideToggle("min-w-0 flex-1")}
+          <button
+            type="button"
+            onClick={() => setMoreOpen((open) => !open)}
+            aria-expanded={moreOpen}
+            className={`shrink-0 rounded-lg border px-3 text-sm font-semibold ${
+              moreOpen
+                ? "border-blue-600 bg-blue-600 text-white"
+                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200"
+            }`}
+          >
+            {moreOpen ? "Back to tools" : "Card options"}
+          </button>
+        </div>
+      </div>
+      <div
+        className={
+          moreOpen
+            ? "duo-tools unfolded:overflow-y-auto unfolded:overscroll-contain unfolded:rounded-xl unfolded:border unfolded:border-gray-200 unfolded:dark:border-gray-700 unfolded:bg-white unfolded:dark:bg-gray-900 unfolded:px-3 unfolded:pb-3"
+            : "unfolded:hidden"
+        }
       >
-        {moreOpen ? "▾" : "▸"} Card options: sport, shape, teammate, limited edition
-      </button>
-      <div className={moreOpen ? "unfolded:max-h-[40dvh] unfolded:shrink-0 unfolded:overflow-y-auto unfolded:overscroll-contain" : "unfolded:hidden"}>
       {!isParent && (
         <button
           onClick={handleDownloadCard}
@@ -3313,7 +3417,11 @@ export default function CardEditor({
       </div>
 
       {/* Toolbar — different content for front vs back. */}
-      <div className="mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden unfolded:mt-2 unfolded:flex unfolded:min-h-0 unfolded:flex-1 unfolded:flex-col">
+      <div
+        className={`duo-tools mt-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden unfolded:flex unfolded:flex-col ${
+          moreOpen ? "unfolded:hidden" : ""
+        }`}
+      >
         {side === "front" && (
         <div className="flex border-b border-gray-200 dark:border-gray-700 unfolded:shrink-0">
           {(["photo", "bg", "text"] as const).map((t) => (
@@ -4117,7 +4225,7 @@ export default function CardEditor({
               </div>
 
               {/* Circulation — limited-edition run size, serialized on the front. */}
-              <div className={moreOpen ? "" : "unfolded:hidden"}>
+              <div>
               <Field label="Cards in circulation (optional)">
                 <input
                   type="number"
@@ -4623,11 +4731,16 @@ export default function CardEditor({
       {/* Assign / Save — one row under the options on large touch screens, so
           finishing never means scrolling past every option. */}
       <div className="mt-4 space-y-2 unfolded:contents">
-        <div className={`space-y-2 unfolded:mt-2 unfolded:grid unfolded:shrink-0 unfolded:gap-2 unfolded:space-y-0 unfolded:pb-[env(safe-area-inset-bottom)] ${
-          allowDrafts ? "unfolded:grid-cols-[auto_1fr_1fr]" : "unfolded:grid-cols-[auto_1fr]"
-        }`}>
+        <div className="duo-save space-y-2 unfolded:grid unfolded:grid-cols-[auto_1fr] unfolded:gap-2 unfolded:space-y-0">
         {notice && (
           <p className="text-sm text-green-600 dark:text-green-400 unfolded:col-span-full">{notice}</p>
+        )}
+        {/* On large touch screens errors show here, so they can't push the card
+            off its side of the fold. */}
+        {error && (
+          <p role="alert" className="hidden text-sm text-red-500 dark:text-red-400 unfolded:col-span-full unfolded:block">
+            {error}
+          </p>
         )}
 
         <div className="flex gap-2 unfolded:contents">
@@ -4658,7 +4771,7 @@ export default function CardEditor({
           <button
             onClick={handleSaveDraft}
             disabled={!cutoutDataUrl || step === "saving" || downloading}
-            className="w-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
+            className="w-full unfolded:col-span-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
           >
             {draftId
               ? "💾 Update draft"
@@ -5016,7 +5129,7 @@ export default function CardEditor({
 
       {/* Player-match picker — choose one of the AI's ~10 suggestions. */}
       {lookAlikeOptions && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4">
               <div>
@@ -5081,7 +5194,7 @@ export default function CardEditor({
       {/* Duo-match picker — like the solo one, but each option is a PAIR with up
           to two pro photos. */}
       {duoMatchOptions && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4">
               <div>
@@ -5153,7 +5266,7 @@ export default function CardEditor({
 
       {/* Covers the flicker while each serialized copy is rendered. */}
       {exportingSerials && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -5169,7 +5282,7 @@ export default function CardEditor({
 
       {/* Covers the flicker while every background is rendered for the sheet. */}
       {exportingAll && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -5185,7 +5298,7 @@ export default function CardEditor({
       {/* Save failed / timed out — a blocking panel with the reason and a Retry
           that re-runs the exact same save. Retry wins over every other overlay. */}
       {saveError ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-950 text-xl">
               ⚠️
@@ -5214,7 +5327,7 @@ export default function CardEditor({
         /* Save succeeded — a checkmark (never a spinner) so a slow next-screen
            load can't look like an endless save. The router also navigates on its
            own; "Done" is the manual escape hatch if that stalls. */
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400 text-xl">
               ✓
@@ -5236,7 +5349,7 @@ export default function CardEditor({
       ) : (step === "saving" || downloading || addingPlayer) ? (
         /* Saving / exporting / downloading / adding a player — covers the wait
            (render + upload, or background removal for an added player). */
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
