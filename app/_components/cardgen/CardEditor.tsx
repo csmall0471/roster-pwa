@@ -42,6 +42,16 @@ import CardBackDuo from "./CardBackDuo";
 import { MAX_EXTRA, DEFAULT_DUO_QUESTIONS, joinNames } from "./card-duo";
 import { compositeFrontCanvas } from "./card-raster";
 import { NAME_FONTS, getNameFont } from "./name-fonts";
+import {
+  TeamPlate,
+  TEAM_STYLES,
+  TEAM_COLORS,
+  DEFAULT_TEAM_STYLE,
+  AUTO_TEAM_COLORS,
+  resolveTeamPalette,
+  cardWidthUnit,
+  containerUnit,
+} from "./team-styles";
 import CardBack, { type BackStats } from "./CardBack";
 import SignaturePad, { type SignatureResult } from "./SignaturePad";
 import {
@@ -712,6 +722,18 @@ export default function CardEditor({
     initialDesign?.frame ?? NO_FRAME
   );
   const frame = getFrame(frameId);
+  // Team-name treatment (top-left plate) and its colors. "auto" colors follow
+  // the frame's team plate, else the classic white/black.
+  const [teamStyle, setTeamStyle] = useState<string>(
+    initialDesign?.text.team_style ?? DEFAULT_TEAM_STYLE
+  );
+  const [teamColors, setTeamColors] = useState<string>(
+    initialDesign?.text.team_colors ?? AUTO_TEAM_COLORS
+  );
+  const { palette: teamPalette, explicit: teamColorsExplicit } = resolveTeamPalette(
+    teamColors,
+    frame?.teamPlate
+  );
   // Number of copies "in circulation" — a serialized limited-edition stamp on
   // the front. Kept as a string for the input; parsed to a number when saved.
   const [circulation, setCirculation] = useState(
@@ -1891,6 +1913,8 @@ export default function CardEditor({
         name_font: nameFont,
         name_size: nameSize,
         name_italic: nameItalic,
+        ...(teamStyle !== DEFAULT_TEAM_STYLE ? { team_style: teamStyle } : {}),
+        ...(teamColors !== AUTO_TEAM_COLORS ? { team_colors: teamColors } : {}),
       },
       circulation:
         circulation.trim() && Number.isFinite(Number(circulation))
@@ -2879,61 +2903,22 @@ export default function CardEditor({
           </div>
         )}
 
-        {/* Team name plate — stacked chevron-cut chips. Plate stays flush to the
-            left edge (full-bleed), but the text is inset so print trim can't
-            clip it. */}
-        <div
-          style={{
-            position: "absolute",
-            // With a frame, tuck the plate just inside the top-left border;
-            // otherwise it's full-bleed to the left edge.
-            top: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT + 1.2} / 100)` : "6.5%",
-            left: frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : 0,
-            pointerEvents: "none",
-            filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))",
-          }}
-        >
-          <div
-            style={{
-              background: frame ? frame.teamPlate.background : "#fff",
-              color: frame ? frame.teamPlate.color : "#0a0a0a",
-              padding: frame
-                ? "0.38em 1.4em"
-                : "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
-              clipPath:
-                "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
-              fontFamily: "var(--font-anton), Impact, sans-serif",
-              fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
-              letterSpacing: "0.04em",
-              lineHeight: 1,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {teamText || "TEAM"}
-          </div>
-          {(ageText || seasonText) && (
-            <div
-              style={{
-                background: frame ? frame.teamPlate.subBackground : "#0a0a0a",
-                color: frame ? frame.teamPlate.subColor : "#fff",
-                padding: frame
-                  ? "0.45em 1.4em"
-                  : "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
-                clipPath:
-                  "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
-                fontFamily:
-                  "var(--font-geist-sans), system-ui, sans-serif",
-                fontSize: "calc(var(--cardw, 22rem) * 2.7 / 100)",
-                letterSpacing: "0.22em",
-                fontWeight: 700,
-                marginTop: "-1px",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {[ageText, seasonText].filter(Boolean).join(" · ")}
-            </div>
-          )}
-        </div>
+        {/* Team name plate — style + colors from the Text tab (team-styles.tsx).
+            Bleed styles run flush to the left edge with the text inset so print
+            trim can't clip it; with a frame they tuck inside the border. */}
+        <TeamPlate
+          styleId={teamStyle}
+          team={teamText}
+          age={ageText}
+          season={seasonText}
+          palette={teamPalette}
+          explicitColors={teamColorsExplicit}
+          u={cardWidthUnit}
+          top={frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT + 1.2} / 100)` : "6.5%"}
+          framedLeft={frame ? `calc(var(--cardw, 22rem) * ${FRAME_PLATE_INSET_PCT} / 100)` : null}
+          textColor={titleColor}
+          textShadow={titleShadow}
+        />
 
         {/* Player name — a colored plate bar when a frame is active, otherwise
             plain title text over the photo. */}
@@ -3675,32 +3660,22 @@ export default function CardEditor({
                           }}
                         />
                       )}
-                      {/* Mini name plate */}
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "6%",
-                          left: 0,
-                          pointerEvents: "none",
-                        }}
-                      >
-                        <div
-                          style={{
-                            background: "#fff",
-                            color: "#0a0a0a",
-                            padding: "0.2em 0.55em 0.2em 8%",
-                            clipPath:
-                              "polygon(0 0, 100% 0, calc(100% - 0.4em) 100%, 0 100%)",
-                            fontFamily:
-                              "var(--font-anton), Impact, sans-serif",
-                            fontSize: "7cqw",
-                            lineHeight: 1,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {(teamText || "TEAM").slice(0, 10)}
-                        </div>
-                      </div>
+                      {/* Mini team plate (current team style + colors) */}
+                      <TeamPlate
+                        styleId={teamStyle}
+                        team={(teamText || "TEAM").slice(0, 10)}
+                        age=""
+                        season=""
+                        showSub={false}
+                        compact
+                        palette={teamPalette}
+                        explicitColors={teamColorsExplicit}
+                        u={containerUnit()}
+                        top="6%"
+                        framedLeft={null}
+                        textColor={lightText ? "#fff" : "#111"}
+                        textShadow={lightText ? "0 1px 3px rgba(0,0,0,0.55)" : "none"}
+                      />
                       {/* Mini player name */}
                       <div
                         style={{
@@ -3958,6 +3933,98 @@ export default function CardEditor({
                   />
                 </Field>
               </div>
+
+              {/* Team name style — each tile previews the style on this card's
+                  background with the real team/age/season text. */}
+              <Field label="Team name style">
+                <div className="grid grid-cols-2 gap-1.5 desktop:grid-cols-3">
+                  {TEAM_STYLES.map((ts) => {
+                    const selected = teamStyle === ts.id;
+                    return (
+                      <button
+                        key={ts.id}
+                        onClick={() => {
+                          setTeamStyle(ts.id);
+                          scrollToPreview();
+                          track("card_team_style_picked", { team_style: ts.id });
+                        }}
+                        aria-pressed={selected}
+                        aria-label={`${ts.name} team name style`}
+                        className={`relative overflow-hidden rounded-md border text-left transition-all ${
+                          selected
+                            ? "border-blue-500 ring-2 ring-blue-500"
+                            : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-500"
+                        }`}
+                      >
+                        <div
+                          className="relative w-full aspect-[16/10] overflow-hidden"
+                          style={{ ...bgStyle, containerType: "inline-size" }}
+                        >
+                          <TeamPlate
+                            styleId={ts.id}
+                            team={teamText}
+                            age={ageText}
+                            season={seasonText}
+                            compact
+                            palette={teamPalette}
+                            explicitColors={teamColorsExplicit}
+                            u={containerUnit(1.2)}
+                            top="11%"
+                            framedLeft={null}
+                            textColor={titleColor}
+                            textShadow={titleShadow}
+                          />
+                        </div>
+                        <div
+                          className={`px-2 py-1 text-[10px] font-medium truncate ${
+                            selected
+                              ? "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
+                              : "bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400"
+                          }`}
+                        >
+                          {ts.name}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              {/* Team name colors — "Auto" follows the frame (or white/black). */}
+              <Field label="Team name colors">
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setTeamColors(AUTO_TEAM_COLORS)}
+                    aria-pressed={teamColors === AUTO_TEAM_COLORS}
+                    title={frame ? "Auto (match the frame)" : "Auto (white & black)"}
+                    className={`h-8 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${
+                      teamColors === AUTO_TEAM_COLORS
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
+                        : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    Auto
+                  </button>
+                  {TEAM_COLORS.map((c) => {
+                    const selected = teamColors === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => setTeamColors(c.id)}
+                        aria-pressed={selected}
+                        aria-label={`${c.name} team name colors`}
+                        title={c.name}
+                        className={`h-8 w-8 rounded-full overflow-hidden border border-gray-300 dark:border-gray-600 transition-all ${
+                          selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""
+                        }`}
+                        style={{
+                          background: `linear-gradient(135deg, ${c.palette.background} 0 58%, ${c.palette.subBackground} 58% 100%)`,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </Field>
               <Field label="Name line 1">
                 <input
                   value={nameL1}

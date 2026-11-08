@@ -201,6 +201,11 @@ export interface CardDesign {
     name_font?: string;
     name_size?: number; // multiplier 0.5–1.5 against the base
     name_italic?: boolean;
+    // Team-name plate treatment (id from cardgen/team-styles). Absent = "chevron".
+    team_style?: string;
+    // Team-name plate colors (id from cardgen/team-styles). Absent = "auto"
+    // (follow the frame, else white/black).
+    team_colors?: string;
   };
   back?: CardBackDesign;
   // Number of copies "in circulation" — shown as a limited-edition stamp on the
