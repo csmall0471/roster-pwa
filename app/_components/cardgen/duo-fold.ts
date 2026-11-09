@@ -168,14 +168,65 @@ export function useKeyboard(): Keyboard {
   return { top, height };
 }
 
-// ?cover=1, for testing on the Duo: lets the page run under iOS's side strip
-// (viewport-fit=cover) while the full-screen editor is open, so ?debug=layout
-// can show whether the strip's inset is reported. If it is, the card tools'
-// bar could move into the strip itself. The editor pads each side by its own
-// inset, so nothing lands under the clock.
+// Screen check: the switch in Card options (large touch screens, coach only),
+// for testing on a phone where the address can't be edited, like the Home
+// Screen app. It shows the ?debug=layout numbers and runs the ?cover=1 test
+// below, and lasts until the app is closed. The URL parameters still work in
+// a browser.
+const SCREEN_CHECK_KEY = "duo-screen-check";
+const screenCheckListeners = new Set<() => void>();
+let screenCheckOn: boolean | null = null;
+
+function readScreenCheck(): boolean {
+  if (screenCheckOn === null) {
+    try {
+      screenCheckOn = window.sessionStorage.getItem(SCREEN_CHECK_KEY) === "1";
+    } catch {
+      screenCheckOn = false;
+    }
+  }
+  return screenCheckOn;
+}
+
+export function setScreenCheck(on: boolean) {
+  screenCheckOn = on;
+  try {
+    if (on) window.sessionStorage.setItem(SCREEN_CHECK_KEY, "1");
+    else window.sessionStorage.removeItem(SCREEN_CHECK_KEY);
+  } catch {
+    // Private mode: it still works until the page reloads.
+  }
+  screenCheckListeners.forEach((l) => l());
+}
+
+function subscribeScreenCheck(onChange: () => void) {
+  screenCheckListeners.add(onChange);
+  return () => {
+    screenCheckListeners.delete(onChange);
+  };
+}
+
+function debugSnapshot(): boolean {
+  return param("debug") === "layout" || readScreenCheck();
+}
+
+function coverSnapshot(): boolean {
+  return param("cover") === "1" || readScreenCheck();
+}
+
+export function useDuoDebug(): boolean {
+  return useSyncExternalStore(subscribeScreenCheck, debugSnapshot, () => false);
+}
+
+// The strip test (?cover=1 or Screen check): lets the page run under iOS's
+// side strip (viewport-fit=cover) while the full-screen editor is open, so the
+// readout shows whether the strip's inset is reported. If it is, the card
+// tools' bar could move into the strip itself. The editor pads each side by
+// its own inset, so nothing lands under the clock.
 export function useViewportCoverTest(active: boolean) {
+  const on = useSyncExternalStore(subscribeScreenCheck, coverSnapshot, () => false);
   useEffect(() => {
-    if (!active || param("cover") !== "1") return;
+    if (!active || !on) return;
     const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
     if (!meta || /viewport-fit/.test(meta.content)) return;
     const before = meta.content;
@@ -183,7 +234,7 @@ export function useViewportCoverTest(active: boolean) {
     return () => {
       meta.content = before;
     };
-  }, [active]);
+  }, [active, on]);
 }
 
 function safeAreaText(): string {
@@ -199,13 +250,15 @@ function safeAreaText(): string {
   return `safe area t${t} r${r} b${b} l${l}`;
 }
 
-export function duoDebugEnabled(): boolean {
-  return param("debug") === "layout";
-}
+let pageBeforeCover: string | null = null;
 
-// What ?debug=layout prints.
+// What the readout prints (?debug=layout or Screen check).
 export function duoDebugText(fold: Fold, keyboard: Keyboard): string {
   const vv = window.visualViewport;
+  const cover = /viewport-fit=cover/.test(
+    document.querySelector('meta[name="viewport"]')?.getAttribute("content") ?? ""
+  );
+  if (!cover && pageBeforeCover === null) pageBeforeCover = `${window.innerWidth}x${window.innerHeight}`;
   const angle = window.screen.orientation?.angle ?? (window as { orientation?: number }).orientation;
   const segments = (window as { viewport?: { segments?: DOMRect[] | null } }).viewport?.segments;
   const standalone = isStandalone();
@@ -213,7 +266,8 @@ export function duoDebugText(fold: Fold, keyboard: Keyboard): string {
     `page ${window.innerWidth}x${window.innerHeight}  screen ${window.screen.width}x${window.screen.height}  angle ${angle ?? "?"}`,
     `visual ${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)} top ${Math.round(vv.offsetTop)}` : "n/a"}  segments ${segments?.length ?? "n/a"}`,
     `fold x ${fold.x ?? "-"}  y ${fold.y ?? "-"}  keyboard ${keyboard ? `${keyboard.height}@${keyboard.top}` : "no"}  ${standalone ? "home screen app" : "browser"}`,
-    `${safeAreaText()}  cover ${/viewport-fit=cover/.test(document.querySelector('meta[name="viewport"]')?.getAttribute("content") ?? "") ? "on" : "off"}`,
+    `${safeAreaText()}  strip test ${cover ? "on" : "off"}  page before ${pageBeforeCover ?? "?"}`,
+    `dpr ${window.devicePixelRatio}  avail ${window.screen.availWidth}x${window.screen.availHeight}  outer ${window.outerWidth}x${window.outerHeight}  ${window.matchMedia("(pointer: coarse)").matches ? "touch" : "mouse"}`,
   ].join("\n");
 }
 

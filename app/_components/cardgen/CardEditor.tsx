@@ -5,7 +5,6 @@ import {
   useRef,
   useEffect,
   useId,
-  useSyncExternalStore,
   useTransition,
   type CSSProperties,
 } from "react";
@@ -81,9 +80,12 @@ import {
   useDuoFold,
   useKeyboard,
   useViewportCoverTest,
-  duoDebugEnabled,
+  useDuoDebug,
+  setScreenCheck,
   duoDebugText,
   UNFOLDED_QUERY,
+  type Fold,
+  type Keyboard,
 } from "./duo-fold";
 
 // Signature width on the sticker, as a fraction of the sticker's width, at
@@ -99,8 +101,6 @@ const LOGO_BASE_WIDTH = 0.28;
 // saved value; clear the field on the card to drop it.
 const DEFAULT_HEAD_COACH = "Connor Small";
 
-
-const subscribeNever = () => () => {};
 
 // Moves focus into a pop-up when it opens, so VoiceOver and a hardware keyboard
 // start inside it rather than on the editor behind it. Module-level so React
@@ -597,7 +597,7 @@ export default function CardEditor({
   const keyboard = useKeyboard();
   const keyboardUp = keyboard !== null;
   useViewportCoverTest(step !== "upload" && step !== "processing");
-  const duoDebug = useSyncExternalStore(subscribeNever, duoDebugEnabled, () => false);
+  const duoDebug = useDuoDebug();
   const wasKeyboardUp = useRef(false);
   useEffect(() => {
     if (!window.matchMedia(UNFOLDED_QUERY).matches) return;
@@ -2913,9 +2913,7 @@ export default function CardEditor({
           {fold.y !== null && (
             <div aria-hidden className="pointer-events-none fixed inset-x-0 z-[60] h-px bg-red-500" style={{ top: fold.y }} />
           )}
-          <pre className="pointer-events-none fixed bottom-2 left-2 z-[60] whitespace-pre rounded bg-black/80 p-2 text-[11px] leading-tight text-white">
-            {duoDebugText(fold, keyboard)}
-          </pre>
+          <DuoReadout fold={fold} keyboard={keyboard} />
         </>
       )}
 
@@ -3393,6 +3391,18 @@ export default function CardEditor({
           className="mt-2 hidden w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 disabled:opacity-50 unfolded:block"
         >
           {downloading ? "Preparing…" : <><span aria-hidden>⬇︎ </span>Download front &amp; back</>}
+        </button>
+      )}
+      {/* For fixing the iPhone Duo layout from the Home Screen app, where the
+          address (?debug=layout) can't be edited. */}
+      {!isParent && (
+        <button
+          type="button"
+          onClick={() => setScreenCheck(!duoDebug)}
+          aria-pressed={duoDebug}
+          className="mt-2 hidden w-full rounded-lg border border-dashed border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 unfolded:block"
+        >
+          {duoDebug ? "Hide screen check" : "Screen check (iPhone Duo layout numbers)"}
         </button>
       )}
       {/* Sport — governs backgrounds, positions, the questionnaire wording, and
@@ -5750,3 +5760,19 @@ function RailItem({
     </button>
   );
 }
+
+// The screen-check readout. Redrawn every second so it shows the numbers after
+// the strip test changes the page, which doesn't always fire a resize.
+function DuoReadout({ fold, keyboard }: { fold: Fold; keyboard: Keyboard }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <pre className="pointer-events-none fixed bottom-2 left-2 z-[60] whitespace-pre rounded bg-black/80 p-2 text-[11px] leading-tight text-white">
+      {duoDebugText(fold, keyboard)}
+    </pre>
+  );
+}
+
