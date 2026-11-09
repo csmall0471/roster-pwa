@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 // Where the iPhone Duo's fold sits in the page, so the full-screen card editor
 // can put the card on one side of it and the tools on the other.
@@ -168,6 +168,37 @@ export function useKeyboard(): Keyboard {
   return { top, height };
 }
 
+// ?cover=1, for testing on the Duo: lets the page run under iOS's side strip
+// (viewport-fit=cover) while the full-screen editor is open, so ?debug=layout
+// can show whether the strip's inset is reported. If it is, the card tools'
+// bar could move into the strip itself. The editor pads each side by its own
+// inset, so nothing lands under the clock.
+export function useViewportCoverTest(active: boolean) {
+  useEffect(() => {
+    if (!active || param("cover") !== "1") return;
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    if (!meta || /viewport-fit/.test(meta.content)) return;
+    const before = meta.content;
+    meta.content = `${before}, viewport-fit=cover`;
+    return () => {
+      meta.content = before;
+    };
+  }, [active]);
+}
+
+function safeAreaText(): string {
+  const probe = document.createElement("div");
+  probe.style.cssText =
+    "position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const [t, r, b, l] = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map((v) =>
+    Math.round(parseFloat(v) || 0)
+  );
+  probe.remove();
+  return `safe area t${t} r${r} b${b} l${l}`;
+}
+
 export function duoDebugEnabled(): boolean {
   return param("debug") === "layout";
 }
@@ -182,6 +213,7 @@ export function duoDebugText(fold: Fold, keyboard: Keyboard): string {
     `page ${window.innerWidth}x${window.innerHeight}  screen ${window.screen.width}x${window.screen.height}  angle ${angle ?? "?"}`,
     `visual ${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)} top ${Math.round(vv.offsetTop)}` : "n/a"}  segments ${segments?.length ?? "n/a"}`,
     `fold x ${fold.x ?? "-"}  y ${fold.y ?? "-"}  keyboard ${keyboard ? `${keyboard.height}@${keyboard.top}` : "no"}  ${standalone ? "home screen app" : "browser"}`,
+    `${safeAreaText()}  cover ${/viewport-fit=cover/.test(document.querySelector('meta[name="viewport"]')?.getAttribute("content") ?? "") ? "on" : "off"}`,
   ].join("\n");
 }
 

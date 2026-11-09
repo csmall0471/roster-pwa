@@ -77,7 +77,14 @@ import {
 import { buildZip, type ZipEntry } from "./zip";
 import type { CardDesign, CardSubject, CardOrientation } from "@/lib/types";
 import { normalizePhotoForUpload } from "./photo-normalize";
-import { useDuoFold, useKeyboard, duoDebugEnabled, duoDebugText, UNFOLDED_QUERY } from "./duo-fold";
+import {
+  useDuoFold,
+  useKeyboard,
+  useViewportCoverTest,
+  duoDebugEnabled,
+  duoDebugText,
+  UNFOLDED_QUERY,
+} from "./duo-fold";
 
 // Signature width on the sticker, as a fraction of the sticker's width, at
 // scale 1 (the resize slider multiplies it). Shared by the preview + export.
@@ -589,6 +596,7 @@ export default function CardEditor({
   const fold = useDuoFold();
   const keyboard = useKeyboard();
   const keyboardUp = keyboard !== null;
+  useViewportCoverTest(step !== "upload" && step !== "processing");
   const duoDebug = useSyncExternalStore(subscribeNever, duoDebugEnabled, () => false);
   const wasKeyboardUp = useRef(false);
   useEffect(() => {
@@ -2814,20 +2822,44 @@ export default function CardEditor({
 
   const fullName = [nameL1, nameL2].filter(Boolean).join(" ");
 
+  function switchSide(s: "front" | "back") {
+    if (s === side) return;
+    setSide(s);
+    setMoreOpen(false);
+    optionsScrollRef.current?.scrollTo({ top: 0 });
+    track("card_side_switched", { side: s });
+    logClientActivity("card_side_switched", { side: s }).catch(() => {});
+  }
+
+  function switchTab(t: "photo" | "bg" | "text") {
+    setTab(t);
+    setMoreOpen(false);
+    optionsScrollRef.current?.scrollTo({ top: 0 });
+  }
+
+  const saveLabel =
+    step === "saving"
+      ? standalone && !assignTargetKey
+        ? "Exporting…"
+        : "Saving…"
+      : !standalone
+        ? "Save card"
+        : assignTargetKey
+          ? `Save to ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
+          : "Save to Photos";
+  const draftLabel = draftId
+    ? "Update draft"
+    : assignTargetKey
+      ? `Save as draft for ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
+      : "Save as draft (no player yet)";
+  const saveDisabled = !cutoutDataUrl || step === "saving" || downloading || leaving;
+
   const sideToggle = (className: string) => (
     <div className={`flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg ${className}`}>
         {(["front", "back"] as const).map((s) => (
           <button
             key={s}
-            onClick={() => {
-              if (s !== side) {
-                setSide(s);
-                setMoreOpen(false);
-                optionsScrollRef.current?.scrollTo({ top: 0 });
-                track("card_side_switched", { side: s });
-                logClientActivity("card_side_switched", { side: s }).catch(() => {});
-              }
-            }}
+            onClick={() => switchSide(s)}
             className={`flex-1 py-1.5 unfolded:py-2.5 text-xs unfolded:text-sm font-semibold uppercase tracking-wide rounded-md transition-colors ${
               side === s
                 ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm"
@@ -3224,7 +3256,7 @@ export default function CardEditor({
           options, above the tools. Card options swap in for the tools. */}
       <div className="duo-head hidden flex-col gap-2 unfolded:flex">
         {duoPlayerPicker}
-        <div className="flex items-stretch gap-2">
+        <div className="duo-head-bar flex items-stretch gap-2">
           {sideToggle("min-w-0 flex-1")}
           <button
             type="button"
@@ -3240,6 +3272,113 @@ export default function CardEditor({
           </button>
         </div>
       </div>
+      {/* Held wide on large touch screens, the editor's controls sit in one
+          vertical bar on the right edge, the way iOS lays out a native app's bars
+          on the iPhone Duo: the way out and the main action at the top, the
+          section switches at the foot, under the right thumb. Held tall, the
+          usual rows are used instead (globals.css, .duo-rail). */}
+      <nav aria-label="Card tools" className="duo-rail hidden">
+        <div className="flex flex-col gap-1">
+          <RailItem
+            label={leaving ? "Leaving" : "Close"}
+            title="Close without saving"
+            onClick={leave}
+            disabled={leaving}
+            busy={leaving}
+            icon={<path d="M6 6l12 12M18 6L6 18" />}
+          />
+          <RailItem
+            label={step === "saving" ? "Saving" : "Save"}
+            title={saveLabel}
+            onClick={() => handleSave(standalone ? assignTargetKey || undefined : undefined)}
+            disabled={saveDisabled}
+            primary
+            busy={step === "saving"}
+            icon={<path d="M5 12.5l4.5 4.5L19 7" />}
+          />
+          {allowDrafts && (
+            <RailItem
+              label="Draft"
+              title={draftLabel}
+              onClick={handleSaveDraft}
+              disabled={!cutoutDataUrl || step === "saving" || downloading}
+              icon={<path d="M7 3.5h10v17l-5-3.5-5 3.5z" />}
+            />
+          )}
+          <RailItem
+            label="Options"
+            title={moreOpen ? "Back to tools" : "Card options: sport, shape, teammates"}
+            onClick={() => setMoreOpen((open) => !open)}
+            active={moreOpen}
+            icon={
+              <>
+                <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+                <circle cx="15" cy="7" r="2" />
+                <circle cx="9" cy="17" r="2" />
+              </>
+            }
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <RailItem
+            label="Front"
+            title="Front of the card"
+            onClick={() => switchSide("front")}
+            active={side === "front" && !moreOpen}
+            icon={
+              <>
+                <rect x="5" y="3" width="14" height="18" rx="2" />
+                <circle cx="12" cy="10" r="2.5" />
+                <path d="M8.5 17c1.2-2.2 5.8-2.2 7 0" />
+              </>
+            }
+          />
+          <RailItem
+            label="Back"
+            title="Back of the card"
+            onClick={() => switchSide("back")}
+            active={side === "back" && !moreOpen}
+            icon={
+              <>
+                <rect x="5" y="3" width="14" height="18" rx="2" />
+                <path d="M8.5 8h7M8.5 12h7M8.5 16h4" />
+              </>
+            }
+          />
+          {side === "front" && (
+            <>
+              <div aria-hidden className="mx-3 my-1 h-px bg-gray-200 dark:bg-gray-700" />
+              <RailItem
+                label="Photo"
+                title="Photo: size, turn, signature"
+                onClick={() => switchTab("photo")}
+                active={tab === "photo" && !moreOpen}
+                icon={
+                  <>
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <circle cx="9" cy="10" r="1.5" />
+                    <path d="M21 16l-5-5-8 8" />
+                  </>
+                }
+              />
+              <RailItem
+                label="Background"
+                title="Background, frame and logo"
+                onClick={() => switchTab("bg")}
+                active={tab === "bg" && !moreOpen}
+                icon={<path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5" />}
+              />
+              <RailItem
+                label="Text"
+                title="Names, design and colours"
+                onClick={() => switchTab("text")}
+                active={tab === "text" && !moreOpen}
+                icon={<path d="M5 6h14M12 6v13M9 19h6" />}
+              />
+            </>
+          )}
+        </div>
+      </nav>
       <div
         className={
           moreOpen
@@ -3258,7 +3397,7 @@ export default function CardEditor({
       )}
       {/* Sport — governs backgrounds, positions, the questionnaire wording, and
           the "plays like" match for the whole card. */}
-      <div className="mt-4 flex items-center gap-2">
+      <div className="mt-4 flex items-center gap-2 unfolded:flex-wrap unfolded:gap-y-2">
         <label htmlFor="card-sport" className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
           Sport
         </label>
@@ -3275,7 +3414,7 @@ export default function CardEditor({
           ))}
         </select>
 
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 ml-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 ml-2 unfolded:ml-0">
           Shape
         </span>
         <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
@@ -3301,7 +3440,7 @@ export default function CardEditor({
           make single-player cards, so the group tools are hidden for them. */}
       {!isParent && (
       <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 unfolded:flex-wrap unfolded:gap-y-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
             Players
           </p>
@@ -3487,14 +3626,11 @@ export default function CardEditor({
         }`}
       >
         {side === "front" && (
-        <div className="flex border-b border-gray-200 dark:border-gray-700 unfolded:shrink-0">
+        <div className="duo-tabs flex border-b border-gray-200 dark:border-gray-700 unfolded:shrink-0">
           {(["photo", "bg", "text"] as const).map((t) => (
             <button
               key={t}
-              onClick={() => {
-                setTab(t);
-                optionsScrollRef.current?.scrollTo({ top: 0 });
-              }}
+              onClick={() => switchTab(t)}
               className={`flex-1 px-3 py-2 unfolded:py-3 text-xs font-semibold uppercase tracking-wide transition-colors ${
                 tab === t
                   ? "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
@@ -4418,8 +4554,9 @@ export default function CardEditor({
 
         {side === "back" && !isDuo && (
           <div className="p-3 space-y-3">
-            {/* Headshot (upper-right of the back) */}
-            <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+            {/* Headshot (upper-right of the back). Wraps its buttons under the
+                text when the tools are narrow (held wide beside the bar). */}
+            <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 p-2 unfolded:flex-wrap">
               <div
                 className="h-12 w-12 shrink-0 rounded-full bg-gray-100 dark:bg-gray-800 bg-cover bg-center border border-gray-200 dark:border-gray-700"
                 style={
@@ -4428,11 +4565,11 @@ export default function CardEditor({
                     : undefined
                 }
               />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 unfolded:min-w-[9rem]">
                 <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">Headshot</div>
                 <div className="text-[11px] text-gray-400 dark:text-gray-500">Upper-right of the back. Drag it in its circle to reposition.</div>
               </div>
-              <div className="flex flex-col items-end gap-1">
+              <div className="flex flex-col items-end gap-1 unfolded:ml-auto">
                 <div className="flex gap-2">
                   {cutoutUrl && (
                     <button
@@ -4813,7 +4950,7 @@ export default function CardEditor({
             onClick={leave}
             disabled={leaving}
             aria-busy={leaving}
-            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-70"
+            className="duo-act flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-70"
           >
             {leaving && (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 dark:border-gray-300 border-t-transparent" />
@@ -4822,18 +4959,10 @@ export default function CardEditor({
           </button>
           <button
             onClick={() => handleSave(standalone ? assignTargetKey || undefined : undefined)}
-            disabled={!cutoutDataUrl || step === "saving" || downloading || leaving}
-            className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            disabled={saveDisabled}
+            className="duo-act flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {step === "saving"
-              ? standalone && !assignTargetKey
-                ? "Exporting…"
-                : "Saving…"
-              : !standalone
-                ? "Save card"
-                : assignTargetKey
-                  ? `Save to ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
-                  : "Save to Photos"}
+            {saveLabel}
           </button>
         </div>
 
@@ -4841,14 +4970,10 @@ export default function CardEditor({
           <button
             onClick={handleSaveDraft}
             disabled={!cutoutDataUrl || step === "saving" || downloading}
-            className="duo-draft w-full unfolded:col-span-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
+            className="duo-draft duo-act w-full unfolded:col-span-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
           >
             <span aria-hidden>💾 </span>
-            {draftId
-              ? "Update draft"
-              : assignTargetKey
-                ? `Save as draft for ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
-                : "Save as draft (no player yet)"}
+            {draftLabel}
           </button>
         )}
         </div>
@@ -5564,5 +5689,64 @@ function TeamColorRow({
         </label>
       </div>
     </div>
+  );
+}
+
+// One item in the editor's vertical bar (held wide on large touch screens): a
+// symbol over a short title, at least 48pt tall. `title` is the full name for
+// VoiceOver when the short title leaves something out ("Save to Ethan Lu").
+function RailItem({
+  label,
+  title,
+  icon,
+  onClick,
+  active = false,
+  disabled = false,
+  primary = false,
+  busy = false,
+}: {
+  label: string;
+  title?: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  primary?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={title ?? label}
+      aria-pressed={primary ? undefined : active}
+      aria-busy={busy || undefined}
+      className={`flex w-full flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 py-1.5 text-[12px] font-semibold leading-tight transition-colors disabled:opacity-50 ${
+        primary
+          ? "min-h-14 bg-blue-600 text-white hover:bg-blue-700"
+          : active
+            ? "min-h-12 bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+            : "min-h-12 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+      }`}
+    >
+      {busy ? (
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      ) : (
+        <svg
+          aria-hidden
+          viewBox="0 0 24 24"
+          className="h-6 w-6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {icon}
+        </svg>
+      )}
+      <span className="max-w-full truncate">{label}</span>
+    </button>
   );
 }
