@@ -212,10 +212,12 @@ export default function DraftsList({
                 {[d.team_name, d.season].filter(Boolean).join(" · ") || "—"}
               </div>
             </Link>
+            {/* Deletes at once, so on touch screens it gets a real 44pt row of its
+                own rather than a tap area reaching up over the draft's link. */}
             <button
               onClick={() => remove(d.id)}
               disabled={pending}
-              className="mt-1 text-[11px] font-medium text-gray-400 hover:text-red-600 disabled:opacity-50"
+              className="mt-1 text-[11px] font-medium text-gray-400 hover:text-red-600 disabled:opacity-50 pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center pointer-coarse:pr-3"
             >
               Delete
             </button>
@@ -225,8 +227,8 @@ export default function DraftsList({
 
       {/* Opening a draft — full-screen loading while the editor reloads. */}
       {navPending && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+        <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div role="status" className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
               Loading draft…

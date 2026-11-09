@@ -95,6 +95,11 @@ const DEFAULT_HEAD_COACH = "Connor Small";
 
 const subscribeNever = () => () => {};
 
+// Moves focus into a pop-up when it opens, so VoiceOver and a hardware keyboard
+// start inside it rather than on the editor behind it. Module-level so React
+// calls it once per mount, not on every render.
+const focusOnMount = (el: HTMLElement | null) => el?.focus({ preventScroll: true });
+
 // The 2" sticker export is hidden for now; flip this to bring it back.
 const SHOW_STICKER: boolean = false;
 
@@ -855,6 +860,19 @@ export default function CardEditor({
   const [duoMatchOptions, setDuoMatchOptions] = useState<
     DuoLookalikeOption[] | null
   >(null);
+  // Escape closes the pop-up that's open (a hardware keyboard on the iPhone Duo
+  // or an iPad). The signature pad handles its own.
+  useEffect(() => {
+    if (!lookAlikeOptions && !duoMatchOptions && !saveError) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (saveError) setSaveError(null);
+      else if (duoMatchOptions) setDuoMatchOptions(null);
+      else setLookAlikeOptions(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lookAlikeOptions, duoMatchOptions, saveError]);
   const [headshotUrl, setHeadshotUrl] = useState<string | null>(
     initBack?.headshot_url ?? null
   );
@@ -2728,7 +2746,7 @@ export default function CardEditor({
 
   if (step === "upload") {
     return (
-      <div className="max-w-md mx-auto overflow-x-hidden">
+      <div className="touch-hits max-w-md mx-auto overflow-x-hidden">
         {error && (
           <p className="text-sm text-red-500 dark:text-red-400 mb-3">{error}</p>
         )}
@@ -2745,11 +2763,20 @@ export default function CardEditor({
             Try the saved photo again
           </button>
         )}
+        {/* A button to VoiceOver and a hardware keyboard (Tab, then Return or
+            Space). Not a <button>: it holds the file input. */}
         <div
+          role="button"
+          tabIndex={0}
           onClick={() => fileRef.current?.click()}
-          className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-2xl px-6 py-16 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+            e.preventDefault();
+            fileRef.current?.click();
+          }}
+          className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-2xl px-6 py-16 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 focus-visible:border-blue-500 focus-visible:outline-none transition-colors"
         >
-          <div className="text-5xl mb-3">📸</div>
+          <div aria-hidden className="text-5xl mb-3">📸</div>
           <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
             {firstName ? `Pick a photo of ${firstName}` : "Pick a photo"}
           </p>
@@ -2813,6 +2840,17 @@ export default function CardEditor({
     </div>
   );
 
+  // Large touch screens: the last thing in each scrolling tools panel. It fades
+  // the panel's bottom edge while there's more below (held tall with a wide
+  // card, the Photo tab shows only its sliders, and iOS hides scroll bars until
+  // you scroll). Sticky, so at the very end it sits on its own empty space.
+  const scrollFade = (
+    <div
+      aria-hidden
+      className="pointer-events-none sticky bottom-0 hidden h-8 bg-gradient-to-t from-white dark:from-gray-900 unfolded:block"
+    />
+  );
+
   // Large touch screens: the card has one side of the iPhone Duo's fold to
   // itself and the tools the other (globals.css, .duo-grid). The fold's position
   // and the on-screen keyboard come from duo-fold.ts.
@@ -2828,7 +2866,7 @@ export default function CardEditor({
       data-no-ptr
       data-kb={keyboard ? "" : undefined}
       style={duoStyle}
-      className="card-fullscreen w-full max-w-md desktop:max-w-none mx-auto overflow-x-hidden desktop:overflow-x-visible unfolded:fixed unfolded:inset-0 unfolded:z-40 unfolded:flex unfolded:h-dvh unfolded:max-w-none unfolded:flex-col unfolded:overflow-hidden unfolded:bg-gray-50 unfolded:p-3 unfolded:dark:bg-gray-950"
+      className="card-fullscreen touch-hits w-full max-w-md desktop:max-w-none mx-auto overflow-x-hidden desktop:overflow-x-visible unfolded:fixed unfolded:inset-0 unfolded:z-40 unfolded:flex unfolded:h-dvh unfolded:max-w-none unfolded:flex-col unfolded:overflow-hidden unfolded:bg-gray-50 unfolded:p-3 unfolded:dark:bg-gray-950"
     >
       {error && (
         <p className="text-sm text-red-500 dark:text-red-400 mb-3 unfolded:hidden">{error}</p>
@@ -3215,7 +3253,7 @@ export default function CardEditor({
           disabled={!cutoutDataUrl || step === "saving" || downloading}
           className="mt-2 hidden w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 disabled:opacity-50 unfolded:block"
         >
-          {downloading ? "Preparing…" : "⬇︎ Download front & back"}
+          {downloading ? "Preparing…" : <><span aria-hidden>⬇︎ </span>Download front &amp; back</>}
         </button>
       )}
       {/* Sport — governs backgrounds, positions, the questionnaire wording, and
@@ -3246,7 +3284,7 @@ export default function CardEditor({
               key={o}
               type="button"
               onClick={() => setOrientation(o)}
-              className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`px-2.5 py-1 text-xs font-medium transition-colors pointer-coarse:min-h-11 ${
                 orientation === o
                   ? "bg-blue-600 text-white"
                   : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -3273,7 +3311,7 @@ export default function CardEditor({
                 type="button"
                 onClick={() => extraFileRef.current?.click()}
                 disabled={addingPlayer}
-                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 pointer-coarse:min-h-11"
               >
                 {addingPlayer ? "Adding…" : "+ Add player (photo)"}
               </button>
@@ -3281,7 +3319,7 @@ export default function CardEditor({
                 type="button"
                 onClick={addNameOnlyPlayer}
                 disabled={addingPlayer}
-                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 pointer-coarse:min-h-11"
                 title="Shares the group photo — just a name and signature"
               >
                 + Add name only
@@ -3439,6 +3477,7 @@ export default function CardEditor({
       </div>
       )}
 
+      {scrollFade}
       </div>
 
       {/* Toolbar — different content for front vs back. */}
@@ -3564,7 +3603,7 @@ export default function CardEditor({
                       onClick={() => setShowSigPad(true)}
                       className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
                     >
-                      {(sigDataUrl ?? sigUrl) ? "Redraw" : "✍️ Draw signature"}
+                      {(sigDataUrl ?? sigUrl) ? "Redraw" : <><span aria-hidden>✍️ </span>Draw signature</>}
                     </button>
                   </div>
                 </div>
@@ -3888,13 +3927,13 @@ export default function CardEditor({
                     <button
                       onClick={() => logoFileRef.current?.click()}
                       disabled={uploadingLogo}
-                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 pointer-coarse:min-h-11"
                     >
                       {uploadingLogo
                         ? "Uploading…"
                         : (logoDataUrl ?? logoUrl)
                           ? "Replace"
-                          : "🏈 Add logo"}
+                          : <><span aria-hidden>🏈 </span>Add logo</>}
                     </button>
                   </div>
                 </div>
@@ -4750,6 +4789,7 @@ export default function CardEditor({
             </div>
           </div>
         )}
+        {scrollFade}
       </div>
       </div>
 
@@ -4801,13 +4841,14 @@ export default function CardEditor({
           <button
             onClick={handleSaveDraft}
             disabled={!cutoutDataUrl || step === "saving" || downloading}
-            className="w-full unfolded:col-span-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
+            className="duo-draft w-full unfolded:col-span-full rounded-lg border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/60 disabled:opacity-50"
           >
+            <span aria-hidden>💾 </span>
             {draftId
-              ? "💾 Update draft"
+              ? "Update draft"
               : assignTargetKey
-                ? `💾 Save as draft for ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
-                : "💾 Save as draft (no player yet)"}
+                ? `Save as draft for ${assignTargets.find((t) => t.key === assignTargetKey)?.name ?? "player"}`
+                : "Save as draft (no player yet)"}
           </button>
         )}
         </div>
@@ -4818,7 +4859,7 @@ export default function CardEditor({
             disabled={!cutoutDataUrl || step === "saving" || downloading}
             className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 unfolded:hidden"
           >
-            {downloading ? "Preparing…" : "⬇︎ Download front & back"}
+            {downloading ? "Preparing…" : <><span aria-hidden>⬇︎ </span>Download front &amp; back</>}
           </button>
         )}
 
@@ -5160,10 +5201,17 @@ export default function CardEditor({
       {/* Player-match picker — choose one of the AI's ~10 suggestions. */}
       {lookAlikeOptions && (
         <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl">
+          <div
+            ref={focusOnMount}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lookalike-title"
+            tabIndex={-1}
+            className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl outline-none"
+          >
             <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                <h3 id="lookalike-title" className="text-sm font-bold text-gray-900 dark:text-white">
                   Pick a player match
                 </h3>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -5225,10 +5273,17 @@ export default function CardEditor({
           to two pro photos. */}
       {duoMatchOptions && (
         <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl">
+          <div
+            ref={focusOnMount}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="duomatch-title"
+            tabIndex={-1}
+            className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-xl outline-none"
+          >
             <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                <h3 id="duomatch-title" className="text-sm font-bold text-gray-900 dark:text-white">
                   Pick a duo match
                 </h3>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -5297,7 +5352,7 @@ export default function CardEditor({
       {/* Covers the flicker while each serialized copy is rendered. */}
       {exportingSerials && (
         <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+          <div role="status" className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
               Rendering serialized cards…
@@ -5313,7 +5368,7 @@ export default function CardEditor({
       {/* Covers the flicker while every background is rendered for the sheet. */}
       {exportingAll && (
         <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+          <div role="status" className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
               Building background options…
@@ -5329,14 +5384,22 @@ export default function CardEditor({
           that re-runs the exact same save. Retry wins over every other overlay. */}
       {saveError ? (
         <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
-            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-950 text-xl">
+          <div
+            ref={focusOnMount}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="save-error-title"
+            aria-describedby="save-error-detail"
+            tabIndex={-1}
+            className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl outline-none"
+          >
+            <div aria-hidden className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-950 text-xl">
               ⚠️
             </div>
-            <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+            <p id="save-error-title" className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
               Couldn&apos;t save your card
             </p>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{saveError}</p>
+            <p id="save-error-detail" className="mt-1 text-xs text-gray-500 dark:text-gray-400">{saveError}</p>
             <div className="mt-4 flex gap-2">
               <button
                 onClick={() => setSaveError(null)}
@@ -5358,8 +5421,15 @@ export default function CardEditor({
            load can't look like an endless save. The router also navigates on its
            own; "Done" is the manual escape hatch if that stalls. */
         <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
-            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400 text-xl">
+          <div
+            ref={focusOnMount}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Card saved"
+            tabIndex={-1}
+            className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl outline-none"
+          >
+            <div aria-hidden className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400 text-xl">
               ✓
             </div>
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -5383,7 +5453,7 @@ export default function CardEditor({
         /* Saving / exporting / downloading / adding a player — covers the wait
            (render + upload, or background removal for an added player). */
         <div className="duo-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-          <div className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
+          <div role="status" className="max-w-xs rounded-2xl bg-white dark:bg-gray-900 px-6 py-5 text-center shadow-xl">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
               {addingPlayer
@@ -5454,7 +5524,9 @@ function TeamColorRow({
       <span className="w-[4.25rem] shrink-0 pt-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
         {label}
       </span>
-      <div className="flex flex-wrap gap-1.5">
+      {/* Touch screens: 36px swatches 8px apart, so each one's 44pt tap area
+          (globals.css, .touch-hits) takes exactly half the gap on every side. */}
+      <div className="flex flex-wrap gap-1.5 pointer-coarse:gap-2">
         {QUICK_TEAM_COLORS.map((c) => {
           const selected = current === c.hex;
           return (
@@ -5464,7 +5536,7 @@ function TeamColorRow({
               aria-pressed={selected}
               aria-label={`${label} color ${c.name}`}
               title={c.name}
-              className={`h-7 w-7 rounded-full border border-gray-300 dark:border-gray-600 transition-all ${
+              className={`h-7 w-7 pointer-coarse:h-9 pointer-coarse:w-9 rounded-full border border-gray-300 dark:border-gray-600 transition-all ${
                 selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""
               }`}
               style={{ background: c.hex }}
@@ -5473,7 +5545,7 @@ function TeamColorRow({
         })}
         <label
           title="Custom color"
-          className={`relative h-7 w-7 cursor-pointer overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 ${
+          className={`relative h-7 w-7 pointer-coarse:h-9 pointer-coarse:w-9 cursor-pointer overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 ${
             custom ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""
           }`}
           style={{

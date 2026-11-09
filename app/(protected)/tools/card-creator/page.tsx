@@ -102,7 +102,7 @@ export default async function CardCreatorPage({
             href="/tools/card-creator/bulk"
             className="mt-3 inline-block rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
-            📸 Upload team photos as drafts
+            <span aria-hidden>📸 </span>Upload team photos as drafts
           </Link>
         )}
       </div>

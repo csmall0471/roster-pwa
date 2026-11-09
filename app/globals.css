@@ -223,6 +223,27 @@ body {
   animation: tb-indeterminate 1.1s ease-in-out infinite;
 }
 
+/* Touch screens (the iPhone Duo open or closed, other phones, iPads): every
+   button and link in the card editor, its pop-ups and the Card Creator page
+   answers taps over at least 44x44pt without changing how it looks, the web
+   version of SwiftUI's contentShape. Where small buttons sit in a row, space
+   them so the gap is at least 44px minus their size, or the later one's tap
+   area takes the whole gap. Fields get 16px text, which also stops iOS
+   zooming the page when one is tapped on the closed Duo or a phone. */
+@media (pointer: coarse) {
+  .touch-hits :is(button, a[href]):not(.absolute, .fixed, .sticky) { position: relative; }
+  .touch-hits :is(button, a[href])::after {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc(50% - 22px));
+  }
+  .card-fullscreen :is(input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"]), select, textarea) {
+    font-size: 1rem;
+    min-height: 44px;
+  }
+  .card-fullscreen input[type="range"] { height: 44px; }
+}
+
 /* Card editor on large touch screens: bigger text and touch targets.
    16px fields also stop iOS zooming the page when one is tapped. */
 @media (min-width: 600px) and (max-width: 1023.98px) and (min-height: 480px),
@@ -285,7 +306,7 @@ body {
     .duo-grid[data-shape="v"] .duo-card { width: min(100%, 100cqh * 5 / 7); }
     .duo-grid[data-shape="h"] .duo-card { width: min(100%, 100cqh * 7 / 5); }
     /* Pop-ups (signature pad, pickers) open on the tools' page, off the fold. */
-    .duo-modal { padding-left: calc(var(--fold-x, 50vw) + var(--gutter) / 2); }
+    .duo-modal { padding-left: calc(var(--fold-x, 50vw) + var(--gutter, 48px) / 2); }
   }
 
   /* Held tall: the card above the fold with Front/Back and Save beside it, the
@@ -310,8 +331,12 @@ body {
       grid-template-areas: "card" "." "head" "tools" "save";
     }
     .duo-grid[data-shape="h"] .duo-head { margin-bottom: 8px; }
+    /* The tools get only what's left below the fold here, so Save as draft
+       shares the Cancel / Save row to give them one more row of room. */
+    .duo-grid[data-shape="h"] .duo-save:has(> .duo-draft) { grid-template-columns: auto 1fr 1fr; }
+    .duo-grid[data-shape="h"] .duo-draft { grid-column: auto; }
     .duo-grid[data-shape="h"] .duo-card { width: min(100%, var(--top) * 7 / 5); }
-    .duo-modal { padding-top: calc(var(--fold-y, 50dvh) + var(--gutter) / 2); }
+    .duo-modal { padding-top: calc(var(--fold-y, 50dvh) + var(--gutter, 48px) / 2); }
   }
 
   /* On-screen keyboard up: the editor shrinks to the space above it, with a
