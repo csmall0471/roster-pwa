@@ -6,6 +6,7 @@ import {
   useEffect,
   useId,
   useSyncExternalStore,
+  useTransition,
   type CSSProperties,
 } from "react";
 import { flushSync } from "react-dom";
@@ -510,6 +511,16 @@ export default function CardEditor({
   initialCardGroupId,
 }: Props) {
   const router = useRouter();
+  // Cancel / Done navigate back to a server-rendered page, which can take a
+  // moment; the transition's pending flag drives an immediate spinner. The
+  // page is prefetched so the trip back is quick.
+  const [leaving, startLeaving] = useTransition();
+  function leave() {
+    startLeaving(() => router.push(returnHref));
+  }
+  useEffect(() => {
+    router.prefetch(returnHref);
+  }, [router, returnHref]);
 
   // Parent-facing view: hide the coach-only power tools throughout the editor.
   const isParent = audience === "parent";
@@ -4759,14 +4770,19 @@ export default function CardEditor({
 
         <div className="flex gap-2 unfolded:contents">
           <button
-            onClick={() => router.push(returnHref)}
-            className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            onClick={leave}
+            disabled={leaving}
+            aria-busy={leaving}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-70"
           >
-            Cancel
+            {leaving && (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 dark:border-gray-300 border-t-transparent" />
+            )}
+            {leaving ? "Leaving…" : "Cancel"}
           </button>
           <button
             onClick={() => handleSave(standalone ? assignTargetKey || undefined : undefined)}
-            disabled={!cutoutDataUrl || step === "saving" || downloading}
+            disabled={!cutoutDataUrl || step === "saving" || downloading || leaving}
             className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {step === "saving"
@@ -5353,10 +5369,13 @@ export default function CardEditor({
               Taking you back…
             </p>
             <button
-              onClick={() => router.push(returnHref)}
-              className="mt-4 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              onClick={leave}
+              disabled={leaving}
+              aria-busy={leaving}
+              className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-80"
             >
-              Done
+              {leaving && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+              {leaving ? "Loading…" : "Done"}
             </button>
           </div>
         </div>
