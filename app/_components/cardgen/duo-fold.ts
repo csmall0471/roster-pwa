@@ -8,18 +8,16 @@ import { useSyncExternalStore } from "react";
 // The fold runs down the middle of the inner screen's long side: a vertical line
 // when it's held wide, a horizontal one when it's held tall. Safari gives a flat
 // phone no fold signal (the Viewport Segments API is behind a flag, and a flat
-// fold has zero width anyway), so it's worked out from the open screen's size
-// (window.outerWidth/Height). Held wide, the Home Screen app loses an ~84pt
-// strip on the camera side, so the page's centre isn't the fold: with the strip
-// on the right (as measured on the owner's Duo) the fold is at the screen's
-// middle, ~42pt right of the page's.
+// fold has zero width anyway), so it's worked out from the screen size. Held
+// wide, the Home Screen app loses an ~84pt strip on the camera side, so the
+// page's centre isn't the fold: with the strip on the right (as measured on the
+// owner's Duo) the fold is at the screen's middle, ~42pt right of the page's.
 //
-// Anything where the page doesn't nearly fill the window (a desktop browser, a
-// test iframe) falls back to the middle of the page.
+// Anything without a usable screen size (an iPad, a desktop window, a test
+// iframe) falls back to the middle of the page.
 //
 // Testing: ?fold=475 puts the fold at x=475, ?fold=y420 at y=420; ?kb=300 fakes a
-// 300px on-screen keyboard; ?debug=layout (or Screen check in Card options)
-// shows the numbers on screen.
+// 300px on-screen keyboard; ?debug=layout shows the numbers on screen.
 
 export type Fold = { x: number | null; y: number | null };
 
@@ -68,29 +66,25 @@ export function computeFold(): Fold {
     return b.left >= a.right ? { x: (a.right + b.left) / 2, y: null } : { x: null, y: (a.bottom + b.top) / 2 };
   }
 
-  // The open screen's size. On the Duo, screen.width/height report the closed
-  // outer display (466x678) even while it's open; outerWidth/outerHeight give
-  // the open screen (951x669 held wide, measured on the owner's Duo).
-  const fullW = window.outerWidth;
-  const fullH = window.outerHeight;
+  const long = Math.max(window.screen.width, window.screen.height);
   if (vw >= vh) {
-    // Held wide: whatever the page is missing from the screen's width is iOS's
-    // side strip. Measured: at angle 90 it's on the right. At 270 (turned the
-    // other way) it should follow the camera to the left; not yet seen.
-    const missing = fullW - vw;
+    // Held wide: whatever the page is missing from the screen's width is the
+    // side strip. It sits on the camera side, which is the left only when the
+    // phone is turned so its top points left (angle 90).
+    const missing = long - vw;
     if (missing < 0 || missing > 120) return { x: vw / 2, y: null };
     const angle =
       window.screen.orientation?.angle ??
       (window as { orientation?: number }).orientation ??
       0;
-    const stripOnLeft = missing > 20 && (angle === 270 || angle === -90);
-    return { x: fullW / 2 - (stripOnLeft ? missing : 0), y: null };
+    const stripOnLeft = missing > 20 && angle === 90;
+    return { x: long / 2 - (stripOnLeft ? missing : 0), y: null };
   }
   // Held tall: in the Home Screen app only the status bar sits above the page.
   // In Safari the bar can be above or below it, so take the page's middle.
-  const missing = fullH - vh;
+  const missing = long - vh;
   if (!isStandalone() || missing < 0 || missing > 200) return { x: null, y: vh / 2 };
-  return { x: null, y: fullH / 2 - missing };
+  return { x: null, y: long / 2 - missing };
 }
 
 function subscribeLayout(onChange: () => void) {
@@ -174,68 +168,11 @@ export function useKeyboard(): Keyboard {
   return { top, height };
 }
 
-// Screen check: the switch in Card options (large touch screens, coach only),
-// for testing on a phone where the address can't be edited, like the Home
-// Screen app. It shows the ?debug=layout numbers until the app is closed.
-//
-// Tried and dropped (2026-11-09): viewport-fit=cover to put the card tools'
-// bar inside iOS's side strip. On the Duo the Home Screen app's page stayed
-// 867 wide with no right inset, so iOS keeps pages out of the strip.
-const SCREEN_CHECK_KEY = "duo-screen-check";
-const screenCheckListeners = new Set<() => void>();
-let screenCheckOn: boolean | null = null;
-
-function readScreenCheck(): boolean {
-  if (screenCheckOn === null) {
-    try {
-      screenCheckOn = window.sessionStorage.getItem(SCREEN_CHECK_KEY) === "1";
-    } catch {
-      screenCheckOn = false;
-    }
-  }
-  return screenCheckOn;
+export function duoDebugEnabled(): boolean {
+  return param("debug") === "layout";
 }
 
-export function setScreenCheck(on: boolean) {
-  screenCheckOn = on;
-  try {
-    if (on) window.sessionStorage.setItem(SCREEN_CHECK_KEY, "1");
-    else window.sessionStorage.removeItem(SCREEN_CHECK_KEY);
-  } catch {
-    // Private mode: it still works until the page reloads.
-  }
-  screenCheckListeners.forEach((l) => l());
-}
-
-function subscribeScreenCheck(onChange: () => void) {
-  screenCheckListeners.add(onChange);
-  return () => {
-    screenCheckListeners.delete(onChange);
-  };
-}
-
-function debugSnapshot(): boolean {
-  return param("debug") === "layout" || readScreenCheck();
-}
-
-export function useDuoDebug(): boolean {
-  return useSyncExternalStore(subscribeScreenCheck, debugSnapshot, () => false);
-}
-
-function safeAreaText(): string {
-  const probe = document.createElement("div");
-  probe.style.cssText =
-    "position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
-  document.body.appendChild(probe);
-  const cs = getComputedStyle(probe);
-  const [t, r, b, l] = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map((v) =>
-    Math.round(parseFloat(v) || 0)
-  );
-  probe.remove();
-  return `safe area t${t} r${r} b${b} l${l}`;
-}
-
-// What the readout prints (?debug=layout or Screen check).
+// What ?debug=layout prints.
 export function duoDebugText(fold: Fold, keyboard: Keyboard): string {
   const vv = window.visualViewport;
   const angle = window.screen.orientation?.angle ?? (window as { orientation?: number }).orientation;
@@ -245,8 +182,6 @@ export function duoDebugText(fold: Fold, keyboard: Keyboard): string {
     `page ${window.innerWidth}x${window.innerHeight}  screen ${window.screen.width}x${window.screen.height}  angle ${angle ?? "?"}`,
     `visual ${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)} top ${Math.round(vv.offsetTop)}` : "n/a"}  segments ${segments?.length ?? "n/a"}`,
     `fold x ${fold.x ?? "-"}  y ${fold.y ?? "-"}  keyboard ${keyboard ? `${keyboard.height}@${keyboard.top}` : "no"}  ${standalone ? "home screen app" : "browser"}`,
-    `${safeAreaText()}`,
-    `dpr ${window.devicePixelRatio}  avail ${window.screen.availWidth}x${window.screen.availHeight}  outer ${window.outerWidth}x${window.outerHeight}  ${window.matchMedia("(pointer: coarse)").matches ? "touch" : "mouse"}`,
   ].join("\n");
 }
 
