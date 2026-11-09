@@ -12,6 +12,10 @@
 // trim; inside a frame they become an inset L that stays clear of the keyline.
 // Every position is computed in u (see geo()), shared by render() and
 // circulation(), so the layout is identical at every preview size.
+//
+// The team block (team name + AGE · SEASON tab), the plate/pinstripe/pop
+// language and the jersey mark are exported so the card back (./sidebar-back)
+// draws the same pieces.
 
 import type { CSSProperties } from "react";
 import {
@@ -33,19 +37,19 @@ import {
 
 // ── Geometry (all in u) ──────────────────────────────────────────────────────
 
-const BLEED = 4; // how far a bleeding plate runs past the trim
-const K = 1.3; // secondary pinstripe thickness
+export const BLEED = 4; // how far a bleeding plate runs past the trim
+export const K = 1.3; // secondary pinstripe thickness
 const FRAME_GAP = 1.4; // framed: clear space between the keyline and the plates
 // Anton caps sit centered in the line box: [0.065, 0.925] em at line-height 1
 // (measured; the other name fonts are centered the same way to within 0.05em).
-const CAP_TOP = 0.065;
-const CAP_H = 0.86;
+export const CAP_TOP = 0.065;
+export const CAP_H = 0.86;
 
-const TEAM_LS = 0.06;
-const SUB_LS = 0.2;
-const SUB_F = 2.3;
-const TAB_T = 4.8; // age · season tab thickness
-const TAB_CUT = 3.4; // angled end of the tab
+export const TEAM_LS = 0.06;
+export const SUB_LS = 0.2;
+export const SUB_F = 2.3;
+export const TAB_T = 4.8; // age · season tab thickness
+export const TAB_CUT = 3.4; // angled end of the tab
 const NAME_LS = 0.02;
 const FIRST_RATIO = 0.6; // first-name size vs. last name on the one-line name
 const NAME_GAP_EM = 0.28; // space between first and last name
@@ -60,7 +64,7 @@ const DIGIT_EM = 0.5; // Anton digit advance (0.494) + a little tracking
 const NAME_SAFETY = 1.22;
 const TEXT_SAFETY = 1.07;
 
-function contrast(a: string, b: string) {
+export function contrast(a: string, b: string) {
   const [x, y] = [luminance(a), luminance(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
@@ -70,13 +74,13 @@ function contrast(a: string, b: string) {
 // both the text and the plate (it would just smear same-colored text).
 // `rotated` = text turned -90°: its local axes are turned too, so the offset is
 // flipped to keep the shadow falling down-right on the card like the others.
-function pop(p: FrontDesignProps, em = 0.055, rotated = false): string | undefined {
+export function pop(p: FrontDesignProps, em = 0.055, rotated = false): string | undefined {
   const { color, background, subBackground } = p.palette;
   if (contrast(subBackground, color) < 1.4 || contrast(subBackground, background) < 1.25) return undefined;
   return `${rotated ? -em : em}em ${em}em 0 ${subBackground}`;
 }
 
-function fit(text: string, base: number, avail: number, em: number, ls: number, safety = TEXT_SAFETY) {
+export function fit(text: string, base: number, avail: number, em: number, ls: number, safety = TEXT_SAFETY) {
   return fitSize(text, base, avail, em * safety, ls);
 }
 
@@ -206,8 +210,60 @@ function geo(p: FrontDesignProps) {
 
 // Lifts the plates off the photo; tighter inside a frame so it doesn't smudge
 // the keyline.
-function plateShadow(p: FrontDesignProps) {
+export function plateShadow(p: FrontDesignProps) {
   return p.frame ? "drop-shadow(0 1px 3px rgba(0,0,0,0.35))" : "drop-shadow(0 2px 7px rgba(0,0,0,0.38))";
+}
+
+// ── Team block (shared with the back) ────────────────────────────────────────
+// The front turns these up the bar (rotated); the back lays them flat across
+// its header. Positioning is the caller's; these carry the look.
+
+// Team name: Anton on the primary plate with the secondary pop.
+export function teamNameStyle(p: FrontDesignProps, size: number, rotated = false): CSSProperties {
+  return {
+    color: p.palette.color,
+    fontFamily: FONTS.anton,
+    fontWeight: 400,
+    fontSize: p.u(size),
+    letterSpacing: `${TEAM_LS}em`,
+    lineHeight: 1,
+    textShadow: pop(p, 0.06, rotated),
+  };
+}
+
+// AGE · SEASON tab: secondary strip with an angled end. The edge at the top of
+// the box (y = 0) is the one that meets the plate's pinstripe.
+export function subTabStyle(p: FrontDesignProps, size: number, startPad: number, endPad: number): CSSProperties {
+  const { u, palette } = p;
+  return {
+    height: u(TAB_T),
+    boxSizing: "border-box",
+    paddingLeft: u(startPad),
+    paddingRight: u(endPad),
+    display: "flex",
+    alignItems: "center",
+    background: palette.subBackground,
+    color: palette.subColor,
+    clipPath: `polygon(0 0, 100% 0, calc(100% - ${u(TAB_CUT)}) 100%, 0 100%)`,
+    fontFamily: FONTS.sans,
+    fontWeight: 700,
+    fontSize: u(size),
+    letterSpacing: `${SUB_LS}em`,
+    lineHeight: 1,
+  };
+}
+
+// Jersey number: a small raised "#" before the digits (the parent sets the
+// Anton font, size and color). The digits carry the baseline.
+export function JerseyDigits({ num }: { num: string }) {
+  return (
+    <>
+      <div style={{ fontSize: "0.46em", lineHeight: 1, marginTop: "0.12em", marginRight: "0.04em", alignSelf: "flex-start" }}>
+        #
+      </div>
+      <div style={{ lineHeight: 1 }}>{num}</div>
+    </>
+  );
 }
 
 // Built horizontally, then turned -90° about its bottom-left corner and pulled
@@ -250,25 +306,7 @@ function Frame(p: FrontDesignProps) {
         })}
       />
       {g.sub && (
-        <div
-          style={{
-            ...vertical(g.sideR, g.tabBottom, p),
-            height: u(TAB_T),
-            boxSizing: "border-box",
-            paddingLeft: u(g.tabStartPad),
-            paddingRight: u(g.tabEndPad),
-            display: "flex",
-            alignItems: "center",
-            background: palette.subBackground,
-            color: palette.subColor,
-            clipPath: `polygon(0 0, 100% 0, calc(100% - ${u(TAB_CUT)}) 100%, 0 100%)`,
-            fontFamily: FONTS.sans,
-            fontWeight: 700,
-            fontSize: u(g.subF),
-            letterSpacing: `${SUB_LS}em`,
-            lineHeight: 1,
-          }}
-        >
+        <div style={{ ...vertical(g.sideR, g.tabBottom, p), ...subTabStyle(p, g.subF, g.tabStartPad, g.tabEndPad) }}>
           {g.sub}
         </div>
       )}
@@ -277,20 +315,7 @@ function Frame(p: FrontDesignProps) {
       <div style={abs({ left: o, right: o, bottom: o, top: u(g.bandTop), background: palette.background })} />
 
       {/* Team name up the bar. */}
-      <div
-        style={{
-          ...vertical(g.teamX0, g.startY, p),
-          color: palette.color,
-          fontFamily: FONTS.anton,
-          fontWeight: 400,
-          fontSize: u(g.teamF),
-          letterSpacing: `${TEAM_LS}em`,
-          lineHeight: 1,
-          textShadow: pop(p, 0.06, true),
-        }}
-      >
-        {g.team}
-      </div>
+      <div style={{ ...vertical(g.teamX0, g.startY, p), ...teamNameStyle(p, g.teamF, true) }}>{g.team}</div>
 
       <Name p={p} g={g} />
 
@@ -390,8 +415,7 @@ function Jersey(p: FrontDesignProps) {
           textShadow: pop(p, 0.06),
         })}
       >
-        <div style={{ fontSize: "0.46em", lineHeight: 1, marginTop: "0.12em", marginRight: "0.04em" }}>#</div>
-        <div style={{ lineHeight: 1 }}>{p.jersey}</div>
+        <JerseyDigits num={p.jersey} />
       </div>
     </div>
   );

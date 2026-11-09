@@ -1,5 +1,6 @@
-import { forwardRef, type CSSProperties } from "react";
-import type { TeamPalette } from "./front-designs/shared";
+import { Fragment, forwardRef, type CSSProperties } from "react";
+import { classicBack } from "./front-designs/classic-back";
+import { backThemeProps, type BackTheme, type FrontDesignProps } from "./front-designs/shared";
 import type { CardSport } from "@/lib/types";
 import { abbreviatePositionFor, getSport } from "./sports";
 
@@ -20,8 +21,10 @@ export type BackStats = {
 };
 
 type Props = {
-  // Team colors picked on the front (header chips). Absent = white/black.
-  teamPalette?: TeamPalette;
+  // Card design styling for the back (the design's BackTheme) and the shared
+  // design inputs (palette, team text, fonts …). Absent = Classic back.
+  theme?: BackTheme;
+  designProps?: FrontDesignProps;
   bgStyle: CSSProperties;
   sport?: CardSport;
   landscape?: boolean;
@@ -43,13 +46,16 @@ type Props = {
   onHeadshotPointerUp?: (e: React.PointerEvent) => void;
 };
 
-// Used in CardEditor as the back-side stage. Pure presentational — owns
-// no state. Same 5/7 aspect + same chevron name-plate language as the front.
+// Used in CardEditor as the back-side stage. Pure presentational — owns no
+// state. The LAYOUT lives here (header, headshot, content panel, section order,
+// portrait vs landscape columns); the card design's BackTheme styles the
+// pieces so the back matches the front.
 
 const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
   {
+    theme = classicBack,
+    designProps,
     bgStyle,
-    teamPalette,
     sport,
     landscape,
     teamText,
@@ -79,57 +85,82 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     ["AGE", stats.age],
   ].filter(([, v]) => v && v.length > 0) as Array<[string, string]>;
 
+  const L = !!landscape;
+  const p = backThemeProps(designProps, {
+    landscape: L,
+    variant: "solo",
+    team: teamText,
+    age: ageText,
+    season: seasonText,
+    // Headshot box: portrait top 3.5% / right 9.5% / 22% wide; landscape
+    // top 5% / right 5% / 17% wide.
+    headshot: headshotUrl
+      ? L
+        ? { left: 140 * (1 - 0.05 - 0.17), top: 5, size: 140 * 0.17 }
+        : { left: 100 * (1 - 0.095 - 0.22), top: 140 * 0.035, size: 22 }
+      : null,
+    panelTop: L ? 30 : 140 * 0.22,
+  });
+  const hs = theme.headshot(p);
+  const matchRing = theme.matchRing(p);
+  const hasQA = !!(
+    stats.favorite_team ||
+    stats.favorite_player ||
+    stats.signature_move ||
+    stats.favorite_drill ||
+    stats.biggest_fan ||
+    stats.loudest_parent ||
+    stats.hype_song
+  );
+  const qa = (
+    <>
+      {stats.favorite_team && <Fragment>{theme.qa(p, "FAV TEAM", stats.favorite_team)}</Fragment>}
+      {stats.favorite_player && <Fragment>{theme.qa(p, "FAV PLAYER", stats.favorite_player)}</Fragment>}
+      {stats.signature_move && <Fragment>{theme.qa(p, qL.signature_move.back, stats.signature_move)}</Fragment>}
+      {stats.favorite_drill && <Fragment>{theme.qa(p, qL.favorite_drill.back, stats.favorite_drill)}</Fragment>}
+      {stats.biggest_fan && <Fragment>{theme.qa(p, "BIGGEST FAN", stats.biggest_fan)}</Fragment>}
+      {stats.loudest_parent && <Fragment>{theme.qa(p, "LOUDEST FAN", stats.loudest_parent)}</Fragment>}
+      {stats.hype_song && <Fragment>{theme.qa(p, "HYPE SONG", stats.hype_song)}</Fragment>}
+    </>
+  );
+  const match = lookAlike
+    ? theme.match(p, {
+        label: "PLAYER MATCH",
+        name: lookAlike.toUpperCase(),
+        blurb: lookAlikeBlurb || undefined,
+        // Drawn onto the canvas at export by the compositor (iOS drops raster
+        // images from the html-to-image snapshot).
+        photos: (style) =>
+          lookAlikePhoto ? (
+            <div
+              data-lookalike-photo
+              data-ring={matchRing}
+              style={{
+                ...style,
+                backgroundImage: `url(${lookAlikePhoto})`,
+                backgroundSize: "cover",
+                // Bias toward the top so the face shows, not the jersey/torso.
+                backgroundPosition: "center 22%",
+              }}
+            />
+          ) : null,
+      })
+    : null;
+  const coaches = (stats.coach || stats.assistant_coaches) && (
+    <>
+      {stats.coach && theme.coach(p, "HEAD COACH", stats.coach)}
+      {stats.assistant_coaches && theme.coach(p, "ASSISTANTS", stats.assistant_coaches)}
+    </>
+  );
+
   return (
     <div
       ref={ref}
       className="relative w-full mx-auto rounded-2xl overflow-hidden shadow-lg"
       style={{ aspectRatio: landscape ? "7 / 5" : "5 / 7", ...bgStyle }}
     >
-      {/* Header chevron chips — matches the front. Flush-left plate with the
-          text inset so print trim can't clip it. */}
-      <div
-        style={{
-          position: "absolute",
-          top: "6.5%",
-          left: 0,
-          pointerEvents: "none",
-          filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))",
-        }}
-      >
-        <div
-          style={{
-            background: teamPalette?.background ?? "#fff",
-            color: teamPalette?.color ?? "#0a0a0a",
-            padding: "0.38em 1.6em 0.38em calc(var(--cardw, 22rem) * 9 / 100)",
-            clipPath: "polygon(0 0, 100% 0, calc(100% - 0.8em) 100%, 0 100%)",
-            fontFamily: "var(--font-anton), Impact, sans-serif",
-            fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
-            letterSpacing: "0.04em",
-            lineHeight: 1,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {teamText || "TEAM"}
-        </div>
-        {(ageText || seasonText) && (
-          <div
-            style={{
-              background: teamPalette?.subBackground ?? "#0a0a0a",
-              color: teamPalette?.subColor ?? "#fff",
-              padding: "0.45em 1.6em 0.45em calc(var(--cardw, 22rem) * 9 / 100)",
-              clipPath: "polygon(0 0, 100% 0, calc(100% - 0.7em) 100%, 0 100%)",
-              fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-              fontSize: "calc(var(--cardw, 22rem) * 2.7 / 100)",
-              letterSpacing: "0.22em",
-              fontWeight: 700,
-              marginTop: "-1px",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {[ageText, seasonText].filter(Boolean).join(" · ")}
-          </div>
-        )}
-      </div>
+      {/* Header — the design's team block. */}
+      {theme.header(p)}
 
       {/* Headshot — small circle, upper-right (above the content panel). The
           compositor reads this element's box so it stays aligned in either
@@ -137,6 +168,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
       {headshotUrl && (
         <div
           data-headshot
+          data-ring={hs.ring}
           onPointerDown={onHeadshotPointerDown}
           onPointerMove={onHeadshotPointerMove}
           onPointerUp={onHeadshotPointerUp}
@@ -153,317 +185,106 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             backgroundPosition: headshotPosition ?? "center",
             backgroundRepeat: "no-repeat",
             borderRadius: "9999px",
-            border: "3px solid rgba(255,255,255,0.92)",
-            // drop-shadow (not box-shadow): box-shadow on a round element
-            // rasterizes to a rectangular shadow through html-to-image.
-            filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))",
+            ...hs.style,
             cursor: onHeadshotPointerDown ? "move" : undefined,
             touchAction: onHeadshotPointerDown ? "none" : undefined,
           }}
         />
       )}
 
-      {/* Content panel (portrait) — semi-transparent dark sheet, bottom ~75%. */}
+      {/* Content panel (portrait) — bottom ~75%. */}
       {!landscape && (
-      <div
-        style={{
-          position: "absolute",
-          left: "5%",
-          right: "5%",
-          top: "22%",
-          bottom: "5%",
-          background: "rgba(0,0,0,0.62)",
-          borderRadius: "14px",
-          padding: "4%",
-          color: "#fff",
-          display: "flex",
-          flexDirection: "column",
-          // Spread the sections to fill the panel instead of leaving a big void
-          // above the "plays like" banner; gap is the minimum spacing.
-          justifyContent: "space-between",
-          gap: "3.5%",
-          fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-        }}
-      >
-        {/* Player name row */}
         <div
           style={{
+            position: "absolute",
+            left: "5%",
+            right: "5%",
+            top: "22%",
+            bottom: "5%",
+            padding: "4%",
+            ...theme.panel(p),
             display: "flex",
-            alignItems: "baseline",
+            flexDirection: "column",
+            // Spread the sections to fill the panel instead of leaving a big void
+            // above the "plays like" banner; gap is the minimum spacing.
             justifyContent: "space-between",
-            gap: "6%",
+            gap: "3.5%",
           }}
         >
-          <span
+          {/* Player name row */}
+          <div
             style={{
-              fontFamily: "var(--font-anton), Impact, sans-serif",
-              fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
-              letterSpacing: "0.04em",
-              lineHeight: 1,
-              flex: "1 1 auto",
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: "6%",
             }}
           >
-            {playerName || "PLAYER"}
-          </span>
-          {jersey && (
             <span
               style={{
-                fontFamily: "var(--font-anton), Impact, sans-serif",
-                fontSize: "calc(var(--cardw, 22rem) * 8 / 100)",
-                color: "#fbbf24",
-                lineHeight: 1,
+                ...theme.name(p),
+                fontSize: p.u(7),
+                flex: "1 1 auto",
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
             >
-              #{jersey}
+              {playerName || "PLAYER"}
             </span>
-          )}
-        </div>
-
-        {/* Stat row — pill chips */}
-        {statRows.length > 0 && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${Math.min(statRows.length, 5)}, 1fr)`,
-              gap: "2%",
-            }}
-          >
-            {statRows.map(([k, v]) => (
-              <div
-                key={k}
-                style={{
-                  background: "rgba(255,255,255,0.12)",
-                  borderRadius: "8px",
-                  padding: "0.5em 0.3em",
-                  textAlign: "center",
-                  minWidth: 0,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
-                    letterSpacing: "0.18em",
-                    color: "rgba(255,255,255,0.55)",
-                    fontWeight: 700,
-                  }}
-                >
-                  {k}
-                </div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-anton), Impact, sans-serif",
-                    // Shrink so longer values (e.g. an un-abbreviated position or
-                    // a tall height like 5'11") stay on one line inside the pill.
-                    fontSize:
-                      v.length > 4
-                        ? "calc(var(--cardw, 22rem) * 3 / 100)"
-                        : "calc(var(--cardw, 22rem) * 4.2 / 100)",
-                    lineHeight: 1.1,
-                    marginTop: "2px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {v}
-                </div>
-              </div>
-            ))}
+            {jersey && theme.jersey(p, jersey)}
           </div>
-        )}
 
-        {/* Season quote — the player's own words, set off like a pull-quote. */}
-        {seasonQuote && (
-          <div
-            style={{
-              borderLeft: "3px solid #fbbf24",
-              paddingLeft: "0.7em",
-            }}
-          >
-            <p
-              style={{
-                fontSize: "calc(var(--cardw, 22rem) * 3.1 / 100)",
-                lineHeight: 1.35,
-                fontStyle: "italic",
-                fontWeight: 600,
-                color: "#fff",
-                margin: 0,
-              }}
-            >
-              &ldquo;{seasonQuote}&rdquo;
-            </p>
-          </div>
-        )}
-
-        {/* Scouting report */}
-        {scoutingReport && (
-          <div>
+          {/* Stat row */}
+          {statRows.length > 0 && (
             <div
               style={{
-                fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
-                letterSpacing: "0.22em",
-                color: "rgba(255,255,255,0.55)",
-                fontWeight: 700,
-                marginBottom: "0.4em",
+                display: "grid",
+                gridTemplateColumns: `repeat(${Math.min(statRows.length, 5)}, 1fr)`,
+                gap: "2%",
               }}
             >
-              SCOUTING REPORT
+              {statRows.map(([k, v]) => (
+                <Fragment key={k}>{theme.stat(p, k, v)}</Fragment>
+              ))}
             </div>
-            <p
+          )}
+
+          {/* Season quote — the player's own words, set off like a pull-quote. */}
+          {seasonQuote && theme.quote(p, seasonQuote)}
+
+          {/* Scouting report */}
+          {scoutingReport && (
+            <div>
+              {theme.label(p, "SCOUTING REPORT")}
+              <p style={theme.body(p)}>{scoutingReport}</p>
+            </div>
+          )}
+
+          {/* Favorites, signature move + fun answers — a compact two-up grid so
+              the (mostly short) answers use the horizontal space. */}
+          {hasQA && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55em 0.9em" }}>{qa}</div>
+          )}
+
+          {/* Plays like */}
+          {match}
+
+          {/* Coaching staff — a footer under the Player Match. */}
+          {coaches && (
+            <div
               style={{
-                fontSize: "calc(var(--cardw, 22rem) * 2.9 / 100)",
-                lineHeight: 1.4,
-                fontStyle: "italic",
-                color: "rgba(255,255,255,0.92)",
-                margin: 0,
+                display: "grid",
+                gridTemplateColumns: stats.coach && stats.assistant_coaches ? "1fr 1fr" : "1fr",
+                gap: "0.9em",
+                ...theme.divider(p),
               }}
             >
-              {scoutingReport}
-            </p>
-          </div>
-        )}
-
-        {/* Favorites, signature move + fun answers — a compact two-up grid so the
-            (mostly short) answers use the horizontal space instead of a row each. */}
-        {(stats.favorite_team ||
-          stats.favorite_player ||
-          stats.signature_move ||
-          stats.favorite_drill ||
-          stats.biggest_fan ||
-          stats.loudest_parent ||
-          stats.hype_song) && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "0.55em 0.9em",
-            }}
-          >
-            {stats.favorite_team && (
-              <QACell label="FAV TEAM" value={stats.favorite_team} />
-            )}
-            {stats.favorite_player && (
-              <QACell label="FAV PLAYER" value={stats.favorite_player} />
-            )}
-            {stats.signature_move && (
-              <QACell label={qL.signature_move.back} value={stats.signature_move} />
-            )}
-            {stats.favorite_drill && (
-              <QACell label={qL.favorite_drill.back} value={stats.favorite_drill} />
-            )}
-            {stats.biggest_fan && (
-              <QACell label="BIGGEST FAN" value={stats.biggest_fan} />
-            )}
-            {stats.loudest_parent && (
-              <QACell label="LOUDEST FAN" value={stats.loudest_parent} />
-            )}
-            {stats.hype_song && (
-              <QACell label="HYPE SONG" value={stats.hype_song} />
-            )}
-          </div>
-        )}
-
-        {/* Plays like */}
-        {lookAlike && (
-          <div
-            style={{
-              background: "linear-gradient(90deg, rgba(251,191,36,0.95) 0%, rgba(251,146,60,0.95) 100%)",
-              color: "#0a0a0a",
-              borderRadius: "10px",
-              padding: "0.7em 0.9em",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.8em",
-            }}
-          >
-            {lookAlikePhoto && (
-              // Drawn onto the canvas at export by the compositor (iOS drops
-              // raster images from the html-to-image snapshot).
-              <div
-                data-lookalike-photo
-                style={{
-                  width: "16%",
-                  aspectRatio: "1 / 1",
-                  flexShrink: 0,
-                  borderRadius: "9999px",
-                  backgroundImage: `url(${lookAlikePhoto})`,
-                  backgroundSize: "cover",
-                  // Bias toward the top so the face shows, not the jersey/torso.
-                  backgroundPosition: "center 22%",
-                  border: "2px solid rgba(10,10,10,0.55)",
-                }}
-              />
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {/* Section title (like the other panel headers), with the matched
-                  pro's name beneath it. */}
-              <div
-                style={{
-                  fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
-                  letterSpacing: "0.22em",
-                  fontWeight: 800,
-                  color: "rgba(10,10,10,0.6)",
-                  marginBottom: "0.15em",
-                }}
-              >
-                PLAYER MATCH
-              </div>
-              <div
-                style={{
-                  fontFamily: "var(--font-anton), Impact, sans-serif",
-                  fontSize: "calc(var(--cardw, 22rem) * 5.5 / 100)",
-                  lineHeight: 1,
-                  letterSpacing: "0.03em",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {lookAlike.toUpperCase()}
-              </div>
-              {lookAlikeBlurb && (
-                <p
-                  style={{
-                    margin: "0.3em 0 0",
-                    fontSize: "calc(var(--cardw, 22rem) * 2.5 / 100)",
-                    lineHeight: 1.25,
-                    fontWeight: 600,
-                    fontStyle: "italic",
-                    color: "rgba(10,10,10,0.82)",
-                  }}
-                >
-                  {lookAlikeBlurb}
-                </p>
-              )}
+              {coaches}
             </div>
-          </div>
-        )}
-
-        {/* Coaching staff — a footer under the Player Match, set off by a thin
-            rule. Amber labels + bold names keep it prominent without a second
-            amber block fighting the Player Match banner above it. */}
-        {(stats.coach || stats.assistant_coaches) && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                stats.coach && stats.assistant_coaches ? "1fr 1fr" : "1fr",
-              gap: "0.9em",
-              borderTop: "1px solid rgba(255,255,255,0.2)",
-              paddingTop: "0.7em",
-            }}
-          >
-            {stats.coach && <CoachCell label="HEAD COACH" value={stats.coach} />}
-            {stats.assistant_coaches && (
-              <CoachCell label="ASSISTANTS" value={stats.assistant_coaches} />
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
       )}
 
       {/* Content panel (landscape) — two columns so the wide, short back doesn't
@@ -477,13 +298,10 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             right: "4%",
             top: "30%",
             bottom: "5%",
-            background: "rgba(0,0,0,0.62)",
-            borderRadius: "14px",
             padding: "2.4% 3%",
-            color: "#fff",
+            ...theme.panel(p),
             display: "flex",
             gap: "3.5%",
-            fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
             overflow: "hidden",
           }}
         >
@@ -492,15 +310,13 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "4%" }}>
               <span
                 style={{
-                  fontFamily: "var(--font-anton), Impact, sans-serif",
+                  ...theme.name(p),
                   // The name shares a narrow column with the jersey number, so a
-                  // long name would clip on one line — let it wrap to two lines and
-                  // step the size down as it gets longer.
-                  fontSize: `calc(var(--cardw, 22rem) * ${
+                  // long name would clip on one line — let it wrap to two lines
+                  // and step the size down as it gets longer.
+                  fontSize: p.u(
                     (playerName || "PLAYER").length > 12 ? 4.4 : (playerName || "PLAYER").length > 8 ? 5.3 : 6.5
-                  } / 100)`,
-                  letterSpacing: "0.02em",
-                  lineHeight: 1.02,
+                  ),
                   flex: "1 1 auto",
                   minWidth: 0,
                   display: "-webkit-box",
@@ -512,286 +328,51 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               >
                 {playerName || "PLAYER"}
               </span>
-              {jersey && (
-                <span
-                  style={{
-                    fontFamily: "var(--font-anton), Impact, sans-serif",
-                    fontSize: "calc(var(--cardw, 22rem) * 7 / 100)",
-                    color: "#fbbf24",
-                    lineHeight: 1,
-                  }}
-                >
-                  #{jersey}
-                </span>
-              )}
+              {jersey && theme.jersey(p, jersey)}
             </div>
 
             {statRows.length > 0 && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5%" }}>
                 {statRows.map(([k, v]) => (
-                  <div
-                    key={k}
-                    style={{
-                      background: "rgba(255,255,255,0.12)",
-                      borderRadius: "8px",
-                      padding: "0.5em 0.3em",
-                      textAlign: "center",
-                      minWidth: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
-                        letterSpacing: "0.18em",
-                        color: "rgba(255,255,255,0.55)",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {k}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "var(--font-anton), Impact, sans-serif",
-                        fontSize:
-                          v.length > 4
-                            ? "calc(var(--cardw, 22rem) * 3 / 100)"
-                            : "calc(var(--cardw, 22rem) * 4.2 / 100)",
-                        lineHeight: 1.1,
-                        marginTop: "2px",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {v}
-                    </div>
-                  </div>
+                  <Fragment key={k}>{theme.stat(p, k, v)}</Fragment>
                 ))}
               </div>
             )}
 
-            {(stats.coach || stats.assistant_coaches) && (
+            {coaches && (
               <div
                 style={{
                   marginTop: "auto",
                   display: "flex",
                   flexDirection: "column",
                   gap: "0.5em",
-                  borderTop: "1px solid rgba(255,255,255,0.2)",
-                  paddingTop: "0.6em",
+                  ...theme.divider(p),
                 }}
               >
-                {stats.coach && <CoachCell label="HEAD COACH" value={stats.coach} />}
-                {stats.assistant_coaches && (
-                  <CoachCell label="ASSISTANTS" value={stats.assistant_coaches} />
-                )}
+                {coaches}
               </div>
             )}
           </div>
 
           {/* Right column — quote, scouting, favorites, player match */}
           <div style={{ flex: "1 1 auto", display: "flex", flexDirection: "column", gap: "4%", minWidth: 0, overflow: "hidden" }}>
-            {seasonQuote && (
-              <div style={{ borderLeft: "3px solid #fbbf24", paddingLeft: "0.7em" }}>
-                <p
-                  style={{
-                    fontSize: "calc(var(--cardw, 22rem) * 2.9 / 100)",
-                    lineHeight: 1.3,
-                    fontStyle: "italic",
-                    fontWeight: 600,
-                    color: "#fff",
-                    margin: 0,
-                  }}
-                >
-                  &ldquo;{seasonQuote}&rdquo;
-                </p>
-              </div>
-            )}
+            {seasonQuote && theme.quote(p, seasonQuote)}
 
             {scoutingReport && (
               <div>
-                <div
-                  style={{
-                    fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
-                    letterSpacing: "0.22em",
-                    color: "rgba(255,255,255,0.55)",
-                    fontWeight: 700,
-                    marginBottom: "0.35em",
-                  }}
-                >
-                  SCOUTING REPORT
-                </div>
-                <p
-                  style={{
-                    fontSize: "calc(var(--cardw, 22rem) * 2.8 / 100)",
-                    lineHeight: 1.35,
-                    fontStyle: "italic",
-                    color: "rgba(255,255,255,0.92)",
-                    margin: 0,
-                  }}
-                >
-                  {scoutingReport}
-                </p>
+                {theme.label(p, "SCOUTING REPORT")}
+                <p style={theme.body(p)}>{scoutingReport}</p>
               </div>
             )}
 
-            {(stats.favorite_team ||
-              stats.favorite_player ||
-              stats.signature_move ||
-              stats.favorite_drill ||
-              stats.biggest_fan ||
-              stats.loudest_parent ||
-              stats.hype_song) && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5em 0.9em" }}>
-                {stats.favorite_team && <QACell label="FAV TEAM" value={stats.favorite_team} />}
-                {stats.favorite_player && <QACell label="FAV PLAYER" value={stats.favorite_player} />}
-                {stats.signature_move && <QACell label={qL.signature_move.back} value={stats.signature_move} />}
-                {stats.favorite_drill && <QACell label={qL.favorite_drill.back} value={stats.favorite_drill} />}
-                {stats.biggest_fan && <QACell label="BIGGEST FAN" value={stats.biggest_fan} />}
-                {stats.loudest_parent && <QACell label="LOUDEST FAN" value={stats.loudest_parent} />}
-                {stats.hype_song && <QACell label="HYPE SONG" value={stats.hype_song} />}
-              </div>
-            )}
+            {hasQA && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5em 0.9em" }}>{qa}</div>}
 
-            {lookAlike && (
-              <div
-                style={{
-                  marginTop: "auto",
-                  background: "linear-gradient(90deg, rgba(251,191,36,0.95) 0%, rgba(251,146,60,0.95) 100%)",
-                  color: "#0a0a0a",
-                  borderRadius: "10px",
-                  padding: "0.6em 0.8em",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.7em",
-                }}
-              >
-                {lookAlikePhoto && (
-                  <div
-                    data-lookalike-photo
-                    style={{
-                      width: "14%",
-                      aspectRatio: "1 / 1",
-                      flexShrink: 0,
-                      borderRadius: "9999px",
-                      backgroundImage: `url(${lookAlikePhoto})`,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center 22%",
-                      border: "2px solid rgba(10,10,10,0.55)",
-                    }}
-                  />
-                )}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: "calc(var(--cardw, 22rem) * 1.9 / 100)",
-                      letterSpacing: "0.22em",
-                      fontWeight: 800,
-                      color: "rgba(10,10,10,0.6)",
-                      marginBottom: "0.12em",
-                    }}
-                  >
-                    PLAYER MATCH
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: "var(--font-anton), Impact, sans-serif",
-                      fontSize: "calc(var(--cardw, 22rem) * 5 / 100)",
-                      lineHeight: 1,
-                      letterSpacing: "0.03em",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {lookAlike.toUpperCase()}
-                  </div>
-                  {lookAlikeBlurb && (
-                    <p
-                      style={{
-                        margin: "0.25em 0 0",
-                        fontSize: "calc(var(--cardw, 22rem) * 2.3 / 100)",
-                        lineHeight: 1.2,
-                        fontWeight: 600,
-                        fontStyle: "italic",
-                        color: "rgba(10,10,10,0.82)",
-                      }}
-                    >
-                      {lookAlikeBlurb}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
+            {match && <div style={{ marginTop: "auto" }}>{match}</div>}
           </div>
         </div>
       )}
     </div>
   );
 });
-
-// Shorten common positions to a badge code so they fit the stat pill; custom
-// values (e.g. "Wing") pass through and the pill shrinks the font to fit.
-// Coaching staff cell — larger, bolder (Anton) name under an amber label so the
-// staff reads as the marquee info, above the fun Q&A grid.
-function CoachCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ minWidth: 0 }}>
-      <div
-        style={{
-          fontSize: "calc(var(--cardw, 22rem) * 2 / 100)",
-          letterSpacing: "0.16em",
-          color: "#fbbf24",
-          fontWeight: 700,
-          marginBottom: "0.2em",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontFamily: "var(--font-anton), Impact, sans-serif",
-          fontSize: "calc(var(--cardw, 22rem) * 3.8 / 100)",
-          lineHeight: 1.05,
-          letterSpacing: "0.02em",
-          color: "#fff",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-// Q&A cell — compact stacked label + answer, meant to tile two-up so short
-// answers use the horizontal space. Answers wrap rather than truncate.
-function QACell({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ minWidth: 0 }}>
-      <div
-        style={{
-          fontSize: "calc(var(--cardw, 22rem) * 1.85 / 100)",
-          letterSpacing: "0.12em",
-          color: "rgba(255,255,255,0.5)",
-          fontWeight: 700,
-          lineHeight: 1.1,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: "calc(var(--cardw, 22rem) * 2.9 / 100)",
-          fontWeight: 600,
-          color: "#fff",
-          lineHeight: 1.2,
-          overflowWrap: "anywhere",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
 
 export default CardBack;

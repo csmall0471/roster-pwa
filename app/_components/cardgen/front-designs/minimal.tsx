@@ -14,6 +14,8 @@
 // / caps 0.70 em, so line-height 0.8 + margin-bottom -0.1em makes the box
 // exactly the cap height. Geist ascent 1.01 / descent 0.29 / caps 0.71 em, so
 // line-height 0.72 does the same. Boxes = caps keeps every gap exact in u.
+//
+// The card back (./minimal-back) reuses the team block, its metrics and inks.
 
 import type { CSSProperties } from "react";
 import {
@@ -31,13 +33,13 @@ import {
 
 // Uppercase advance widths (em) measured without spaces — slightly wider than
 // FONT_EM so fitted text errs on the small side.
-const BEBAS_EM = 0.385;
+export const BEBAS_EM = 0.385;
 const DIGIT_EM = 0.4; // Bebas figures are tabular
-const SANS_EM = 0.665; // Geist 600 caps
+export const SANS_EM = 0.665; // Geist 600 caps
 
 const TEAM_LS = 0.16;
 const SMALL_LS = 0.3;
-const RULE = 0.5; // accent rule thickness (u)
+export const RULE = 0.5; // accent rule thickness (u)
 const SHORT_RULE = 8; // length of the jersey / name rules (u)
 
 // Cap-height boxes (see header).
@@ -67,10 +69,16 @@ function layout(p: FrontDesignProps) {
 
   // Team: right edge stays ≥ 3u (+ estimate slack) left of the jersey.
   const teamAvail = p.jersey ? p.W - side - jerseyW - 3.5 - side : p.W - 2 * side;
+
+  return { side, top, bottom, label, J, jerseyW, jerseyRuleW, gapLabel, gapRule, jerseyH, ...teamFit(p, teamAvail) };
+}
+
+// Team block (team name, rule, age · season) fitted to `avail` u of width.
+export function teamFit(p: FrontDesignProps, avail: number) {
   const team = teamOrPlaceholder(p);
-  const T = fitSize(team, 9, teamAvail, BEBAS_EM, TEAM_LS);
+  const T = fitSize(team, 9, avail, BEBAS_EM, TEAM_LS);
   const sub = subLine(p).toUpperCase();
-  const S = sub ? fitSize(sub, 2.7, teamAvail, SANS_EM, SMALL_LS) : 0;
+  const S = sub ? fitSize(sub, 2.7, avail, SANS_EM, SMALL_LS) : 0;
   const teamRuleGap = 1.6;
   const subGap = 1.5;
   const teamH = T * 0.7 + teamRuleGap + RULE + (sub ? subGap + S * 0.72 : 0);
@@ -78,13 +86,15 @@ function layout(p: FrontDesignProps) {
     [...team].length * (BEBAS_EM + TEAM_LS) * T,
     [...sub].length * (SANS_EM + SMALL_LS) * S
   );
-
-  return { side, top, bottom, label, J, jerseyW, jerseyRuleW, gapLabel, gapRule, jerseyH, team, T, sub, S, teamRuleGap, subGap, teamH, teamW };
+  return { team, T, sub, S, teamRuleGap, subGap, teamH, teamW };
 }
+
+// Where the team block sits (top-left corner, u) plus its fitted metrics.
+export type TeamGeom = { top: number; side: number } & ReturnType<typeof teamFit>;
 
 // ── Color ────────────────────────────────────────────────────────────────────
 
-type Ink = {
+export type Ink = {
   text: string; // display type (team, number, name)
   textShadow: string;
   small: string; // small caps (age · season, NO., coaches)
@@ -97,7 +107,7 @@ function contrast(a: number, b: number) {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-function inks(p: FrontDesignProps): Ink {
+export function inks(p: FrontDesignProps): Ink {
   if (p.colorSource === "default") {
     return {
       text: p.textColor,
@@ -143,7 +153,7 @@ function Rule({ p, ink, style }: { p: FrontDesignProps; ink: Ink; style: CSSProp
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
-function Team({ p, g, ink }: { p: FrontDesignProps; g: ReturnType<typeof layout>; ink: Ink }) {
+export function MinimalTeam({ p, g, ink }: { p: FrontDesignProps; g: TeamGeom; ink: Ink }) {
   return (
     <div
       style={abs({
@@ -320,7 +330,7 @@ export const minimal: FrontDesign = {
     const ink = inks(p);
     return (
       <>
-        <Team p={p} g={g} ink={ink} />
+        <MinimalTeam p={p} g={g} ink={ink} />
         <Jersey p={p} g={g} ink={ink} />
         <Name p={p} g={g} ink={ink} />
       </>

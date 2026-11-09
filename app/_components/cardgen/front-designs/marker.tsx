@@ -17,6 +17,9 @@
 //     drops toward the bottom trim.
 //   - Torn ends are cut inside the padding, so text never touches a jag.
 //   - Everything is a flex column (no inline line-box strut).
+//
+// The card back (./marker-back.tsx) reuses the tape, the team block and the
+// text fitting exported here, so both sides are taped up from one kit.
 
 import type { CSSProperties, ReactNode } from "react";
 import {
@@ -35,18 +38,18 @@ import {
   type FrontDesignProps,
 } from "./shared";
 
-const MK = FONTS.marker;
-const EM = FONT_EM.marker;
-const SIN = (deg: number) => Math.sin((Math.abs(deg) * Math.PI) / 180);
+export const MK = FONTS.marker;
+export const EM = FONT_EM.marker;
+export const SIN = (deg: number) => Math.sin((Math.abs(deg) * Math.PI) / 180);
 
 // Tilts (deg, negative = counter-clockwise).
-const TILT_TEAM = -3.5;
+export const TILT_TEAM = -3.5;
 const TILT_SUB = 4; // relative to the team block → about +0.5° on the card
 const TILT_FIRST = 2.4;
 const TILT_LAST = -1.6;
 const TILT_COACH = 1;
 
-const TAPE_SHADOW = "drop-shadow(0 2px 3px rgba(0,0,0,0.38))";
+export const TAPE_SHADOW = "drop-shadow(0 2px 3px rgba(0,0,0,0.38))";
 
 // ── Text fitting ────────────────────────────────────────────────────────────
 
@@ -54,7 +57,7 @@ const TAPE_SHADOW = "drop-shadow(0 2px 3px rgba(0,0,0,0.38))";
 // word of wide capitals (KOWALCZYK, VANDERHOOVEN) runs 6–13% wider than it
 // predicts. Weight each character by its width class (measured across all
 // the card fonts, relative to FONT_EM) to stay within ~4% for any font.
-function widthFactor(text: string): number {
+export function widthFactor(text: string): number {
   const cs = [...text];
   if (!cs.length) return 1;
   let sum = 0;
@@ -70,7 +73,7 @@ function widthFactor(text: string): number {
 
 const FIT = 0.95; // headroom on top of the per-character estimate
 
-function fit(text: string, base: number, avail: number, em: number, ls = 0): number {
+export function fit(text: string, base: number, avail: number, em: number, ls = 0): number {
   return fitSize(text, base, avail * FIT, em * widthFactor(text), ls);
 }
 
@@ -81,16 +84,20 @@ function fitLean(text: string, base: number, avail: number, em: number, ls: numb
 }
 
 // Estimated rendered width (u) of nowrap text.
-function textW(text: string, size: number, em: number, ls = 0): number {
+export function textW(text: string, size: number, em: number, ls = 0): number {
   return [...text].length * (em * widthFactor(text) + ls) * size;
 }
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
-type Geo = {
+export type Geo = {
   edge: number; // plate distance from the trim (left / right / bottom)
   top: number; // team block top
   jersey: { D: number; top: number; right: number; left: number; bottom: number } | null;
+  // Card back only: the plates' right limit (u, tilt slack included) and a
+  // scale on the team/sub base sizes so the block fits above the panel.
+  plateRight?: number;
+  teamScale?: number;
 };
 
 function geo(p: FrontDesignProps): Geo {
@@ -116,7 +123,7 @@ const JAGS = [
   [0.9, 0.35, 0.65, 0.05, 1, 0.5, 0.8],
 ];
 
-function torn(p: FrontDesignProps, seed: number, depth: number): string {
+export function torn(p: FrontDesignProps, seed: number, depth: number): string {
   const a = JAGS[seed % JAGS.length];
   const b = JAGS[(seed + 1) % JAGS.length];
   const n = a.length - 1;
@@ -127,7 +134,7 @@ function torn(p: FrontDesignProps, seed: number, depth: number): string {
 }
 
 // Solid tape color with a soft sheen and faint diagonal fibres.
-function tapeBg(p: FrontDesignProps, color: string): string {
+export function tapeBg(p: FrontDesignProps, color: string): string {
   return [
     "linear-gradient(178deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0.08) 100%)",
     `repeating-linear-gradient(100deg, rgba(0,0,0,0.04) 0 ${p.u(0.35)}, rgba(0,0,0,0) ${p.u(0.35)} ${p.u(1.25)})`,
@@ -135,7 +142,7 @@ function tapeBg(p: FrontDesignProps, color: string): string {
   ].join(", ");
 }
 
-function Tape(props: {
+export function Tape(props: {
   p: FrontDesignProps;
   bg: string;
   fg: string;
@@ -173,17 +180,18 @@ const SUB_INDENT = 3;
 const TEAM_LS = 0.02;
 const SUB_LS = 0.06;
 
-function teamMetrics(p: FrontDesignProps, g: Geo) {
+export function teamMetrics(p: FrontDesignProps, g: Geo) {
   const team = teamOrPlaceholder(p);
   const sub = subLine(p).toUpperCase();
   // Right limit for the plates. The block's tilt pushes its right edge out by
   // at most height·sinθ (≈1u), so subtract that too. With a jersey the plate
   // stops 2.5u (the text ≥ 5u) short of the sticker.
   const slack = 1.1;
-  const plateRight = g.jersey ? g.jersey.left - 2.5 - slack : p.W - g.edge - slack;
+  const plateRight = g.plateRight ?? (g.jersey ? g.jersey.left - 2.5 - slack : p.W - g.edge - slack);
   const span = plateRight - g.edge;
-  const ts = fit(team, 7.4, span - TEAM_PAD[1] - TEAM_PAD[3], EM, TEAM_LS);
-  const ss = fit(sub, 3.2, span - SUB_INDENT - SUB_PAD[1] - SUB_PAD[3], EM, SUB_LS);
+  const k = g.teamScale ?? 1;
+  const ts = fit(team, 7.4 * k, span - TEAM_PAD[1] - TEAM_PAD[3], EM, TEAM_LS);
+  const ss = fit(sub, 3.2 * k, span - SUB_INDENT - SUB_PAD[1] - SUB_PAD[3], EM, SUB_LS);
   const teamH = ts * 1.12 + TEAM_PAD[0] + TEAM_PAD[2];
   const subH = sub ? ss * 1.12 + SUB_PAD[0] + SUB_PAD[2] - 0.4 : 0;
   const width = Math.max(
@@ -198,7 +206,7 @@ function teamMetrics(p: FrontDesignProps, g: Geo) {
   return { team, sub, ts, ss, height: teamH + subH, width, subDrop };
 }
 
-function Team({ p, g }: { p: FrontDesignProps; g: Geo }) {
+export function Team({ p, g }: { p: FrontDesignProps; g: Geo }) {
   const m = teamMetrics(p, g);
   return (
     <div

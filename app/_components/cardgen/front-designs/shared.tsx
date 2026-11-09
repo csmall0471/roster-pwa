@@ -289,6 +289,8 @@ export type FrontDesign = {
   // Where the "LIMITED EDITION n / N" stamp goes (top-right by default, below
   // the jersey when there is one). Override if the jersey sits elsewhere.
   circulation?: (p: FrontDesignProps) => { top: string; right: string };
+  // Card-back styling (see BackTheme below). Absent = the Classic back.
+  back?: BackTheme;
 };
 
 export function defaultCirculation(p: FrontDesignProps): { top: string; right: string } {
@@ -311,4 +313,113 @@ export function teamOrPlaceholder(p: FrontDesignProps) {
 
 export function subLine(p: FrontDesignProps, sep = " · ") {
   return [p.age, p.season].filter(Boolean).join(sep);
+}
+
+// ── Card back ────────────────────────────────────────────────────────────────
+//
+// Each design also styles the card BACK so the two sides read as one card.
+// The back's LAYOUT (where the header, headshot and content panel sit, the
+// section order, portrait vs landscape columns) is owned by CardBack /
+// CardBackDuo; a BackTheme supplies the styled pieces. Same EXPORT and PRINT
+// rules as the front. The photos (headshot, player match, duo match) are drawn
+// onto the canvas at export as circles from their element boxes — themes style
+// the ring via `ring` (canvas color) and may decorate AROUND the circle, but
+// the photo itself is always a circle.
+
+export type BackThemeProps = FrontDesignProps & {
+  variant: "solo" | "duo";
+  // Headshot circle box in u (solo back only, when a headshot is set).
+  headshot: { left: number; top: number; size: number } | null;
+  // Top of the content panel in u; the header must stay above it.
+  panelTop: number;
+};
+
+export type BackMatchParts = {
+  label: string; // "PLAYER MATCH" / "DUO MATCH" / "SQUAD MATCH"
+  name: string; // already uppercased
+  blurb?: string;
+  // Renders the photo circle(s) with the data-* hooks the compositor needs.
+  // Pass the circle's size/border/shadow; returns null when there is no photo.
+  photos: (style: CSSProperties) => ReactNode;
+};
+
+export type BackTheme = {
+  // Team block across the top (absolutely positioned inside the back). Keep it
+  // above p.panelTop and clear of p.headshot.
+  header: (p: BackThemeProps) => ReactNode;
+  // Headshot ring: CSS for the circle element (border, filter …) plus the ring
+  // color the exporter strokes on the canvas.
+  headshot: (p: BackThemeProps) => { style: CSSProperties; ring: string };
+  // Content panel surface: background, border, borderRadius, color, fontFamily.
+  // Position/padding/flow are set by the layout.
+  panel: (p: BackThemeProps) => CSSProperties;
+  // Player-name text style in the panel (the layout sets size/overflow).
+  name: (p: BackThemeProps) => CSSProperties;
+  jersey: (p: BackThemeProps, num: string) => ReactNode;
+  stat: (p: BackThemeProps, label: string, value: string) => ReactNode;
+  // Section heading (e.g. "SCOUTING REPORT"), including its bottom spacing.
+  label: (p: BackThemeProps, text: string) => ReactNode;
+  quote: (p: BackThemeProps, text: string) => ReactNode;
+  // Scouting-report paragraph style.
+  body: (p: BackThemeProps) => CSSProperties;
+  // Question/answer cell (solo favorites grid; the duo's questions).
+  qa: (p: BackThemeProps, label: string, value: string) => ReactNode;
+  match: (p: BackThemeProps, parts: BackMatchParts) => ReactNode;
+  // Ring color the exporter strokes around player-match / duo-match photos.
+  matchRing: (p: BackThemeProps) => string;
+  coach: (p: BackThemeProps, label: string, value: string) => ReactNode;
+  // Rule above the coaching staff (borderTop + paddingTop).
+  divider: (p: BackThemeProps) => CSSProperties;
+};
+
+// Back-theme inputs from the editor's design inputs (or Classic defaults when
+// a caller has none), with the back's own geometry.
+export function backThemeProps(
+  base: FrontDesignProps | undefined,
+  o: {
+    landscape: boolean;
+    variant: "solo" | "duo";
+    team: string;
+    age: string;
+    season: string;
+    headshot: BackThemeProps["headshot"];
+    panelTop: number;
+  }
+): BackThemeProps {
+  const fallback: FrontDesignProps = {
+    u: cardWidthUnit,
+    landscape: o.landscape,
+    ...cardSize(o.landscape),
+    frame: null,
+    inset: 0,
+    palette: CLASSIC_PALETTE,
+    colorSource: "default",
+    team: o.team,
+    age: o.age,
+    season: o.season,
+    jersey: "",
+    nameLines: [],
+    isGroup: o.variant === "duo",
+    nameFont: { family: FONTS.anton, em: FONT_EM.anton },
+    nameSize: 1,
+    nameItalic: false,
+    coaches: null,
+    textColor: "#fff",
+    textShadow: "0 2px 8px rgba(0,0,0,0.45)",
+    compact: false,
+  };
+  return {
+    ...(base ?? fallback),
+    landscape: o.landscape,
+    ...cardSize(o.landscape),
+    // Frames are front-only; the back never insets for one.
+    frame: null,
+    inset: 0,
+    team: o.team.trim(),
+    age: o.age.trim(),
+    season: o.season.trim(),
+    variant: o.variant,
+    headshot: o.headshot,
+    panelTop: o.panelTop,
+  };
 }

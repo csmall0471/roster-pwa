@@ -34,12 +34,12 @@ import {
 
 // ── Font metrics ─────────────────────────────────────────────────────────────
 
-type MeasuredFont = Exclude<FontKey, "sans">;
-type Cap = { top: number; h: number };
+export type MeasuredFont = Exclude<FontKey, "sans">;
+export type Cap = { top: number; h: number };
 
 // At line-height 1: distance from the top of the line box to the cap top, and
 // the cap height, in em (measured from the loaded fonts).
-const CAP: Record<MeasuredFont, Cap> = {
+export const CAP: Record<MeasuredFont, Cap> = {
   anton: { top: 0.058, h: 0.867 },
   bebas: { top: 0.09, h: 0.71 },
   archivo: { top: 0.135, h: 0.7 },
@@ -80,13 +80,13 @@ const FONT_VARS: Array<[string, MeasuredFont]> = [
   ["--font-oswald", "oswald"],
   ["--font-marker", "marker"],
 ];
-function fontOf(family: string): MeasuredFont | null {
+export function fontOf(family: string): MeasuredFont | null {
   return FONT_VARS.find(([v]) => family.includes(v))?.[1] ?? null;
 }
 
 // Width of `text` in em. Characters that were not measured (accents, symbols)
 // count as 10% wider than the font's average uppercase advance.
-function textEm(font: MeasuredFont | null, text: string, avg: number) {
+export function textEm(font: MeasuredFont | null, text: string, avg: number) {
   const t = font ? ADV.get(font) : undefined;
   let w = 0;
   for (const ch of text) w += t?.get(ch) ?? avg * 1.1;
@@ -102,7 +102,7 @@ function fitText(text: string, font: MeasuredFont | null, avg: number, base: num
 
 // ── Inks ─────────────────────────────────────────────────────────────────────
 
-type Ink = { fill: string; ring: string; edge: string; depth: string };
+export type Ink = { fill: string; ring: string; edge: string; depth: string };
 
 function rgb(hex: string): [number, number, number] | null {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
@@ -112,12 +112,12 @@ function rgb(hex: string): [number, number, number] | null {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 // Mix toward black (amt 0…1).
-function shade(hex: string, amt: number) {
+export function shade(hex: string, amt: number) {
   const c = rgb(hex);
   if (!c) return "#000000";
   return `#${c.map((v) => Math.round(v * (1 - amt)).toString(16).padStart(2, "0")).join("")}`;
 }
-function contrast(a: string, b: string) {
+export function contrast(a: string, b: string) {
   const la = luminance(a);
   const lb = luminance(b);
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
@@ -128,7 +128,7 @@ function contrast(a: string, b: string) {
 // against the photo), depth = the 3D drop (the ring color, shaded). With no
 // colors picked: white letters, near-black ring and drop — legible on dark and
 // light backgrounds alike.
-function inks(p: FrontDesignProps): Ink {
+export function inks(p: FrontDesignProps): Ink {
   if (p.colorSource === "default") return { fill: "#ffffff", ring: "#0a0a0a", edge: "#ffffff", depth: "#000000" };
   const fill = p.palette.background;
   // Same (or nearly the same) two colors: ring in the fill's readable contrast.
@@ -159,8 +159,8 @@ const DEPTH = 0.09; // 3D drop, per axis
 const STEPS = 4;
 // How far the lettering reaches past the advance box, in em: left/top
 // (outline, less ~0.02em of side bearing) and right/bottom (outline + drop).
-const EXT_LT = R2 - 0.02;
-const EXT_RB = DEPTH + R2 - 0.02;
+export const EXT_LT = R2 - 0.02;
+export const EXT_RB = DEPTH + R2 - 0.02;
 const EXT_BELOW = DEPTH + R2; // below the baseline (no bearing)
 // Small text: outline radius, and its reach right/below (outline + drop).
 const SR = 0.06;
@@ -175,7 +175,7 @@ const ringLayers = (r: number, c: string) => DIRS.map(([x, y]) => layer(x * r, y
 
 // Fill → ring → edge → stepped 3D drop. The drop copies are widened sideways
 // by the edge radius so the extrusion is as thick as the outlined letter.
-function letterShadow(k: Ink) {
+export function letterShadow(k: Ink) {
   const out = [...ringLayers(R1, k.ring), ...ringLayers(R2, k.edge)];
   const s = 0.707 * R2;
   for (let i = 1; i <= STEPS; i++) {
@@ -206,7 +206,9 @@ const STAMP_W = 27; // the LIMITED EDITION stamp, ≈ 26u wide
 
 type Layout = ReturnType<typeof layout>;
 
-function layout(p: FrontDesignProps) {
+// `teamRight` overrides where the team block must end (the card back, which
+// has no jersey there but may have a headshot).
+function layout(p: FrontDesignProps, teamRight?: number) {
   const framed = !!p.frame;
   const L = p.landscape;
   // Outer limit for any lettering (outline and drop included): inside the
@@ -232,7 +234,7 @@ function layout(p: FrontDesignProps) {
 
   // Team block: from m to `right` (3u clear of the jersey, or the far edge).
   const left = m;
-  const right = jersey ? jersey.left - 3 : p.W - m;
+  const right = teamRight ?? (jersey ? jersey.left - 3 : p.W - m);
   const teamText = teamOrPlaceholder(p).toUpperCase();
   const teamSize = fitText(teamText, "bungee", FONT_EM.bungee, L ? 7.5 : 9, right - left, TEAM_LS, EXT_LT + EXT_RB);
   const teamCapTop = gt + R2 * teamSize;
@@ -339,6 +341,13 @@ function Team({ p, Lo, k }: { p: FrontDesignProps; Lo: Layout; k: Ink }) {
       )}
     </div>
   );
+}
+
+// The front's team block on its own (no jersey), ending by `right` u (default:
+// the print-safe line) — the card back's header.
+export function VarsityTeamBlock({ p, right }: { p: FrontDesignProps; right?: number }) {
+  const q = { ...p, jersey: "" };
+  return <Team p={q} Lo={layout(q, right)} k={inks(q)} />;
 }
 
 function Jersey({ p, Lo, k }: { p: FrontDesignProps; Lo: Layout; k: Ink }) {

@@ -389,13 +389,18 @@ function stripeColor(p: FrontDesignProps, i: number) {
 
 const SHADOW = "drop-shadow(0 3px 6px rgba(0,0,0,0.45))";
 
-function Team(p: FrontDesignProps) {
-  const e = edges(p);
-  const { rows } = teamLayout(p, e, jerseyLayout(p, e));
+// The team block. The card back reuses it as its header: `right` caps how far
+// right its plates and stripes may reach (card u, instead of the frame / the
+// number board) and `maxBottom` lifts it so it ends above that line.
+export function RacingTeam({ p, right, maxBottom }: { p: FrontDesignProps; right?: number; maxBottom?: number }) {
+  const base = edges(p);
+  const e = right == null ? base : { ...base, right };
+  const { rows, height } = teamLayout(p, e, right == null ? jerseyLayout(p, e) : null);
+  const top = maxBottom == null ? e.top : Math.min(e.top, maxBottom - height);
   return (
     <div
       style={abs({
-        top: p.u(e.top),
+        top: p.u(top),
         left: p.u(e.base),
         display: "flex",
         flexDirection: "column",
@@ -408,6 +413,10 @@ function Team(p: FrontDesignProps) {
       ))}
     </div>
   );
+}
+
+function Team(p: FrontDesignProps) {
+  return <RacingTeam p={p} />;
 }
 
 function Jersey(p: FrontDesignProps) {

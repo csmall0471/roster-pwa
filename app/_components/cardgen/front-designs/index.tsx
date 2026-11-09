@@ -3,6 +3,18 @@
 // ./shared.tsx for the contract and the export/print rules.
 
 import { classic } from "./classic";
+// Back themes are attached here rather than in each design file: every
+// <id>-back.tsx imports helpers from its <id>.tsx, so having <id>.tsx import
+// its back too would make a circular import.
+import { racingBack } from "./racing-back";
+import { ribbonBack } from "./ribbon-back";
+import { scoreboardBack } from "./scoreboard-back";
+import { pillBack } from "./pill-back";
+import { varsityBack } from "./varsity-back";
+import { stampBack } from "./stamp-back";
+import { sidebarBack } from "./sidebar-back";
+import { markerBack } from "./marker-back";
+import { minimalBack } from "./minimal-back";
 import { racing } from "./racing";
 import { ribbon } from "./ribbon";
 import { scoreboard } from "./scoreboard";
@@ -16,7 +28,18 @@ import { defaultCirculation, type FrontDesign, type FrontDesignProps } from "./s
 
 export const DEFAULT_FRONT_DESIGN = "chevron";
 
-export const FRONT_DESIGNS: FrontDesign[] = [classic, racing, ribbon, scoreboard, pill, varsity, stamp, sidebar, marker, minimal];
+export const FRONT_DESIGNS: FrontDesign[] = [
+  classic,
+  { ...racing, back: racingBack },
+  { ...ribbon, back: ribbonBack },
+  { ...scoreboard, back: scoreboardBack },
+  { ...pill, back: pillBack },
+  { ...varsity, back: varsityBack },
+  { ...stamp, back: stampBack },
+  { ...sidebar, back: sidebarBack },
+  { ...marker, back: markerBack },
+  { ...minimal, back: minimalBack },
+];
 
 export function getFrontDesign(id: string | null | undefined): FrontDesign {
   return FRONT_DESIGNS.find((d) => d.id === id) ?? classic;

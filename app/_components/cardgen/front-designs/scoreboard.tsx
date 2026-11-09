@@ -110,7 +110,9 @@ function textW(text: string, size: number, em: number, ls: number) {
 
 // ── Team: score bug ──────────────────────────────────────────────────────────
 
-function bugLayout(p: FrontDesignProps) {
+// `right` (u) overrides how far right the team/season column may run (the card
+// back passes the headshot's left edge instead of the jersey's).
+function bugLayout(p: FrontDesignProps, right?: number) {
   const left = leftEdge(p);
   const padL = leftPad(p);
   const age = p.age.trim().toUpperCase();
@@ -124,7 +126,7 @@ function bugLayout(p: FrontDesignProps) {
       ? ACCENT_BAR_FRAMED
       : ACCENT_BAR;
   const colStart = left + ageCell + DIVIDER;
-  const colRight = jerseyText(p) ? jerseyGeo(p).left - JERSEY_GAP : maxRight(p);
+  const colRight = right ?? (jerseyText(p) ? jerseyGeo(p).left - JERSEY_GAP : maxRight(p));
   const colAvail = colRight - colStart;
 
   const teamSize = fit(team, 6.4, colAvail - 2 * TEAM_PAD_X, FONT_EM.anton, LS_TEAM);
@@ -141,13 +143,18 @@ function bugLayout(p: FrontDesignProps) {
   return { left, padL, age, season, team, ageSize, ageCell, teamSize, seasonSize, bottom, colRight: colStart + colW };
 }
 
-function Team(p: FrontDesignProps) {
-  const L = bugLayout(p);
+// The score bug. The front draws it with no overrides; the card back (see
+// ./scoreboard-back) reuses it as its header with `right` = the column's right
+// limit (u) and `maxBottom` = the lowest its bottom rule may sit (u), which
+// lifts the bug when the back's panel starts high.
+export function ScoreBug({ p, right, maxBottom }: { p: FrontDesignProps; right?: number; maxBottom?: number }) {
+  const L = bugLayout(p, right);
   const { u, palette } = p;
+  const top = maxBottom === undefined ? bugTop(p) : Math.min(bugTop(p), maxBottom - (L.bottom - bugTop(p)));
   return (
     <div
       style={abs({
-        top: u(bugTop(p)),
+        top: u(top),
         left: u(L.left),
         display: "flex",
         alignItems: "stretch",
@@ -422,7 +429,7 @@ export const scoreboard: FrontDesign = {
   nameFont: "anton",
   render: (p) => (
     <>
-      <Team {...p} />
+      <ScoreBug p={p} />
       <Jersey {...p} />
       <Name {...p} />
     </>

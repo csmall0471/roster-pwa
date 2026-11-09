@@ -345,7 +345,8 @@ async function compositeBackCanvas(
       ctx.beginPath();
       ctx.arc(cx, cy, rad - 0.032 * size, 0, Math.PI * 2);
       ctx.lineWidth = 0.064 * size;
-      ctx.strokeStyle = "rgba(255,255,255,0.92)";
+      // Ring color comes from the card design (data-ring); white by default.
+      ctx.strokeStyle = el.dataset.ring || "rgba(255,255,255,0.92)";
       ctx.stroke();
     }
   }
@@ -365,7 +366,7 @@ async function compositeBackCanvas(
         (er.top - br.top) * s,
         er.width * s,
         er.height * s,
-        { width: 0.006 * outW, color: "rgba(10,10,10,0.55)" },
+        { width: 0.006 * outW, color: el.dataset.ring || "rgba(10,10,10,0.55)" },
         0.3 // bias toward the face
       );
     }
@@ -388,7 +389,7 @@ async function compositeBackCanvas(
         (er.top - br.top) * s,
         er.width * s,
         er.height * s,
-        { width: 0.006 * outW, color: "rgba(10,10,10,0.55)" },
+        { width: 0.006 * outW, color: els[i].dataset.ring || "rgba(10,10,10,0.55)" },
         0.28 // bias toward the face
       );
     }

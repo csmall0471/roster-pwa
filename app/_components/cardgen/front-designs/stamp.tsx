@@ -8,6 +8,9 @@
 // Geometry is computed in u (see layout()) so the team box can be fitted to
 // stop short of the jersey stamp, and so the limited-edition stamp can be
 // placed under whichever of the two reaches lower.
+//
+// The card back (./stamp-back.tsx) reuses the team box, the inks and the
+// double-rule sizes exported here, so both sides are stamped from one set.
 
 import type { CSSProperties } from "react";
 import {
@@ -28,10 +31,10 @@ import {
 
 // ── Tilts ────────────────────────────────────────────────────────────────────
 
-const TEAM_TILT = -4; // counter-clockwise; rotated about its right-top corner
+export const TEAM_TILT = -4; // counter-clockwise; rotated about its right-top corner
 const NAME_TILT = -2; // counter-clockwise; rotated about its left-top corner
-const JERSEY_TILT = 7; // the number turns inside a circle (bounds unchanged)
-const sinDeg = (d: number) => Math.abs(Math.sin((d * Math.PI) / 180));
+export const JERSEY_TILT = 7; // the number turns inside a circle (bounds unchanged)
+export const sinDeg = (d: number) => Math.abs(Math.sin((d * Math.PI) / 180));
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -45,7 +48,7 @@ function contrast(a: string, b: string) {
 // inner rule) is the other team color when it reads well on the plate,
 // otherwise the palette's readable white/black. The outer rule of each plate is
 // drawn in the other team color so both colors show on every piece.
-function inks(p: FrontDesignProps) {
+export function inks(p: FrontDesignProps) {
   const P = p.palette;
   const ink = contrast(P.background, P.subBackground) >= 4.5 ? P.subBackground : P.color;
   const sealInk = contrast(P.subBackground, P.background) >= 4.5 ? P.background : P.subColor;
@@ -77,7 +80,7 @@ const REL: Record<string, number> = {
 // Average advance (em per character) of `text` in a font whose average
 // uppercase advance is `em`, with a 4% margin. Lowercase is measured as
 // uppercase (it is narrower, so this errs small).
-function textEm(text: string, em: number): number {
+export function textEm(text: string, em: number): number {
   const chars = [...text.toUpperCase()];
   if (!chars.length) return em;
   const rel = chars.reduce((w, ch) => w + (REL[ch] ?? 1.15), 0) / chars.length;
@@ -87,10 +90,10 @@ function textEm(text: string, em: number): number {
 // ── Layout (all in u) ────────────────────────────────────────────────────────
 
 // Double rule: outer rule, plate-colored gap, inner rule.
-const R1 = 0.6;
-const GAP = 0.55;
-const R2 = 0.28;
-const RULES = R1 + GAP + R2;
+export const R1 = 0.6;
+export const GAP = 0.55;
+export const R2 = 0.28;
+export const RULES = R1 + GAP + R2;
 
 const TEAM_PX = 2.4;
 const TEAM_PT = 1.5;
@@ -112,24 +115,12 @@ const COACH_LS = 0.14;
 const COACH_GAP = 1.3; // name → dashed rule
 const COACH_PAD = 1.0; // dashed rule → coaches
 
-function layout(p: FrontDesignProps) {
-  const framed = !!p.frame;
-  const edge = framed ? p.inset + 1 : 0; // plates keep clear of the frame band + keyline
-  const sx = framed ? edge : 4.5; // plate inset from the left/right trim
-  const top = framed ? edge : 4;
-
-  // Jersey seal.
-  const hasJersey = !!p.jersey;
-  const sealRight = framed ? edge : 5;
-  const sealTop = top;
-  const sealLeft = p.W - sealRight - SEAL;
-  const sealSize = fitSize(p.jersey, 7, 9.4, textEm(p.jersey, FONT_EM.stencil), 0.02);
-
-  // Team box.
+// Team box text sizes and outer size (u) for a box whose left edge is at `sx`
+// and whose tilted bottom-right corner must stop at `rightLimit`.
+export function teamBox(p: FrontDesignProps, sx: number, rightLimit: number) {
   const team = teamOrPlaceholder(p).toUpperCase();
   const sub = subLine(p).toUpperCase();
   const teamH0 = 2 * RULES + TEAM_PT + TEAM_PB + 6.4 + (sub ? SUB_GAP + R2 + SUB_PAD + 2.3 : 0);
-  const rightLimit = hasJersey ? sealLeft - 3 : p.W - sx;
   // The tilt pushes the bottom-right corner out by h·sin(tilt).
   const boxMax = rightLimit - sx - teamH0 * sinDeg(TEAM_TILT);
   const textMax = Math.min(TEAM_MAX_TEXT, boxMax - 2 * (RULES + TEAM_PX));
@@ -145,6 +136,24 @@ function layout(p: FrontDesignProps) {
   );
   const teamW = teamText + 2 * (RULES + TEAM_PX);
   const teamH = 2 * RULES + TEAM_PT + TEAM_PB + teamSize + (sub ? SUB_GAP + R2 + SUB_PAD + subSize : 0);
+  return { team, sub, teamSize, subSize, teamW, teamH };
+}
+
+function layout(p: FrontDesignProps) {
+  const framed = !!p.frame;
+  const edge = framed ? p.inset + 1 : 0; // plates keep clear of the frame band + keyline
+  const sx = framed ? edge : 4.5; // plate inset from the left/right trim
+  const top = framed ? edge : 4;
+
+  // Jersey seal.
+  const hasJersey = !!p.jersey;
+  const sealRight = framed ? edge : 5;
+  const sealTop = top;
+  const sealLeft = p.W - sealRight - SEAL;
+  const sealSize = fitSize(p.jersey, 7, 9.4, textEm(p.jersey, FONT_EM.stencil), 0.02);
+
+  // Team box.
+  const rightLimit = hasJersey ? sealLeft - 3 : p.W - sx;
 
   return {
     framed,
@@ -155,17 +164,14 @@ function layout(p: FrontDesignProps) {
     sealTop,
     sealLeft,
     sealSize,
-    team,
-    sub,
-    teamSize,
-    subSize,
-    teamW,
-    teamH,
+    ...teamBox(p, sx, rightLimit),
     bottom: framed ? edge : 5,
   };
 }
 
 type L = ReturnType<typeof layout>;
+// What the team box needs: its top-left corner (u) plus teamBox()'s sizes.
+export type TeamGeo = ReturnType<typeof teamBox> & { top: number; sx: number };
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
@@ -190,7 +196,8 @@ function ruled(p: FrontDesignProps, plate: string, rule: string, ink: string): {
   };
 }
 
-function Team({ p, l }: { p: FrontDesignProps; l: L }) {
+// The team box (also the card back's header).
+export function Team({ p, l }: { p: FrontDesignProps; l: TeamGeo }) {
   const c = inks(p);
   const box = ruled(p, c.plate, c.rule, c.ink);
   return (

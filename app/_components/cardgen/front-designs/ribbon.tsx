@@ -43,14 +43,14 @@ const DROP = "drop-shadow(0 3px 7px rgba(0,0,0,0.45))";
 
 // ── Color helpers ────────────────────────────────────────────────────────────
 
-function contrast(a: string, b: string) {
+export function contrast(a: string, b: string) {
   const la = luminance(a);
   const lb = luminance(b);
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
 // A darker shade of a color (solid gradient layer over it — exports fine).
-function shade(color: string, a: number) {
+export function shade(color: string, a: number) {
   return `linear-gradient(rgba(0,0,0,${a}), rgba(0,0,0,${a})), ${color}`;
 }
 
@@ -116,13 +116,19 @@ const SUB_PAD_Y = 1.4;
 const SUB_NOTCH = 1.8;
 const SUB_PAD_R = SUB_NOTCH + 2.4;
 
-function teamSizes(p: FrontDesignProps, g: Geo) {
+// maxHeight (card back only): the block's height limit in u; the team line
+// shrinks to fit it. The front leaves it unset.
+function teamSizes(p: FrontDesignProps, g: Geo, maxHeight?: number) {
   const team = teamOrPlaceholder(p).toUpperCase();
   const sub = subLine(p).toUpperCase();
   const avail = g.teamLimit - g.teamTextLeft;
   // 0.95: Oswald's caps run a little wider than the average on long names.
-  const teamSize = fitSize(team, 7, (avail - TEAM_PAD_R) * 0.95, EM, LS_TEAM);
+  let teamSize = fitSize(team, 7, (avail - TEAM_PAD_R) * 0.95, EM, LS_TEAM);
   const subSize = sub ? fitSize(sub, 2.7, (avail - SUB_PAD_R) * 0.95, EM, LS_SUB) : 0;
+  if (maxHeight !== undefined) {
+    const rest = 2 * TEAM_PAD_Y + (sub ? 0.6 + subSize * 1.1 + 2 * SUB_PAD_Y : 0);
+    teamSize = Math.max(0.5, Math.min(teamSize, Math.floor(((maxHeight - rest) / 1.1) * 100) / 100));
+  }
   const height =
     teamSize * 1.1 + 2 * TEAM_PAD_Y + (sub ? 0.6 + subSize * 1.1 + 2 * SUB_PAD_Y : 0);
   // Estimated right end of the widest ribbon (for the limited-edition stamp).
@@ -136,7 +142,7 @@ function teamSizes(p: FrontDesignProps, g: Geo) {
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
 // A sewn stitch: a dashed rule drawn with a repeating gradient.
-function Stitch({
+export function Stitch({
   p,
   color,
   y,
@@ -171,7 +177,7 @@ function Stitch({
 
 // A horizontal ribbon: flat or swallowtail-notched ends, stitched along the
 // top and bottom.
-function Ribbon({
+export function Ribbon({
   p,
   bg,
   stitch,
@@ -241,8 +247,8 @@ function text(size: string, ls: number, extra?: CSSProperties): CSSProperties {
   };
 }
 
-function Team({ p, g }: { p: FrontDesignProps; g: Geo }) {
-  const s = teamSizes(p, g);
+function Team({ p, g, maxHeight }: { p: FrontDesignProps; g: Geo; maxHeight?: number }) {
+  const s = teamSizes(p, g, maxHeight);
   const pal = p.palette;
   return (
     <div
@@ -288,9 +294,16 @@ function Team({ p, g }: { p: FrontDesignProps; g: Geo }) {
   );
 }
 
+// The front's team block alone (no jersey pennant), for the card back: the
+// widest ribbon ends by x = `limit` and the block ends above y = `bottom` (u).
+export function RibbonTeamBlock({ p, limit, bottom }: { p: FrontDesignProps; limit: number; bottom: number }) {
+  const g = { ...geometry({ ...p, jersey: "" }), teamLimit: limit };
+  return <Team p={p} g={g} maxHeight={bottom - g.teamTop} />;
+}
+
 // Pennant outline inset by b (u) in a w × h box: straight sides, pointed
 // bottom of the given depth. Returned as a clip-path in % of the box.
-function pennantClip(w: number, h: number, depth: number, b: number, insetTop: boolean) {
+export function pennantClip(w: number, h: number, depth: number, b: number, insetTop: boolean) {
   const half = w / 2;
   const slant = Math.hypot(half, depth) / half;
   const tipY = h - b * slant;
@@ -375,7 +388,7 @@ const STAR_GAP = 0.32;
 const STAR_CLIP =
   "polygon(50% 0%, 61.2% 34.5%, 97.6% 34.5%, 68.2% 55.9%, 79.4% 90.5%, 50% 69.1%, 20.6% 90.5%, 31.8% 55.9%, 2.4% 34.5%, 38.8% 34.5%)";
 
-function Star({ size, color }: { size: string; color: string }) {
+export function Star({ size, color }: { size: string; color: string }) {
   return <div style={{ width: size, height: size, flex: "none", background: color, clipPath: STAR_CLIP }} />;
 }
 

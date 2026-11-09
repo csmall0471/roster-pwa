@@ -16,6 +16,7 @@ import {
   type FrontDesign,
   type FrontDesignProps,
 } from "./shared";
+import { classicBack } from "./classic-back";
 
 function Jersey(p: FrontDesignProps) {
   if (!p.jersey) return null;
@@ -161,6 +162,7 @@ export const classic: FrontDesign = {
   id: "chevron",
   name: "Classic",
   nameFont: "anton",
+  back: classicBack,
   render: (p) => (
     <>
       <Jersey {...p} />

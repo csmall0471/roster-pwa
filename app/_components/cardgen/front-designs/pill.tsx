@@ -62,6 +62,22 @@ function fitCapsule(text: string, base: number, avail: number, em: number, ls: n
   return fitSize(text, base, avail, em, ls + (2 * padEm) / n);
 }
 
+// Team block (team capsule + age · season capsule) sized to run from `left` to
+// `right` (u): the text, both font sizes and the block's height. Shared by the
+// front's layout() and the card back's header (./pill-back).
+export function teamBlock(p: FrontDesignProps, left: number, right: number) {
+  const L = p.landscape;
+  const team = teamOrPlaceholder(p);
+  const sub = subLine(p).toUpperCase();
+  const teamAvail = right - left;
+  const teamFs = fitCapsule(team, L ? 5.3 : 5.6, teamAvail, FONT_EM.archivo * WIDE, TEAM_LS, TEAM_PAD.x);
+  const subFs = fitCapsule(sub, L ? 2.4 : 2.5, teamAvail - INDENT - 2 * RING, FONT_EM.sans * WIDE, SUB_LS, SUB_PAD.x);
+  const teamH = teamFs * (1 + TEAM_PAD.top + TEAM_PAD.bottom);
+  const subH = sub ? subFs * (1 + 2 * SUB_PAD.y) + 2 * RING : 0;
+  const blockH = teamH + (sub ? subH - TUCK : 0);
+  return { team, sub, teamFs, subFs, blockH };
+}
+
 // Every top-zone size and position, in u — shared by render() and circulation().
 function layout(p: FrontDesignProps) {
   const L = p.landscape;
@@ -77,15 +93,8 @@ function layout(p: FrontDesignProps) {
   const jerseyFs = fitSize(p.jersey || "0", L ? 6.6 : 7.1, (D - 2 * ring) * 0.76, FONT_EM.archivo, 0);
 
   // Team block, top-left; its right edge stops JERSEY_CLEAR short of the disc.
-  const team = teamOrPlaceholder(p);
-  const sub = subLine(p).toUpperCase();
   const teamRight = hasJersey ? jerseyLeft - JERSEY_CLEAR : p.W - m;
-  const teamAvail = teamRight - m;
-  const teamFs = fitCapsule(team, L ? 5.3 : 5.6, teamAvail, FONT_EM.archivo * WIDE, TEAM_LS, TEAM_PAD.x);
-  const subFs = fitCapsule(sub, L ? 2.4 : 2.5, teamAvail - INDENT - 2 * RING, FONT_EM.sans * WIDE, SUB_LS, SUB_PAD.x);
-  const teamH = teamFs * (1 + TEAM_PAD.top + TEAM_PAD.bottom);
-  const subH = sub ? subFs * (1 + 2 * SUB_PAD.y) + 2 * RING : 0;
-  const blockH = teamH + (sub ? subH - TUCK : 0);
+  const { team, sub, teamFs, subFs, blockH } = teamBlock(p, m, teamRight);
   // The block centres vertically on the disc (it is never taller than it).
   const teamTop = hasJersey && blockH < D ? m + (D - blockH) / 2 : m;
   const teamBottom = teamTop + blockH;
@@ -142,7 +151,13 @@ function Jersey({ p, g }: { p: FrontDesignProps; g: Layout }) {
   );
 }
 
-function Team({ p, g }: { p: FrontDesignProps; g: Layout }) {
+// Where the team block sits (top-left corner, u) and what it says — a Layout
+// on the front; the card back passes its own (./pill-back).
+export type TeamPlacement = Pick<Layout, "m" | "teamTop" | "team" | "sub" | "teamFs" | "subFs">;
+
+// The team block: big primary team capsule with the secondary age · season
+// capsule tucked under it. The card back reuses it as its header.
+export function PillTeam({ p, g }: { p: FrontDesignProps; g: TeamPlacement }) {
   return (
     <div
       style={abs({
@@ -338,7 +353,7 @@ export const pill: FrontDesign = {
     return (
       <>
         <Jersey p={p} g={g} />
-        <Team p={p} g={g} />
+        <PillTeam p={p} g={g} />
         <Name p={p} g={g} />
       </>
     );

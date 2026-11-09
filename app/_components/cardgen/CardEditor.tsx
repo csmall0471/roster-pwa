@@ -47,6 +47,8 @@ import { NAME_FONTS, getNameFont } from "./name-fonts";
 import {
   FrontDesignLayer,
   FRONT_DESIGNS,
+  getFrontDesign,
+  CLASSIC_PALETTE,
   DEFAULT_FRONT_DESIGN,
   circulationPosition,
   resolveTeamPalette,
@@ -2590,6 +2592,16 @@ export default function CardEditor({
     };
   }
   const liveFront = frontProps({ u: cardWidthUnit, compact: false });
+  // The back uses the same design (its BackTheme) and inputs, minus the frame
+  // border. Classic's back never followed frame colors, so it stays
+  // white/black there unless team colors were picked.
+  const backTheme = getFrontDesign(frontDesign).back;
+  const backDesignProps: FrontDesignProps = {
+    ...frontProps({ u: cardWidthUnit, compact: false, withFrame: false }),
+    ...(frontDesign === DEFAULT_FRONT_DESIGN && teamColorSource === "frame"
+      ? { palette: CLASSIC_PALETTE, colorSource: "default" as const }
+      : {}),
+  };
   const circulationPos = circulationPosition(frontDesign, liveFront);
 
   function pickFrontDesign(d: FrontDesign) {
@@ -2863,7 +2875,8 @@ export default function CardEditor({
             <CardBackDuo
               ref={backStageRef}
               bgStyle={bgStyle}
-              teamPalette={teamColorSource === "user" ? teamPalette : undefined}
+              theme={backTheme}
+              designProps={backDesignProps}
               landscape={landscape}
               teamText={teamText}
               ageText={ageText}
@@ -2881,7 +2894,8 @@ export default function CardEditor({
             <CardBack
               ref={backStageRef}
               bgStyle={bgStyle}
-              teamPalette={teamColorSource === "user" ? teamPalette : undefined}
+              theme={backTheme}
+              designProps={backDesignProps}
               sport={sport}
               landscape={landscape}
               teamText={teamText}
