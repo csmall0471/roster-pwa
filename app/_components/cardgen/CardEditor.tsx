@@ -79,7 +79,6 @@ import { normalizePhotoForUpload } from "./photo-normalize";
 import {
   useDuoFold,
   useKeyboard,
-  useViewportCoverTest,
   useDuoDebug,
   setScreenCheck,
   duoDebugText,
@@ -596,7 +595,6 @@ export default function CardEditor({
   const fold = useDuoFold();
   const keyboard = useKeyboard();
   const keyboardUp = keyboard !== null;
-  useViewportCoverTest(step !== "upload" && step !== "processing");
   const duoDebug = useDuoDebug();
   const wasKeyboardUp = useRef(false);
   useEffect(() => {

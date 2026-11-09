@@ -274,9 +274,8 @@ body {
      it are unreliable when the phone is partly folded. */
   .card-fullscreen {
     --pad: 12px;
-    /* Each side keeps clear of its own safe-area inset (they differ on the Duo:
-       iOS's strip is on one side only). They are 0 unless the page is allowed
-       under the system UI (?cover=1, see duo-fold.ts). */
+    /* Each side keeps clear of its own safe-area inset (they can differ). They
+       are 0 here: the app doesn't let pages under the system UI. */
     --pad-t: max(12px, env(safe-area-inset-top));
     --pad-l: max(12px, env(safe-area-inset-left));
     --gutter: 48px;

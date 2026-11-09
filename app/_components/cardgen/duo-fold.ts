@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 // Where the iPhone Duo's fold sits in the page, so the full-screen card editor
 // can put the card on one side of it and the tools on the other.
@@ -8,16 +8,18 @@ import { useEffect, useSyncExternalStore } from "react";
 // The fold runs down the middle of the inner screen's long side: a vertical line
 // when it's held wide, a horizontal one when it's held tall. Safari gives a flat
 // phone no fold signal (the Viewport Segments API is behind a flag, and a flat
-// fold has zero width anyway), so it's worked out from the screen size. Held
-// wide, the Home Screen app loses an ~84pt strip on the camera side, so the
-// page's centre isn't the fold: with the strip on the right (as measured on the
-// owner's Duo) the fold is at the screen's middle, ~42pt right of the page's.
+// fold has zero width anyway), so it's worked out from the open screen's size
+// (window.outerWidth/Height). Held wide, the Home Screen app loses an ~84pt
+// strip on the camera side, so the page's centre isn't the fold: with the strip
+// on the right (as measured on the owner's Duo) the fold is at the screen's
+// middle, ~42pt right of the page's.
 //
-// Anything without a usable screen size (an iPad, a desktop window, a test
-// iframe) falls back to the middle of the page.
+// Anything where the page doesn't nearly fill the window (a desktop browser, a
+// test iframe) falls back to the middle of the page.
 //
 // Testing: ?fold=475 puts the fold at x=475, ?fold=y420 at y=420; ?kb=300 fakes a
-// 300px on-screen keyboard; ?debug=layout shows the numbers on screen.
+// 300px on-screen keyboard; ?debug=layout (or Screen check in Card options)
+// shows the numbers on screen.
 
 export type Fold = { x: number | null; y: number | null };
 
@@ -66,25 +68,29 @@ export function computeFold(): Fold {
     return b.left >= a.right ? { x: (a.right + b.left) / 2, y: null } : { x: null, y: (a.bottom + b.top) / 2 };
   }
 
-  const long = Math.max(window.screen.width, window.screen.height);
+  // The open screen's size. On the Duo, screen.width/height report the closed
+  // outer display (466x678) even while it's open; outerWidth/outerHeight give
+  // the open screen (951x669 held wide, measured on the owner's Duo).
+  const fullW = window.outerWidth;
+  const fullH = window.outerHeight;
   if (vw >= vh) {
-    // Held wide: whatever the page is missing from the screen's width is the
-    // side strip. It sits on the camera side, which is the left only when the
-    // phone is turned so its top points left (angle 90).
-    const missing = long - vw;
+    // Held wide: whatever the page is missing from the screen's width is iOS's
+    // side strip. Measured: at angle 90 it's on the right. At 270 (turned the
+    // other way) it should follow the camera to the left; not yet seen.
+    const missing = fullW - vw;
     if (missing < 0 || missing > 120) return { x: vw / 2, y: null };
     const angle =
       window.screen.orientation?.angle ??
       (window as { orientation?: number }).orientation ??
       0;
-    const stripOnLeft = missing > 20 && angle === 90;
-    return { x: long / 2 - (stripOnLeft ? missing : 0), y: null };
+    const stripOnLeft = missing > 20 && (angle === 270 || angle === -90);
+    return { x: fullW / 2 - (stripOnLeft ? missing : 0), y: null };
   }
   // Held tall: in the Home Screen app only the status bar sits above the page.
   // In Safari the bar can be above or below it, so take the page's middle.
-  const missing = long - vh;
+  const missing = fullH - vh;
   if (!isStandalone() || missing < 0 || missing > 200) return { x: null, y: vh / 2 };
-  return { x: null, y: long / 2 - missing };
+  return { x: null, y: fullH / 2 - missing };
 }
 
 function subscribeLayout(onChange: () => void) {
@@ -170,9 +176,11 @@ export function useKeyboard(): Keyboard {
 
 // Screen check: the switch in Card options (large touch screens, coach only),
 // for testing on a phone where the address can't be edited, like the Home
-// Screen app. It shows the ?debug=layout numbers and runs the ?cover=1 test
-// below, and lasts until the app is closed. The URL parameters still work in
-// a browser.
+// Screen app. It shows the ?debug=layout numbers until the app is closed.
+//
+// Tried and dropped (2026-11-09): viewport-fit=cover to put the card tools'
+// bar inside iOS's side strip. On the Duo the Home Screen app's page stayed
+// 867 wide with no right inset, so iOS keeps pages out of the strip.
 const SCREEN_CHECK_KEY = "duo-screen-check";
 const screenCheckListeners = new Set<() => void>();
 let screenCheckOn: boolean | null = null;
@@ -210,31 +218,8 @@ function debugSnapshot(): boolean {
   return param("debug") === "layout" || readScreenCheck();
 }
 
-function coverSnapshot(): boolean {
-  return param("cover") === "1" || readScreenCheck();
-}
-
 export function useDuoDebug(): boolean {
   return useSyncExternalStore(subscribeScreenCheck, debugSnapshot, () => false);
-}
-
-// The strip test (?cover=1 or Screen check): lets the page run under iOS's
-// side strip (viewport-fit=cover) while the full-screen editor is open, so the
-// readout shows whether the strip's inset is reported. If it is, the card
-// tools' bar could move into the strip itself. The editor pads each side by
-// its own inset, so nothing lands under the clock.
-export function useViewportCoverTest(active: boolean) {
-  const on = useSyncExternalStore(subscribeScreenCheck, coverSnapshot, () => false);
-  useEffect(() => {
-    if (!active || !on) return;
-    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
-    if (!meta || /viewport-fit/.test(meta.content)) return;
-    const before = meta.content;
-    meta.content = `${before}, viewport-fit=cover`;
-    return () => {
-      meta.content = before;
-    };
-  }, [active, on]);
 }
 
 function safeAreaText(): string {
@@ -250,15 +235,9 @@ function safeAreaText(): string {
   return `safe area t${t} r${r} b${b} l${l}`;
 }
 
-let pageBeforeCover: string | null = null;
-
 // What the readout prints (?debug=layout or Screen check).
 export function duoDebugText(fold: Fold, keyboard: Keyboard): string {
   const vv = window.visualViewport;
-  const cover = /viewport-fit=cover/.test(
-    document.querySelector('meta[name="viewport"]')?.getAttribute("content") ?? ""
-  );
-  if (!cover && pageBeforeCover === null) pageBeforeCover = `${window.innerWidth}x${window.innerHeight}`;
   const angle = window.screen.orientation?.angle ?? (window as { orientation?: number }).orientation;
   const segments = (window as { viewport?: { segments?: DOMRect[] | null } }).viewport?.segments;
   const standalone = isStandalone();
@@ -266,7 +245,7 @@ export function duoDebugText(fold: Fold, keyboard: Keyboard): string {
     `page ${window.innerWidth}x${window.innerHeight}  screen ${window.screen.width}x${window.screen.height}  angle ${angle ?? "?"}`,
     `visual ${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)} top ${Math.round(vv.offsetTop)}` : "n/a"}  segments ${segments?.length ?? "n/a"}`,
     `fold x ${fold.x ?? "-"}  y ${fold.y ?? "-"}  keyboard ${keyboard ? `${keyboard.height}@${keyboard.top}` : "no"}  ${standalone ? "home screen app" : "browser"}`,
-    `${safeAreaText()}  strip test ${cover ? "on" : "off"}  page before ${pageBeforeCover ?? "?"}`,
+    `${safeAreaText()}`,
     `dpr ${window.devicePixelRatio}  avail ${window.screen.availWidth}x${window.screen.availHeight}  outer ${window.outerWidth}x${window.outerHeight}  ${window.matchMedia("(pointer: coarse)").matches ? "touch" : "mouse"}`,
   ].join("\n");
 }
