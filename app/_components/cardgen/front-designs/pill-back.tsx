@@ -17,6 +17,8 @@ import {
   FONTS,
   FONT_EM,
   abs,
+  accentLift,
+  backNameFamily,
   fitSize,
   luminance,
   shadow,
@@ -150,38 +152,8 @@ function Header({ p }: { p: BackThemeProps }) {
   );
 }
 
-// The layout fixes the player name's size (it can't shrink to fit like the
-// front's), and Archivo Black, Pill's name face, is ~60% wider than Anton. A
-// solo name that won't fit in the card's name font is set in Anton (the
-// Classic back's name face) instead of being cut off.
-function nameFamily(p: BackThemeProps): string {
-  const name = p.nameLines.filter(Boolean).join(" ").toUpperCase();
-  if (p.variant === "duo" || !name || p.nameFont.em <= FONT_EM.anton) return p.nameFont.family;
-  const width = (s: string, fs: number) => [...s].length * (p.nameFont.em * 1.04 + 0.01) * fs;
-  let fits: boolean;
-  if (!p.landscape) {
-    // One line at 7u beside the jersey disc (8u + the row's 6% gap).
-    fits = width(name, 7) <= 82 - (p.jersey ? 8 + 0.06 * 82 : 0);
-  } else {
-    // Up to two lines in the left column, at the layout's stepped size.
-    const n = name.length;
-    const fs = n > 12 ? 4.4 : n > 8 ? 5.3 : 6.5;
-    const avail = 43.3 - (p.jersey ? 7.2 + 0.04 * 43.3 : 0);
-    // Greedy word wrap: every word fits on a line, and two lines hold them all.
-    let lines = 1;
-    let line = 0;
-    fits = true;
-    for (const word of name.split(/\s+/)) {
-      const w = width(word, fs);
-      if (w > avail) fits = false;
-      if (line && line + 0.26 * fs + w <= avail) line += 0.26 * fs + w;
-      else if (line) [lines, line] = [lines + 1, w];
-      else line = w;
-    }
-    fits = fits && lines <= 2;
-  }
-  return fits ? p.nameFont.family : FONTS.anton;
-}
+// The jersey disc's diameter (u), beside the panel name.
+const JERSEY_D = (p: BackThemeProps) => (p.landscape ? 7.2 : 8);
 
 // "HEAD COACH" / "ASSISTANTS" → the front's coach-chip prefixes.
 function coachPrefix(label: string) {
@@ -189,6 +161,28 @@ function coachPrefix(label: string) {
   if (label === "ASSISTANTS") return "ASST.";
   return label;
 }
+
+// Splits a match name into two balanced lines at a word boundary, preferring a
+// break after a joiner ("&", "AND", "+", "/", a trailing comma) so each pro's
+// name stays whole: "LEBRON JAMES &" / "DWYANE WADE & CHRIS BOSH". Null when
+// it's a single word.
+function twoLines(name: string): [string, string] | null {
+  const words = name.trim().split(/\s+/);
+  if (words.length < 2) return null;
+  const joiner = (w: string) => /^(&|AND|\+|\/)$/.test(w) || /[,&]$/.test(w);
+  let breaks = words.map((_, i) => i).filter((i) => i > 0 && joiner(words[i - 1]));
+  if (!breaks.length) breaks = words.map((_, i) => i).slice(1);
+  const len = (i: number) => Math.max([...words.slice(0, i).join(" ")].length, [...words.slice(i).join(" ")].length);
+  const at = breaks.reduce((best, i) => (len(i) < len(best) ? i : best));
+  return [words.slice(0, at).join(" "), words.slice(at).join(" ")];
+}
+
+// Group back: below this one-line size (u) the match name wraps to two lines
+// (never smaller than MATCH_FLOOR, nor bigger than MATCH_TWO_MAX) rather than
+// shrinking under its blurb.
+const MATCH_WRAP_AT = 3.2;
+const MATCH_FLOOR = 3;
+const MATCH_TWO_MAX = 3.8;
 
 function Match({ p, m }: { p: BackThemeProps; m: BackMatchParts }) {
   const duo = p.variant === "duo";
@@ -211,7 +205,15 @@ function Match({ p, m }: { p: BackThemeProps; m: BackMatchParts }) {
   const gap = L ? 1.5 : 1.7;
   const photosW = n ? n * photo + (n - 1) * 0.35 * PANEL_EM + gap : 0;
   const avail = contentWidth(p) - 2 * CAP_RING - (photos ? pad : endPad) - photosW - endPad;
-  const nameFs = fitSize(m.name, duo ? 4.4 : L ? 4 : 4.8, avail, FONT_EM.archivo * 1.06, 0.01);
+  const em = FONT_EM.archivo * 1.06;
+  const one = fitSize(m.name, duo ? 4.4 : L ? 4 : 4.8, avail, em, 0.01);
+  // The solo banner keeps one fitted line; the group's (often two or three
+  // pros) wraps onto two when one line would be too small to read.
+  const lines = duo && one < MATCH_WRAP_AT ? twoLines(m.name) : null;
+  const nameFs = lines
+    ? Math.max(MATCH_FLOOR, fitSize(lines[0].length > lines[1].length ? lines[0] : lines[1], MATCH_TWO_MAX, avail, em, 0.01))
+    : one;
+  const line: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
   return (
     <div
       style={{
@@ -234,12 +236,23 @@ function Match({ p, m }: { p: BackThemeProps; m: BackMatchParts }) {
             fontSize: p.u(nameFs),
             letterSpacing: "0.01em",
             lineHeight: 1,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
+            ...(lines ? {} : line),
           }}
         >
-          {m.name}
+          {lines
+            ? lines.map((t, i) => (
+                <div
+                  key={i}
+                  style={{
+                    ...line,
+                    // Air between the lines, plus room for accented capitals.
+                    ...(i ? { marginTop: p.u(nameFs * 0.06 + accentLift(t, nameFs, 0.2)) } : {}),
+                  }}
+                >
+                  {t}
+                </div>
+              ))
+            : m.name}
         </div>
         {m.blurb && (
           <p
@@ -275,11 +288,22 @@ function Coach({ p, label, value }: { p: BackThemeProps; label: string; value: s
   const base = duo ? 2.3 : L ? 2.1 : 2.25;
   const fs = Math.max(2, Math.min(base, Math.round((cell / needEm) * 100) / 100));
   const c = pop(p);
+  // Group back: the head coach sizes to its line and the assistants take the
+  // rest, but the assistants always keep their own line's width, up to half
+  // the row (after the layout's 7% gap) — so a long head coach wraps in its
+  // half instead of squeezing the assistants into a letter-wide column. With
+  // no assistants, the head coach still has the whole row.
+  const half = 0.465 * contentWidth(p);
+  const flex: CSSProperties = !duo
+    ? {}
+    : label === "ASSISTANTS"
+      ? { flex: "1 1 0", minWidth: p.u(Math.min(half, needEm * fs)) }
+      : { flex: "0 1 auto" };
   return (
     <div
       style={{
-        ...(duo ? { flex: label === "ASSISTANTS" ? "1 1 0" : "0 1 auto" } : {}),
         minWidth: 0,
+        ...flex,
         display: "flex",
         alignItems: "flex-start",
         gap: "0.5em",
@@ -304,7 +328,9 @@ function Coach({ p, label, value }: { p: BackThemeProps; label: string; value: s
       >
         {tag}
       </span>
-      <span style={{ minWidth: 0, letterSpacing: "0.08em", overflowWrap: "anywhere" }}>{text}</span>
+      {/* Wraps at word boundaries (and hyphens); only a word too long for a
+          whole line breaks inside it. */}
+      <span style={{ minWidth: 0, letterSpacing: "0.08em", overflowWrap: "break-word" }}>{text}</span>
     </div>
   );
 }
@@ -335,8 +361,11 @@ export const pillBack: BackTheme = {
     overflow: "hidden",
   }),
 
+  // The layout fixes the name's size, and Archivo Black (Pill's name face) is
+  // ~60% wider than Anton: a name that won't fit in the card's font drops to
+  // Anton, then Bebas, instead of being cut off.
   name: (p) => ({
-    fontFamily: nameFamily(p),
+    fontFamily: backNameFamily(p, { jerseyW: JERSEY_D(p), letterSpacing: 0.01 }),
     fontStyle: p.nameItalic ? "italic" : "normal",
     letterSpacing: "0.01em",
     lineHeight: p.variant === "duo" ? 1.05 : p.landscape ? 1.04 : 1,
@@ -346,7 +375,7 @@ export const pillBack: BackTheme = {
 
   // The front's jersey disc, small: primary disc, secondary ring.
   jersey: (p, num) => {
-    const D = p.landscape ? 7.2 : 8;
+    const D = JERSEY_D(p);
     const ring = p.landscape ? 0.6 : 0.65;
     return (
       <div

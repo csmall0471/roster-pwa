@@ -22,6 +22,7 @@ import {
   SAFE,
   abs,
   accentLift,
+  backNameFamily,
   luminance,
   shadow,
   subLine,
@@ -218,6 +219,15 @@ function TabOnRule({ p, text, rule, mb }: { p: BackThemeProps; text: string; rul
   );
 }
 
+// Jersey tab (u): Anton digits after a small "#", with side padding. Its
+// width feeds the name's font fallback.
+const JERSEY_PAD_X = 1.1;
+const jerseyTabSize = (landscape: boolean) => (landscape ? 4.8 : 5.2);
+function jerseyTabW(landscape: boolean, num: string): number {
+  // "#" at 0.46em (≈0.6em glyph) + its 0.04em gap, then the digits.
+  return 2 * JERSEY_PAD_X + jerseyTabSize(landscape) * (0.32 + [...num].length * (FONT_EM.anton + 0.02));
+}
+
 export const sidebarBack: BackTheme = {
   header: (p) => <Header p={p} />,
 
@@ -259,7 +269,9 @@ export const sidebarBack: BackTheme = {
   },
 
   name: (p) => ({
-    fontFamily: p.nameFont.family,
+    // A wide pick (Bungee, Black Ops …) steps down to Anton / Bebas when the
+    // name would not fit beside the jersey tab.
+    fontFamily: backNameFamily(p, { jerseyW: jerseyTabW(p.landscape, p.jersey), letterSpacing: 0.03 }),
     fontStyle: p.nameItalic ? "italic" : "normal",
     letterSpacing: "0.03em",
     lineHeight: p.variant === "duo" ? 1.05 : p.landscape ? 1.02 : 1,
@@ -278,10 +290,10 @@ export const sidebarBack: BackTheme = {
         background: p.palette.background,
         color: p.palette.color,
         borderBottom: `${p.u(0.6)} solid ${p.palette.subBackground}`,
-        padding: `${p.u(0.6)} ${p.u(1.1)} ${p.u(0.4)}`,
+        padding: `${p.u(0.6)} ${p.u(JERSEY_PAD_X)} ${p.u(0.4)}`,
         fontFamily: FONTS.anton,
         fontWeight: 400,
-        fontSize: p.u(p.landscape ? 4.8 : 5.2),
+        fontSize: p.u(jerseyTabSize(p.landscape)),
         lineHeight: 1,
         letterSpacing: "0.02em",
         whiteSpace: "nowrap",

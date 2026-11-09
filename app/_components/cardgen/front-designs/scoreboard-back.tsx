@@ -7,7 +7,7 @@
 // thin accent rules mark the Q&A, quote and coaching staff.
 
 import type { CSSProperties, ReactNode } from "react";
-import { FONTS, luminance, type BackTheme, type BackThemeProps } from "./shared";
+import { FONTS, FONT_EM, backNameFamily, luminance, type BackTheme, type BackThemeProps } from "./shared";
 import { ScoreBug } from "./scoreboard";
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -70,11 +70,19 @@ function ticked(p: BackThemeProps, c: SlateColors): CSSProperties {
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
+// Score box number size (u) and footprint width (u): its min width, or the
+// Anton digits plus the value box's side padding when wider.
+function scoreBoxGeo(landscape: boolean, num: string) {
+  const size = num.length > 2 ? (landscape ? 3.5 : 4) : landscape ? 4.4 : 5;
+  const minW = landscape ? 8.4 : 10;
+  return { size, minW, w: Math.max(minW, [...num].length * (FONT_EM.anton + 0.02) * size + 2 * 1.2) };
+}
+
 // Score box: a "NO." tab over a value box with a thin rule under it.
 function ScoreBox({ p, num }: { p: BackThemeProps; num: string }) {
   const c = colors(p);
   const L = p.landscape;
-  const size = num.length > 2 ? (L ? 3.5 : 4) : L ? 4.4 : 5;
+  const { size, minW } = scoreBoxGeo(L, num);
   return (
     <div
       style={{
@@ -82,7 +90,7 @@ function ScoreBox({ p, num }: { p: BackThemeProps; num: string }) {
         alignSelf: L ? "flex-start" : "center",
         display: "flex",
         flexDirection: "column",
-        minWidth: p.u(L ? 8.4 : 10),
+        minWidth: p.u(minW),
         borderBottom: `${p.u(RULE)} solid ${c.lead}`,
       }}
     >
@@ -243,7 +251,14 @@ export const scoreboardBack: BackTheme = {
     const c = colors(p);
     const duo = p.variant === "duo";
     return {
-      fontFamily: p.nameFont.family,
+      // A wide pick (Bungee, Black Ops …) steps down to Anton / Bebas when the
+      // name would not fit on the bar beside the score box.
+      fontFamily: backNameFamily(p, {
+        jerseyW: scoreBoxGeo(p.landscape, p.jersey).w,
+        // Side padding (em) plus the cap (u, at the portrait name size).
+        padEm: 0.3 + (p.nameItalic ? 0.42 : 0.3) + CAP / 7,
+        letterSpacing: 0.01,
+      }),
       fontStyle: p.nameItalic ? "italic" : "normal",
       letterSpacing: "0.01em",
       lineHeight: duo ? 1.05 : 1,

@@ -423,3 +423,50 @@ export function backThemeProps(
     panelTop: o.panelTop,
   };
 }
+
+// Back-panel name font. The layout sets the panel name at a fixed size (7u on
+// one line in portrait; 4.4–6.5u on up to two lines in landscape), so a wide
+// name font (Black Ops, Bungee, Marker, Archivo …) cuts ordinary names off
+// with "…". Returns the user's font when the name fits, else Anton, else
+// Bebas. `jerseyW` is the width (u) of the theme's jersey mark beside the name
+// (0 when none); `padEm` is any horizontal padding the theme adds around the
+// name, in em.
+export function backNameFamily(
+  p: BackThemeProps,
+  o: { jerseyW: number; padEm?: number; letterSpacing?: number } = { jerseyW: 0 }
+): string {
+  const name = p.nameLines.filter(Boolean).join(" ").trim().toUpperCase();
+  if (p.variant === "duo" || !name) return p.nameFont.family;
+  const ls = o.letterSpacing ?? 0.02;
+  const pad = o.padEm ?? 0;
+  const candidates: Array<{ family: string; em: number }> = [
+    p.nameFont,
+    { family: FONTS.anton, em: FONT_EM.anton },
+    { family: FONTS.bebas, em: FONT_EM.bebas },
+  ];
+  // Real names run up to ~1.1× a font's average glyph width.
+  const width = (s: string, em: number, fs: number) => ([...s].length * (em * 1.1 + ls) + pad) * fs;
+  const fits = (em: number) => {
+    if (!p.landscape) {
+      // One line beside the jersey mark: panel inner width 82u minus the mark
+      // and the row's 6% gap.
+      return width(name, em, 7) <= 82 - (p.jersey ? o.jerseyW + 0.06 * 82 : 0);
+    }
+    // Landscape: up to two whole-word lines in the 36% left column.
+    const fs = name.length > 12 ? 4.4 : name.length > 8 ? 5.3 : 6.5;
+    const avail = 43.3 - (p.jersey ? o.jerseyW + 0.04 * 43.3 : 0);
+    let lines = 1;
+    let line = 0;
+    for (const word of name.split(/\s+/)) {
+      const w = width(word, em, fs);
+      if (w > avail) return false;
+      if (line && line + 0.26 * fs + w <= avail) line += 0.26 * fs + w;
+      else if (line) [lines, line] = [lines + 1, w];
+      else line = w;
+    }
+    return lines <= 2;
+  };
+  // Never swap to a font wider than the user's.
+  for (const c of candidates) if (c.em <= p.nameFont.em && fits(c.em)) return c.family;
+  return candidates[candidates.length - 1].family;
+}

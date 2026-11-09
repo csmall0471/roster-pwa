@@ -23,6 +23,7 @@ import {
   FONTS,
   SAFE,
   accentLift,
+  backNameFamily,
   fitSize,
   luminance,
   type BackTheme,
@@ -227,20 +228,27 @@ function Tick({ p, h }: { p: BackThemeProps; h: number }) {
   );
 }
 
+// Number board geometry (u), shared by the board and the name's font fallback.
+function boardGeo(landscape: boolean, num: string) {
+  const h = landscape ? 6.4 : 7;
+  const s = h * TAN;
+  const size = fitSize(num, h * 0.72, 8.5, 0.5);
+  const w = Math.max(h * 1.5, [...num].length * 0.5 * size + 2 * s + 2.4);
+  const lead = 1.1;
+  const gap = 0.75;
+  // Footprint in the name row: the board plus the stripe/gap margin before it.
+  return { h, s, size, w, lead, gap, outer: lead + gap + w };
+}
+
 // The front's number board: secondary fill inside a primary keyline, with a
 // leading stripe. The number is in normal flow so the board baseline-aligns
 // with the player name.
 function Board({ p, num }: { p: BackThemeProps; num: string }) {
   const { u } = p;
   const k = look(p);
-  const h = p.landscape ? 6.4 : 7;
-  const s = h * TAN;
-  const size = fitSize(num, h * 0.72, 8.5, 0.5);
-  const w = Math.max(h * 1.5, [...num].length * 0.5 * size + 2 * s + 2.4);
+  const { h, s, size, w, lead, gap } = boardGeo(p.landscape, num);
   const d = 0.55; // keyline
   const kx = d / COS; // keyline measured sideways on the slanted ends
-  const lead = 1.1;
-  const gap = 0.75;
   return (
     <div
       style={{
@@ -477,7 +485,12 @@ export const racingBack: BackTheme = {
   },
 
   name: (p) => ({
-    fontFamily: p.nameFont.family,
+    // A wide pick (Bungee, Black Ops …) steps down to Anton / Bebas when the
+    // name would not fit beside the number board.
+    fontFamily: backNameFamily(p, {
+      jerseyW: boardGeo(p.landscape, p.jersey).outer,
+      letterSpacing: 0.03,
+    }),
     fontStyle: p.nameItalic ? "italic" : "normal",
     letterSpacing: "0.03em",
     lineHeight: p.variant === "duo" ? 1.05 : p.landscape ? 1.02 : 1,

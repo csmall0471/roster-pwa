@@ -292,6 +292,29 @@ async function drawCircle(
   ctx.stroke();
 }
 
+// The visible part of `el` inside `root`: the intersection of its box with every
+// ancestor (below root) that clips — overflow other than visible, or a
+// clip-path (approximated by its box). null when fully clipped away. The
+// photos are drawn from their element boxes, so without this a photo pushed
+// out of a clipping panel (long text) would still be painted on the canvas.
+function visibleRect(el: HTMLElement, root: HTMLElement): DOMRect | null {
+  let r = el.getBoundingClientRect();
+  let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
+  for (let a = el.parentElement; a && a !== root; a = a.parentElement) {
+    const cs = getComputedStyle(a);
+    const clips =
+      cs.overflow !== "visible" || cs.overflowX !== "visible" || cs.overflowY !== "visible" ||
+      (cs.clipPath && cs.clipPath !== "none");
+    if (!clips) continue;
+    r = a.getBoundingClientRect();
+    left = Math.max(left, r.left);
+    top = Math.max(top, r.top);
+    right = Math.min(right, r.right);
+    bottom = Math.min(bottom, r.bottom);
+  }
+  return right > left && bottom > top ? new DOMRect(left, top, right - left, bottom - top) : null;
+}
+
 // Composite the back at an arbitrary output width (height keeps the 5:7 ratio).
 // All positions are fractions of outW/outH, so it scales to any resolution.
 async function compositeBackCanvas(
@@ -355,10 +378,16 @@ async function compositeBackCanvas(
   // in a flex row whose spot depends on the content above it).
   if (L.lookalikeSrc) {
     const el = L.backEl.querySelector<HTMLElement>("[data-lookalike-photo]");
-    if (el) {
+    const vis = el ? visibleRect(el, L.backEl) : null;
+    if (el && vis) {
       const br = L.backEl.getBoundingClientRect();
       const er = el.getBoundingClientRect();
       const s = outW / (br.width || outW);
+      // Clip to what's actually visible (a clipping panel may hide part of it).
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect((vis.left - br.left) * s, (vis.top - br.top) * s, vis.width * s, vis.height * s);
+      ctx.clip();
       await drawCircle(
         ctx,
         L.lookalikeSrc,
@@ -369,6 +398,7 @@ async function compositeBackCanvas(
         { width: 0.006 * outW, color: el.dataset.ring || "rgba(10,10,10,0.55)" },
         0.3 // bias toward the face
       );
+      ctx.restore();
     }
   }
 
@@ -381,7 +411,13 @@ async function compositeBackCanvas(
     for (let i = 0; i < els.length && i < L.duoPhotos.length; i++) {
       const src = L.duoPhotos[i];
       if (!src) continue;
+      const vis = visibleRect(els[i], L.backEl);
+      if (!vis) continue;
       const er = els[i].getBoundingClientRect();
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect((vis.left - br.left) * s, (vis.top - br.top) * s, vis.width * s, vis.height * s);
+      ctx.clip();
       await drawCircle(
         ctx,
         src,
@@ -392,6 +428,7 @@ async function compositeBackCanvas(
         { width: 0.006 * outW, color: els[i].dataset.ring || "rgba(10,10,10,0.55)" },
         0.28 // bias toward the face
       );
+      ctx.restore();
     }
   }
 

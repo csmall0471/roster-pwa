@@ -16,7 +16,17 @@
 // Attached to the design in ./index.tsx, so the import of ./ribbon is one-way.
 
 import type { CSSProperties } from "react";
-import { FONTS, FONT_EM, SAFE, fitSize, isDark, shadow, type BackTheme, type BackThemeProps } from "./shared";
+import {
+  FONTS,
+  FONT_EM,
+  SAFE,
+  backNameFamily,
+  fitSize,
+  isDark,
+  shadow,
+  type BackTheme,
+  type BackThemeProps,
+} from "./shared";
 import { Ribbon, RibbonTeamBlock, Star, Stitch, contrast, pennantClip, shade } from "./ribbon";
 
 const OSWALD = FONTS.oswald;
@@ -88,9 +98,14 @@ function panelPadTop(p: BackThemeProps) {
 
 // ── Header: team ribbons + the headshot rosette ─────────────────────────────
 
-// How far the rosette's pleats reach past the photo circle (u).
+// How far the rosette's pleats reach past the photo circle (u): as far as the
+// room above the panel allows (the panel paints over the header), so in
+// landscape, where the photo ends just above the panel, it is a narrow ruff.
 function ruffle(p: BackThemeProps) {
-  return p.landscape ? 2.2 : 2.4;
+  const want = p.landscape ? 2.2 : 2.4;
+  const hs = p.headshot;
+  if (!hs) return want;
+  return Math.max(0, Math.min(want, p.panelTop - 0.5 - (hs.top + hs.size)));
 }
 
 function Rosette({ p }: { p: BackThemeProps }) {
@@ -98,10 +113,12 @@ function Rosette({ p }: { p: BackThemeProps }) {
   if (!hs) return null;
   const c = colors(p);
   const e = ruffle(p);
+  if (e < 0.3) return null;
   const size = hs.size + 2 * e;
-  // Pleated edge: 2N points alternating between the outer radius and a notch.
+  // Pleated edge: 2N points alternating between the outer radius and a notch
+  // (shallower on a narrow ruff, so the notches stay outside the photo).
   const N = 34;
-  const inner = 50 - (0.95 / size) * 100;
+  const inner = 50 - (Math.min(0.95, 0.4 * e) / size) * 100;
   const pts: string[] = [];
   for (let i = 0; i < 2 * N; i++) {
     const a = (i * Math.PI) / N;
@@ -129,26 +146,33 @@ function Rosette({ p }: { p: BackThemeProps }) {
           background: `repeating-conic-gradient(from ${-step / 4}deg, rgba(0,0,0,0.2) 0deg ${step / 2}deg, rgba(255,255,255,0.12) ${step / 2}deg ${step}deg), ${c.primary}`,
         }}
       />
-      {/* Sewn ring between the pleats and the photo. */}
-      <div
-        style={{
-          position: "absolute",
-          inset: p.u(e * 0.36),
-          borderRadius: "9999px",
-          border: `${p.u(0.28)} dashed ${c.stitch}`,
-        }}
-      />
+      {/* Sewn ring between the pleats and the photo (when there is room). */}
+      {e >= 1.4 && (
+        <div
+          style={{
+            position: "absolute",
+            inset: p.u(e * 0.36),
+            borderRadius: "9999px",
+            border: `${p.u(0.28)} dashed ${c.stitch}`,
+          }}
+        />
+      )}
     </div>
   );
 }
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
+// Jersey pennant width (u).
+function pennantW(p: BackThemeProps) {
+  return p.landscape ? 9 : 10;
+}
+
 function JerseyPennant({ p, num }: { p: BackThemeProps; num: string }) {
   const c = colors(p);
   const L = p.landscape;
   const pad = panelPadTop(p);
-  const w = L ? 9 : 10;
+  const w = pennantW(p);
   const depth = L ? 2.6 : 3;
   // Height below the panel's top padding; the rest hangs into the gap under
   // the name row without growing it.
@@ -237,6 +261,7 @@ function stitchRule(p: BackThemeProps, color: string, deg: 90 | 180) {
 
 export const ribbonBack: BackTheme = {
   header: (p) => {
+    // Clear of the rosette (same ruff width it is drawn with).
     const limit = p.headshot ? p.headshot.left - 3 - ruffle(p) : p.W - SAFE;
     return (
       <>
@@ -281,16 +306,19 @@ export const ribbonBack: BackTheme = {
 
   name: (p) => {
     const c = colors(p);
+    const ls = p.variant !== "duo" && p.landscape ? 0.03 : 0.04;
     const base: CSSProperties = {
-      fontFamily: p.nameFont.family,
+      // The user's font when the name fits the panel row, else a narrower one.
+      fontFamily: backNameFamily(p, { jerseyW: pennantW(p), letterSpacing: ls }),
       fontStyle: p.nameItalic ? "italic" : "normal",
+      letterSpacing: `${ls}em`,
       color: c.ink,
     };
     return p.variant === "duo"
-      ? { ...base, letterSpacing: "0.04em", lineHeight: 1.05, textTransform: "uppercase" }
+      ? { ...base, lineHeight: 1.05, textTransform: "uppercase" }
       : p.landscape
-        ? { ...base, letterSpacing: "0.03em", lineHeight: 1.02 }
-        : { ...base, letterSpacing: "0.04em", lineHeight: 1 };
+        ? { ...base, lineHeight: 1.02 }
+        : { ...base, lineHeight: 1 };
   },
 
   jersey: (p, num) => <JerseyPennant p={p} num={num} />,

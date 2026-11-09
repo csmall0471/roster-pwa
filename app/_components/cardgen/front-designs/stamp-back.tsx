@@ -12,7 +12,17 @@
 // thin accents. Text only ever sits on its own contrast-paired surface.
 
 import type { CSSProperties } from "react";
-import { FONTS, FONT_EM, SAFE, abs, fitSize, shadow, type BackTheme, type BackThemeProps } from "./shared";
+import {
+  FONTS,
+  FONT_EM,
+  SAFE,
+  abs,
+  backNameFamily,
+  fitSize,
+  shadow,
+  type BackTheme,
+  type BackThemeProps,
+} from "./shared";
 // Attached to the design in ./index.tsx, so this import of ./stamp is one-way.
 import { GAP, JERSEY_TILT, R1, R2, TEAM_TILT, Team, inks, sinDeg, teamBox, textEm } from "./stamp";
 
@@ -22,7 +32,11 @@ const SHADOW = "drop-shadow(0 3px 7px rgba(0,0,0,0.4))";
 
 // Headshot seal: outer rule, a seal-colored gap, then the photo's own ring.
 const HS_GAP = 0.8;
-const hsMargin = () => R1 + HS_GAP; // seal margin around the photo circle (u)
+type Headshot = NonNullable<BackThemeProps["headshot"]>;
+// Seal margin around the photo circle (u). The landscape headshot sits just
+// above the panel, so there the margin shrinks to end 0.5u clear of it.
+const hsMargin = (p: BackThemeProps, hs: Headshot) =>
+  Math.max(0, Math.min(R1 + HS_GAP, p.panelTop - 0.5 - (hs.top + hs.size)));
 // The exporter strokes the headshot ring at 6.4% of the circle's size.
 const HS_RING = 0.064;
 
@@ -32,7 +46,7 @@ function Header({ p }: { p: BackThemeProps }) {
   const hs = p.headshot;
   // Keep the box 3u clear of the headshot seal (or SAFE from the trim), and
   // 2u above the panel.
-  const rightLimit = hs ? hs.left - hsMargin() - 3 : p.W - SAFE;
+  const rightLimit = hs ? hs.left - hsMargin(p, hs) - 3 : p.W - SAFE;
   const maxBottom = p.panelTop - 2;
   // The box tilts about its top-right corner, so its lowest point is the
   // bottom-left corner: h·cos + w·sin below the top. Where that runs into the
@@ -59,9 +73,11 @@ function Header({ p }: { p: BackThemeProps }) {
 }
 
 // Round seal behind the headshot (the photo element is drawn on top of it).
-function HeadshotSeal({ p, hs }: { p: BackThemeProps; hs: NonNullable<BackThemeProps["headshot"]> }) {
+function HeadshotSeal({ p, hs }: { p: BackThemeProps; hs: Headshot }) {
   const c = inks(p);
-  const m = hsMargin();
+  const m = hsMargin(p, hs);
+  // A clamped margin keeps the rule-to-gap proportion.
+  const rule = (m * R1) / (R1 + HS_GAP);
   return (
     <div
       style={abs({
@@ -71,7 +87,7 @@ function HeadshotSeal({ p, hs }: { p: BackThemeProps; hs: NonNullable<BackThemeP
         height: p.u(hs.size + 2 * m),
         borderRadius: "9999px",
         background: c.seal,
-        border: `${p.u(R1)} solid ${c.sealRule}`,
+        border: `${p.u(rule)} solid ${c.sealRule}`,
         boxSizing: "border-box",
         ...shadow(p, SHADOW),
       })}
@@ -102,6 +118,10 @@ function caps(p: BackThemeProps, size: number, ls = 0.14): CSSProperties {
 
 // Stat boxes are stamped slightly askew, each its own way.
 const STAT_TILT: Record<string, number> = { POS: -1.5, HT: 1, "#": -1, AGE: 1.5 };
+
+// Jersey seal diameter (u).
+const jerseyD = (p: BackThemeProps) => (p.landscape ? 8 : 8.2);
+const NAME_LS = 0.02; // panel name letter spacing (em)
 
 // ── Theme ────────────────────────────────────────────────────────────────────
 
@@ -135,9 +155,10 @@ export const stampBack: BackTheme = {
   },
 
   name: (p) => ({
-    fontFamily: p.nameFont.family,
+    // Falls back to Anton/Bebas when the user's font would cut the name off.
+    fontFamily: backNameFamily(p, { jerseyW: jerseyD(p), letterSpacing: NAME_LS }),
     fontStyle: p.nameItalic ? "italic" : "normal",
-    letterSpacing: "0.02em",
+    letterSpacing: `${NAME_LS}em`,
     lineHeight: p.variant === "duo" ? 1.05 : 1,
     color: inks(p).ink,
     textTransform: "uppercase",
@@ -146,7 +167,7 @@ export const stampBack: BackTheme = {
   // A small "NO." seal, like the front's jersey stamp.
   jersey: (p, num) => {
     const c = inks(p);
-    const D = p.landscape ? 8 : 8.2;
+    const D = jerseyD(p);
     const size = fitSize(num, D * 0.46, D * 0.6, textEm(num, FONT_EM.stencil), 0.02);
     return (
       <div

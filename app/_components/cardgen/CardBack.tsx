@@ -1,6 +1,6 @@
 import { Fragment, forwardRef, type CSSProperties } from "react";
 import { classicBack } from "./front-designs/classic-back";
-import { backThemeProps, type BackTheme, type FrontDesignProps } from "./front-designs/shared";
+import { accentLift, backThemeProps, type BackTheme, type FrontDesignProps } from "./front-designs/shared";
 import type { CardSport } from "@/lib/types";
 import { abbreviatePositionFor, getSport } from "./sports";
 
@@ -78,10 +78,12 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
   ref
 ) {
   const qL = getSport(sport).qLabels;
+  // Designs draw their own "#", so drop one the coach typed (as the front does).
+  const jerseyNum = (jersey || stats.jersey || "").trim().replace(/^#+\s*/, "");
   const statRows: Array<[string, string]> = [
     ["POS", abbreviatePositionFor(sport, stats.position)],
     ["HT", stats.height],
-    ["#", jersey || stats.jersey],
+    ["#", jerseyNum],
     ["AGE", stats.age],
   ].filter(([, v]) => v && v.length > 0) as Array<[string, string]>;
 
@@ -102,6 +104,12 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
     panelTop: L ? 30 : 140 * 0.22,
   });
   const hs = theme.headshot(p);
+  // The name span clips overflow at a tight line height, which would shave
+  // the accents off É/Ú/Ñ; give accented names headroom (unless the theme
+  // already set its own top padding).
+  const nameStyle = theme.name(p);
+  const nameAccentPad =
+    accentLift(playerName || "", 1) && nameStyle.paddingTop === undefined ? { paddingTop: "0.24em" } : {};
   const matchRing = theme.matchRing(p);
   const hasQA = !!(
     stats.favorite_team ||
@@ -222,7 +230,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
           >
             <span
               style={{
-                ...theme.name(p),
+                ...nameStyle,
+                ...nameAccentPad,
                 fontSize: p.u(7),
                 flex: "1 1 auto",
                 minWidth: 0,
@@ -233,7 +242,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             >
               {playerName || "PLAYER"}
             </span>
-            {jersey && theme.jersey(p, jersey)}
+            {jerseyNum && theme.jersey(p, jerseyNum)}
           </div>
 
           {/* Stat row */}
@@ -310,7 +319,8 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "4%" }}>
               <span
                 style={{
-                  ...theme.name(p),
+                  ...nameStyle,
+                  ...nameAccentPad,
                   // The name shares a narrow column with the jersey number, so a
                   // long name would clip on one line — let it wrap to two lines
                   // and step the size down as it gets longer.
@@ -328,7 +338,7 @@ const CardBack = forwardRef<HTMLDivElement, Props>(function CardBack(
               >
                 {playerName || "PLAYER"}
               </span>
-              {jersey && theme.jersey(p, jersey)}
+              {jerseyNum && theme.jersey(p, jerseyNum)}
             </div>
 
             {statRows.length > 0 && (

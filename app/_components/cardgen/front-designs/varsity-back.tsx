@@ -15,7 +15,7 @@
 // ./varsity here is one-way.
 
 import type { CSSProperties } from "react";
-import { FONTS, FONT_EM, contrastText, fitSize, luminance, type BackTheme, type BackThemeProps } from "./shared";
+import { FONTS, FONT_EM, accentLift, contrastText, fitSize, luminance, type BackTheme, type BackThemeProps } from "./shared";
 import {
   CAP,
   EXT_LT,
@@ -139,39 +139,50 @@ function widthIn(family: string, avgEm: number, text: string, size: number) {
   return (textEm(fontOf(family), text, avgEm) + 0.01 * [...text].length + EXT_LT + EXT_RB) * size;
 }
 
+// Lines a greedy word wrap of `text` takes in `avail` (u), given each word's
+// width and the space's (u); Infinity when a word alone is wider than a line.
+function lineCount(text: string, wordW: (word: string) => number, space: number, avail: number) {
+  let lines = 1;
+  let w = 0;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const ww = wordW(word);
+    if (ww > avail) return Infinity;
+    if (w && w + space + ww > avail) {
+      lines++;
+      w = ww;
+    } else w += (w ? space : 0) + ww;
+  }
+  return lines;
+}
+
 type Face = { family: string; capTop: number; lh: number };
 
 // The name row. The layout fixes the name's size, so a long name is kept whole
 // by first stepping the jersey number down (8 → 7u, portrait) and then setting
-// the name in condensed Bebas instead of the design's name font. The name gets
-// one line (two in the narrow landscape column, words never broken).
+// the name in Anton and, failing that, condensed Bebas instead of the design's
+// name font (the order backNameFamily uses). The name gets one line (two in
+// the narrow landscape column, words never broken).
 function nameRow(p: BackThemeProps): { face: Face; jersey: number } {
   const name = playerName(p);
   const own = { family: p.nameFont.family, em: p.nameFont.em };
+  const anton = { family: FONTS.anton, em: FONT_EM.anton };
   const bebas = { family: FONTS.bebas, em: FONT_EM.bebas };
   const L = p.variant === "solo" && p.landscape;
-  const steps: Array<[{ family: string; em: number }, number]> =
+  // Never swap to a font wider than the user's (Bebas stays the last resort).
+  const fallbacks = anton.em <= own.em ? [anton, bebas] : [bebas];
+  type Step = [{ family: string; em: number }, number];
+  const steps: Step[] =
     p.variant === "duo" || L
-      ? [[own, 6], [bebas, 6]]
-      : [[own, 8], [own, 7], [bebas, 8], [bebas, 7], [bebas, 6]];
-  const fits = ([c, j]: (typeof steps)[number]) => {
+      ? [own, ...fallbacks].map((c): Step => [c, 6])
+      : [[own, 8], [own, 7], ...fallbacks.flatMap((c): Step[] => [[c, 8], [c, 7]]), [bebas, 6]];
+  const fits = ([c, j]: Step) => {
     if (p.variant === "duo") return widthIn(c.family, c.em, name, 7) <= contentW(p);
     const jw = p.jersey ? jerseyW(j, p.jersey) : 0;
     if (!L) return widthIn(c.family, c.em, name, 7) <= contentW(p) * 0.94 - jw;
     const size = landscapeNameSize(p);
     const avail = leftColW(p) * 0.96 - jw;
     const space = textEm(fontOf(c.family), " ", c.em) * size;
-    let lines = 1;
-    let w = 0;
-    for (const word of name.split(/\s+/).filter(Boolean)) {
-      const ww = widthIn(c.family, c.em, word, size);
-      if (ww > avail) return false;
-      if (w && w + space + ww > avail) {
-        lines++;
-        w = ww;
-      } else w += (w ? space : 0) + ww;
-    }
-    return lines <= 2;
+    return lineCount(name, (word) => widthIn(c.family, c.em, word, size), space, avail) <= 2;
   };
   const [c, jersey] = steps.find(fits) ?? steps[steps.length - 1];
   const f = fontOf(c.family);
@@ -430,7 +441,25 @@ export const varsityBack: BackTheme = {
     const bannerW = duo ? contentW(p) : L ? rightColW(p) : contentW(p);
     const textW = bannerW - hoist - padL - n * photo - (n - 1) * 1.1 - gap - point - 1.2;
     const base = duo ? 4.4 : L ? 4.6 : 5.2;
-    const nameSize = Math.max(3, fitSize(m.name, base, textW, (textEm("bungee", m.name, FONT_EM.bungee) + 0.2) / Math.max(1, [...m.name].length)));
+    const single = fitSize(m.name, base, textW, (textEm("bungee", m.name, FONT_EM.bungee) + 0.2) / Math.max(1, [...m.name].length));
+    // The solo banner keeps one line (a 3u floor, then an ellipsis). A group's
+    // match is often two or three full names ("STEPHEN CURRY & KLAY THOMPSON"),
+    // so when one line would drop below 3.6u it wraps at whole words instead:
+    // the largest size ≥ 3.4u that takes two lines, else three (a longer one
+    // runs to more lines at 3.4u rather than being cut).
+    const wrap = duo && single < 3.6;
+    let nameSize = Math.max(3, single);
+    if (wrap) {
+      const bw = (t: string) => textEm("bungee", t, FONT_EM.bungee) + 0.01 * [...t].length; // + tracking
+      const avail = textW * 0.96; // slack for the measured-width estimate
+      const sizeFor = (lines: number) => {
+        for (let s = base; s >= 3.4 - 1e-6; s -= 0.1) {
+          if (lineCount(m.name, (word) => bw(word) * s, bw(" ") * s, avail) <= lines) return +s.toFixed(2);
+        }
+        return 0;
+      };
+      nameSize = sizeFor(2) || sizeFor(3) || 3.4;
+    }
     const ring = varsityBack.matchRing(p);
     const stitch = alpha(b.hiText, 0.4);
     const seam = (pos: "top" | "bottom"): CSSProperties => ({
@@ -471,11 +500,16 @@ export const varsityBack: BackTheme = {
             style={{
               fontFamily: FONTS.bungee,
               fontSize: p.u(nameSize),
-              lineHeight: 1.05,
               letterSpacing: "0.01em",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              ...(wrap
+                ? {
+                    // Accents on a wrapped line need room under the line above.
+                    lineHeight: accentLift(m.name, 1) ? 1.24 : 1.05,
+                    whiteSpace: "normal",
+                    overflowWrap: "normal",
+                    textWrap: "balance",
+                  }
+                : { lineHeight: 1.05, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }),
             }}
           >
             {m.name}

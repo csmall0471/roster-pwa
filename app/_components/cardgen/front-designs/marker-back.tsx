@@ -12,7 +12,7 @@
 // team color with that color's contrast-paired text.
 
 import type { CSSProperties, ReactNode } from "react";
-import { FONTS, SAFE, abs, luminance, shadow, type BackTheme, type BackThemeProps } from "./shared";
+import { FONTS, SAFE, abs, backNameFamily, luminance, shadow, type BackTheme, type BackThemeProps } from "./shared";
 import { MK, SIN, TAPE_SHADOW, TILT_TEAM, Tape, Team, tapeBg, teamMetrics, torn, type Geo } from "./marker";
 
 // Kraft paper and inks.
@@ -51,7 +51,16 @@ function clearTape(p: BackThemeProps): string {
 // ── Header ───────────────────────────────────────────────────────────────────
 
 const HS_MARGIN = 2.2; // sticker margin around the headshot circle (u)
+const HS_PANEL_GAP = 0.5; // the sticker stops at least this far above the panel (u)
 const HS_RING = 0.064; // the exporter strokes the headshot ring at 6.4% of its size
+
+// The sticker's margin around the headshot: HS_MARGIN, clamped so the sticker
+// ends above the kraft panel (the landscape headshot sits only 1.2u above it),
+// which would otherwise cover its bottom and break the hand-drawn loop.
+function hsMargin(p: BackThemeProps): number {
+  const h = p.headshot!;
+  return Math.max(0, Math.min(HS_MARGIN, p.panelTop - HS_PANEL_GAP - (h.top + h.size)));
+}
 
 function Header({ p }: { p: BackThemeProps }) {
   // The front's team block (no jersey). Its plates stop 3u short of the
@@ -78,13 +87,18 @@ function Header({ p }: { p: BackThemeProps }) {
 // The round team-color sticker behind the headshot, circled by hand.
 function HeadshotSticker({ p }: { p: BackThemeProps }) {
   const h = p.headshot!;
-  const D = h.size + 2 * HS_MARGIN;
+  const m = hsMargin(p);
+  const D = h.size + 2 * m;
+  // The loop is drawn in the margin band outside the photo; a narrower band
+  // pulls it toward the sticker's edge and thins the strokes a little.
+  const k = m / HS_MARGIN;
+  const at = (n: number) => p.u(n * k);
   const ring = stickerRing(p);
   return (
     <div
       style={abs({
-        left: p.u(h.left - HS_MARGIN),
-        top: p.u(h.top - HS_MARGIN),
+        left: p.u(h.left - m),
+        top: p.u(h.top - m),
         width: p.u(D),
         height: p.u(D),
         ...shadow(p, TAPE_SHADOW),
@@ -103,8 +117,8 @@ function HeadshotSticker({ p }: { p: BackThemeProps }) {
       <div
         style={{
           position: "absolute",
-          inset: p.u(0.5),
-          border: `${p.u(0.42)} solid ${ring}`,
+          inset: at(0.5),
+          border: `${p.u(Math.max(0.3, 0.42 * k))} solid ${ring}`,
           borderRadius: "49% 51% 50% 50% / 52% 48% 52% 48%",
           transform: "rotate(-14deg)",
         }}
@@ -112,8 +126,8 @@ function HeadshotSticker({ p }: { p: BackThemeProps }) {
       <div
         style={{
           position: "absolute",
-          inset: `${p.u(0.2)} ${p.u(0.65)} ${p.u(0.55)} ${p.u(0.25)}`,
-          border: `${p.u(0.32)} solid transparent`,
+          inset: `${at(0.2)} ${at(0.65)} ${at(0.55)} ${at(0.25)}`,
+          border: `${p.u(Math.max(0.24, 0.32 * k))} solid transparent`,
           borderTopColor: ring,
           borderLeftColor: ring,
           borderRadius: "50%",
@@ -268,8 +282,11 @@ function LabelTape({
   );
 }
 
+// Diameter of the jersey sticker beside the panel name (u).
+const jerseyD = (p: BackThemeProps) => (p.landscape ? 9.6 : 11);
+
 function Jersey({ p, num }: { p: BackThemeProps; num: string }) {
-  const D = p.landscape ? 9.6 : 11;
+  const D = jerseyD(p);
   const ring = stickerRing(p);
   const glyphs = [...num].length * 1.06 + 0.6 * 1.13;
   const fs = Math.max(2, Math.min(p.landscape ? 4.2 : 4.8, ((D - 4.2) * 0.95) / (glyphs * 0.622)));
@@ -442,13 +459,18 @@ export const markerBack: BackTheme = {
   }),
 
   name: (p) => {
+    const ls = 0.01;
+    const padX = p.landscape ? 0.32 : 0.36; // em, each side of the tape
     const tape: CSSProperties = {
-      fontFamily: p.nameFont.family,
+      // The user's font when the name fits beside the jersey sticker at the
+      // layout's size, else a narrower display face (never an ellipsis or a
+      // mid-word break).
+      fontFamily: backNameFamily(p, { jerseyW: jerseyD(p), padEm: 2 * padX, letterSpacing: ls }),
       fontStyle: p.nameItalic ? "italic" : "normal",
       color: p.palette.color,
       background: tapeBg(p, p.palette.background),
       clipPath: torn(p, 1, 0.8),
-      letterSpacing: "0.01em",
+      letterSpacing: `${ls}em`,
       textTransform: "uppercase",
     };
     if (p.variant === "duo")
@@ -458,7 +480,7 @@ export const markerBack: BackTheme = {
     return {
       ...tape,
       maxWidth: "max-content",
-      padding: p.landscape ? "0.08em 0.32em 0.02em" : "0.08em 0.36em 0.03em",
+      padding: `0.08em ${padX}em ${p.landscape ? 0.02 : 0.03}em`,
       lineHeight: p.landscape ? 1.08 : 1.06,
       transform: "rotate(-1.2deg)",
       transformOrigin: "left center",
