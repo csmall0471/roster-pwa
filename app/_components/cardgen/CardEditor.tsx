@@ -2603,8 +2603,10 @@ export default function CardEditor({
       team: teamText.trim(),
       age: ageText.trim(),
       season: seasonText.trim(),
-      // Designs add their own "#", so drop one the coach typed.
-      jersey: stats.jersey.trim().replace(/^#+\s*/, ""),
+      // Designs add their own "#", so drop one the coach typed. A group card
+      // shows several players, so no single player's number goes on it (the
+      // saved number stays, and comes back if the extra players are removed).
+      jersey: isDuo ? "" : stats.jersey.trim().replace(/^#+\s*/, ""),
       nameLines: isDuo
         ? [(namesTitle || nameL1).trim().toUpperCase()]
         : [nameL1.trim(), nameL2.trim()],
