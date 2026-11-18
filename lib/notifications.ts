@@ -87,6 +87,8 @@ export type TrainingConfirmationPayload = {
   packagePrice?: string | null
   /** Whole-series registration: tell them they can mark dates they'll miss. */
   packageSeries?: boolean
+  /** packagePrice is this family's sibling price (a second kid). */
+  siblingPrice?: boolean
   bulkDates?: Array<{ date: string; time: string | null; endTime?: string | null }>
   imageUrl?: string | null
   description?: string | null
@@ -294,7 +296,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const payLabel = (m: PaymentMethod) => (payPhone(m.link) ? `${m.label} (${payPhone(m.link)})` : m.label)
   const costText   = pkgPrice
     ? [
-        `Cost: ${packageSummary(pkgPrice, dates.length)}`,
+        `Cost: ${packageSummary(pkgPrice, dates.length)}${payload.siblingPrice ? " (sibling price)" : ""}`,
         payMethods.length ? `Pay with: ${payMethods.map((m) => m.link && !payPhone(m.link) ? `${m.label} (${venmoPayLink(m.link, `${payload.playerName} - ${payload.sessionTitle}`, packagePriceCents(pkgPrice)) ?? m.link})` : payLabel(m)).join(", ")}` : "",
       ].filter(Boolean).join("\n")
     : ""
@@ -350,7 +352,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
 
     const costHtml = pkgPrice
       ? [
-          infoTable(infoRow("Cost", packageSummary(pkgPrice, dates.length))),
+          infoTable(infoRow("Cost", `${packageSummary(pkgPrice, dates.length)}${payload.siblingPrice ? " (sibling price)" : ""}`)),
           payMethods.length
             ? `<p style="margin:-12px 0 20px;font-size:13px;color:#6b7280;">Pay with: ${payMethods.map((m) =>
                 m.link ? `<a href="${esc(venmoPayLink(m.link, `${payload.playerName} - ${payload.sessionTitle}`, packagePriceCents(pkgPrice)) ?? m.link)}" style="color:#2563eb;text-decoration:none;font-weight:600;">${esc(payLabel(m))}</a>` : esc(m.label),

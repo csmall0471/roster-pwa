@@ -4,7 +4,7 @@ import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions, adminBulkUpdateSessions, markTrainingSignupsPaid, adminRemoveTrainingSignups, setTrainingAttendance } from "../actions"
 import type { SessionData, PaymentMethod, RepeatDayConfig, BulkSessionUpdateData, SpecificDate } from "../actions"
-import { fmtPackagePrice, packageSummary } from "@/lib/training-package"
+import { fmtPackagePrice, packageSummary, parseSiblingPrice, siblingSummary, packageKidPrice, isSiblingPrice, packagePriceCents, fmtCents } from "@/lib/training-package"
 import { seriesTimesSummary, isWeeklySeries } from "@/lib/training-schedule"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
@@ -32,6 +32,8 @@ export type TrainingSession = {
   series_id:         string | null
   package_only:      boolean
   package_price:     string | null
+  /** Each extra kid from one family: "50%" (off) or "$50"; null = full price. */
+  package_sibling_price: string | null
   signups: Array<{
     id:             string
     player_id:      string
@@ -39,6 +41,8 @@ export type TrainingSession = {
     paid:           boolean
     /** Whole series: false when marked as missing this date (unset = going). */
     attending?:     boolean
+    parent_id?:     string | null
+    created_at?:    string
     players: { first_name: string; last_name: string } | null
     parents: { first_name: string; last_name: string } | null
   }>
@@ -80,6 +84,7 @@ type FormState = {
   series_id:         string
   package_only:      boolean
   package_price:     string
+  package_sibling_price: string
   /** "Pick dates" schedule: any days, not a weekly pattern. */
   specific_dates:    boolean
   picked:            PickedDate[]
@@ -91,7 +96,7 @@ const EMPTY_FORM: FormState = {
   payment_amount: "", payment_methods: [], notes: "",
   eligibility_rules: null, repeat_weekly: false, repeat_weeks: "4",
   repeat_days: [], day_times: {}, series_id: "",
-  package_only: false, package_price: "",
+  package_only: false, package_price: "", package_sibling_price: "",
   specific_dates: false, picked: [],
 }
 
@@ -193,6 +198,7 @@ type BulkFormState = {
   eligibility_rules: EligibilityRules
   package_only:      boolean
   package_price:     string
+  package_sibling_price: string
 }
 
 // Which bulk-edit fields the user opted to change, and how each maps to columns.
@@ -237,6 +243,7 @@ function buildBulkPartial(f: BulkFormState, on: (k: BulkFieldKey) => boolean): P
   if (on("package")) {
     d.package_only  = f.package_only
     d.package_price = f.package_only ? f.package_price.trim() || null : null
+    d.package_sibling_price = f.package_only ? f.package_sibling_price.trim() || null : null
     // A package has one price for the series, not a price per session.
     if (f.package_only) d.payment_amount = null
   }
@@ -246,11 +253,13 @@ function buildBulkPartial(f: BulkFormState, on: (k: BulkFieldKey) => boolean): P
 // ── SessionList ───────────────────────────────────────────────────────────────
 
 export default function SessionList({
-  initialSessions, teams, players,
+  initialSessions, teams, players, familyLinks = {},
 }: {
   initialSessions: TrainingSession[]
   teams:           TeamOption[]
   players:         PlayerOption[]
+  /** player id → parent ids (player_parents), to spot siblings for sibling pricing. */
+  familyLinks?:    Record<string, string[]>
 }) {
   const [sessions, setSessions]       = useState(initialSessions)
   const [adding, setAdding]           = useState(false)
@@ -362,6 +371,7 @@ export default function SessionList({
       series_id:         s.series_id        ?? "",
       package_only:      s.package_only,
       package_price:     s.package_price    ?? "",
+      package_sibling_price: s.package_sibling_price ?? "",
       specific_dates:    false,
       picked:            [],
     }
@@ -406,7 +416,11 @@ export default function SessionList({
   // The series a dropdown choice points at → its whole-series settings.
   function seriesPackage(seriesId: string) {
     const series = seriesId ? sessions.find((s) => s.series_id === seriesId) : undefined
-    return { package_only: series?.package_only ?? false, package_price: series?.package_price ?? "" }
+    return {
+      package_only:          series?.package_only ?? false,
+      package_price:         series?.package_price ?? "",
+      package_sibling_price: series?.package_sibling_price ?? "",
+    }
   }
 
   function setSchedule(mode: "once" | "weekly" | "dates") {
@@ -451,6 +465,7 @@ export default function SessionList({
       series_id:         form.series_id         || null,
       package_only:      formIsPackage,
       package_price:     formIsPackage ? form.package_price.trim() || null : null,
+      package_sibling_price: formIsPackage ? form.package_sibling_price.trim() || null : null,
     }
   }
 
@@ -878,6 +893,11 @@ export default function SessionList({
                 <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price</label>
                 <p className="text-sm text-gray-700 dark:text-gray-300 py-1.5">
                   {fmtPackagePrice(form.package_price) ?? "No price"} for the series
+                  {siblingSummary(form.package_price, form.package_sibling_price) && (
+                    <span className="block text-xs text-gray-500 dark:text-gray-400">
+                      {siblingSummary(form.package_price, form.package_sibling_price)}
+                    </span>
+                  )}
                 </p>
                 <p className="text-[11px] text-gray-400 dark:text-gray-500">Change it with &ldquo;Edit all&rdquo; on the series.</p>
               </div>
@@ -906,9 +926,19 @@ export default function SessionList({
             )}
           </div>
           {formIsPackage && makesNewSeries && (
-            <p className="text-xs text-blue-700 dark:text-blue-300 -mt-2">
-              Parents see: <strong>{packageSummary(form.package_price, sessionCount)}</strong>
-            </p>
+            <>
+              <SiblingPriceField
+                value={form.package_sibling_price}
+                basePrice={form.package_price}
+                onChange={(v) => setForm((f) => ({ ...f, package_sibling_price: v }))}
+              />
+              <p className="text-xs text-blue-700 dark:text-blue-300">
+                Parents see: <strong>{packageSummary(form.package_price, sessionCount)}</strong>
+                {siblingSummary(form.package_price, form.package_sibling_price) && (
+                  <> · {siblingSummary(form.package_price, form.package_sibling_price)}</>
+                )}
+              </p>
+            </>
           )}
 
           {/* Payment methods */}
@@ -1095,6 +1125,7 @@ export default function SessionList({
               sessions={g}
               players={players}
               teams={teams}
+              familyLinks={familyLinks}
               expandedId={expandedId}
               onToggleExpand={(id) => setExpandedId((v) => v === id ? null : id)}
               onEdit={openEdit}
@@ -1125,6 +1156,7 @@ export default function SessionList({
                 sessions={g}
                 players={players}
                 teams={teams}
+                familyLinks={familyLinks}
                 expandedId={expandedId}
                 onToggleExpand={(id) => setExpandedId((v) => v === id ? null : id)}
                 onEdit={openEdit}
@@ -1311,13 +1343,14 @@ function MultiDatePicker({
 // ── AdminSeriesGroup ──────────────────────────────────────────────────────────
 
 function AdminSeriesGroup({
-  sessions, players, teams, expandedId, onToggleExpand, onEdit, onDuplicate, onDelete,
+  sessions, players, teams, familyLinks, expandedId, onToggleExpand, onEdit, onDuplicate, onDelete,
   onDuplicateSeries, onDeleteSeries,
   onSignupAdded, onSignupRemoved, onSignupPaidToggled, onAttendanceChanged, onBulkUpdated,
 }: {
   sessions:        TrainingSession[]
   players:         PlayerOption[]
   teams:           TeamOption[]
+  familyLinks:     Record<string, string[]>
   expandedId:      string | null
   onToggleExpand:  (id: string) => void
   onEdit:          (s: TrainingSession) => void
@@ -1355,7 +1388,8 @@ function AdminSeriesGroup({
     : null
   const isPackage        = firstSession.package_only && !!firstSession.series_id
   const costLabel        = isPackage
-    ? packageSummary(firstSession.package_price, count)
+    ? [packageSummary(firstSession.package_price, count), siblingSummary(firstSession.package_price, firstSession.package_sibling_price)]
+        .filter(Boolean).join(" · ")
     : firstSession.payment_amount ? `${firstSession.payment_amount}/session` : null
   const locationCostMeta = [locationLabel, costLabel].filter(Boolean).join(" · ")
 
@@ -1433,6 +1467,7 @@ function AdminSeriesGroup({
           {isPackage && (
             <SeriesRosterPanel
               sessions={sessions}
+              familyLinks={familyLinks}
               onSignupRemoved={onSignupRemoved}
               onSignupPaidToggled={onSignupPaidToggled}
             />
@@ -1468,14 +1503,103 @@ function AdminSeriesGroup({
   )
 }
 
+// ── SiblingPriceField ─────────────────────────────────────────────────────────
+// Whole-series sibling price: everyone pays the same, a % off, or a flat price
+// for each extra kid. Emits the stored text: "" / "50%" / "$50".
+
+type SiblingMode = "none" | "percent" | "flat"
+
+function SiblingPriceField({
+  value, basePrice, onChange,
+}: {
+  value:     string
+  basePrice: string
+  onChange:  (value: string) => void
+}) {
+  const parsed = parseSiblingPrice(value)
+  const [mode, setMode]     = useState<SiblingMode>(parsed?.kind ?? "none")
+  const [amount, setAmount] = useState(parsed ? (parsed.kind === "percent" ? String(parsed.pct) : parsed.price) : "")
+
+  function emit(m: SiblingMode, a: string) {
+    const t = a.trim()
+    onChange(m === "none" || !t ? "" : m === "percent" ? `${t}%` : t)
+  }
+  function pickMode(m: SiblingMode) {
+    // Half off is the usual sibling deal, so start there.
+    const a = m === "percent" ? (mode === "percent" ? amount : "50") : m === "flat" && mode === "flat" ? amount : ""
+    setMode(m)
+    setAmount(a)
+    emit(m, a)
+  }
+
+  const full    = fmtPackagePrice(basePrice)
+  const sibling = parsed ? packageKidPrice(basePrice, value, 1) : null
+  const MODES: Array<[SiblingMode, string]> = [["none", "Same price"], ["percent", "% off"], ["flat", "Their own price"]]
+
+  return (
+    <div>
+      <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Brothers &amp; sisters</label>
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="radiogroup" className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+          {MODES.map(([m, label], i) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={mode === m}
+              onClick={() => pickMode(m)}
+              className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${i > 0 ? "border-l border-gray-300 dark:border-gray-600" : ""} ${
+                mode === m
+                  ? "bg-blue-600 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {mode === "percent" && (
+          <span className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+            <input
+              type="number" min={1} max={100} inputMode="decimal" aria-label="Percent off for siblings"
+              value={amount}
+              onChange={(e) => { setAmount(e.target.value); emit("percent", e.target.value) }}
+              className="w-16 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            % off
+          </span>
+        )}
+        {mode === "flat" && (
+          <input
+            type="text" placeholder="e.g. $50" aria-label="Price for each sibling"
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); emit("flat", e.target.value) }}
+            className="w-24 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        )}
+      </div>
+      <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+        {mode === "none"
+          ? "Every kid pays the full price."
+          : sibling
+            ? `First kid in a family pays ${full ?? "the full price"}; each brother or sister pays ${sibling}.`
+            : parsed?.kind === "percent"
+              ? `Each brother or sister gets ${parsed.pct}% off.`
+              : mode === "percent" ? "Enter how much off." : "Enter the sibling price."}
+      </p>
+    </div>
+  )
+}
+
 // ── SeriesRosterPanel ─────────────────────────────────────────────────────────
 // Whole-series package: who's registered, paid for the series, and remove from
 // every date at once. (Each date's own list below is for attendance.)
 
 function SeriesRosterPanel({
-  sessions, onSignupRemoved, onSignupPaidToggled,
+  sessions, familyLinks, onSignupRemoved, onSignupPaidToggled,
 }: {
   sessions:            TrainingSession[]
+  familyLinks:         Record<string, string[]>
   onSignupRemoved:     (sessionId: string, signupId: string) => void
   onSignupPaidToggled: (sessionId: string, signupId: string, paid: boolean) => void
 }) {
@@ -1488,16 +1612,21 @@ function SeriesRosterPanel({
       first:    string
       last:     string
       parent:   string | null
+      parentId: string | null
+      /** Earliest signup — the first kid of a family to register pays full price. */
+      firstAt:  string
       signups:  Array<{ sessionId: string; id: string; paid: boolean; attending: boolean }>
     }>()
     for (const s of sessions) {
       for (const su of s.signups) {
         let r = map.get(su.player_id)
         if (!r) {
-          r = { playerId: su.player_id, first: su.players?.first_name ?? "Unknown", last: su.players?.last_name ?? "player", parent: null, signups: [] }
+          r = { playerId: su.player_id, first: su.players?.first_name ?? "Unknown", last: su.players?.last_name ?? "player", parent: null, parentId: null, firstAt: su.created_at ?? "", signups: [] }
           map.set(su.player_id, r)
         }
         if (!r.parent && su.parents) r.parent = `${su.parents.first_name} ${su.parents.last_name}`
+        if (!r.parentId && su.parent_id) r.parentId = su.parent_id
+        if (su.created_at && (!r.firstAt || su.created_at < r.firstAt)) r.firstAt = su.created_at
         r.signups.push({ sessionId: s.id, id: su.id, paid: su.paid, attending: su.attending !== false })
       }
     }
@@ -1507,7 +1636,38 @@ function SeriesRosterPanel({
   const upcoming  = sessions.filter((s) => !isPast(s.session_date))
   const spotsLeft = upcoming.length ? Math.max(0, Math.min(...upcoming.map((s) => s.max_players - s.signups.length))) : null
   const price     = fmtPackagePrice(sessions[0].package_price)
-  const unpaid    = roster.filter((r) => !r.signups.every((x) => x.paid)).length
+  const unpaid    = roster.filter((r) => !r.signups.every((x) => x.paid))
+
+  // Sibling pricing: group kids who share a parent into families; within a
+  // family the first to register pays full price, the rest the sibling price.
+  const basePrice   = sessions[0].package_price
+  const siblingRule = sessions[0].package_sibling_price
+  const hasSibling  = !!parseSiblingPrice(siblingRule)
+  const kidPrice = useMemo(() => {
+    const out = new Map<string, { amount: string | null; sibling: boolean }>()
+    if (!hasSibling) return out
+    const root = new Map(roster.map((r) => [r.playerId, r.playerId]))
+    const find = (x: string): string => { while (root.get(x) !== x) x = root.get(x)!; return x }
+    const kidByParent = new Map<string, string>()
+    for (const r of roster) {
+      const parents = familyLinks[r.playerId]?.length ? familyLinks[r.playerId] : r.parentId ? [r.parentId] : []
+      for (const pid of parents) {
+        const other = kidByParent.get(pid)
+        if (other) root.set(find(r.playerId), find(other))
+        else kidByParent.set(pid, r.playerId)
+      }
+    }
+    const families = new Map<string, typeof roster>()
+    for (const r of roster) families.set(find(r.playerId), [...(families.get(find(r.playerId)) ?? []), r])
+    for (const kids of families.values()) {
+      kids
+        .sort((a, b) => a.firstAt.localeCompare(b.firstAt) || a.last.localeCompare(b.last) || a.first.localeCompare(b.first))
+        .forEach((r, nth) => out.set(r.playerId, { amount: packageKidPrice(basePrice, siblingRule, nth), sibling: isSiblingPrice(siblingRule, nth) }))
+    }
+    return out
+  }, [roster, familyLinks, hasSibling, basePrice, siblingRule])
+  const unpaidCents = unpaid.map((r) => packagePriceCents(kidPrice.get(r.playerId)?.amount))
+  const unpaidDue   = hasSibling && unpaidCents.every((c) => c > 0) ? fmtCents(unpaidCents.reduce((a, b) => a + b, 0)) : null
 
   function togglePaid(r: (typeof roster)[number]) {
     const paid = !r.signups.every((x) => x.paid)
@@ -1541,9 +1701,9 @@ function SeriesRosterPanel({
             </span>
           )}
         </p>
-        {unpaid > 0 && (
+        {unpaid.length > 0 && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            {unpaid} unpaid{price ? ` · ${price} each` : ""}
+            {unpaid.length} unpaid{unpaidDue ? ` · ${unpaidDue} due` : price && !hasSibling ? ` · ${price} each` : ""}
           </p>
         )}
       </div>
@@ -1559,6 +1719,16 @@ function SeriesRosterPanel({
                 <p className="text-xs text-gray-700 dark:text-gray-300 min-w-0">
                   {r.first} {r.last}
                   {r.parent && <span className="text-gray-400 dark:text-gray-500"> ({r.parent})</span>}
+                  {kidPrice.get(r.playerId)?.amount && (
+                    <span className="ml-2 text-gray-500 dark:text-gray-400">
+                      {kidPrice.get(r.playerId)!.amount}
+                      {kidPrice.get(r.playerId)!.sibling && (
+                        <span className="ml-1 rounded-full bg-purple-100 px-1.5 py-px text-[10px] font-semibold text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                          sibling
+                        </span>
+                      )}
+                    </span>
+                  )}
                   {r.signups.length < sessions.length && (
                     <span className="ml-2 text-amber-600 dark:text-amber-400">
                       in {r.signups.length} of {sessions.length}
@@ -1973,6 +2143,7 @@ function BulkEditPanel({
     eligibility_rules: first.eligibility_rules,
     package_only:      first.package_only,
     package_price:     first.package_price    ?? "",
+    package_sibling_price: first.package_sibling_price ?? "",
   })
   const [enabled, setEnabled] = useState<Record<BulkFieldKey, boolean>>({} as Record<BulkFieldKey, boolean>)
   const [error, setError]   = useState<string | null>(null)
@@ -2186,6 +2357,13 @@ function BulkEditPanel({
                 Replaces the per-session price. Kids already signed up for some dates keep those dates.
               </p>
             </div>
+          )}
+          {form.package_only && (
+            <SiblingPriceField
+              value={form.package_sibling_price}
+              basePrice={form.package_price}
+              onChange={(v) => setForm((f) => ({ ...f, package_sibling_price: v }))}
+            />
           )}
         </div>
       )}

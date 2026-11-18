@@ -6,7 +6,7 @@ import type { EligibilityRules } from "@/lib/training-eligibility"
 import { sendTrainingConfirmation } from "@/lib/notifications"
 import { logActivity } from "@/lib/activity"
 import { track } from "@vercel/analytics/server"
-import { isMissingPackageColumn, PACKAGE_MIGRATION_MSG, isMissingAttendingColumn, ATTENDANCE_MIGRATION_MSG } from "@/lib/training-package"
+import { isMissingPackageColumn, PACKAGE_MIGRATION_MSG, isMissingAttendingColumn, ATTENDANCE_MIGRATION_MSG, isMissingSiblingColumn, SIBLING_MIGRATION_MSG, packageKidPrice, isSiblingPrice } from "@/lib/training-package"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -29,16 +29,38 @@ export type SessionData = {
   package_only:      boolean
   /** Price for the whole series when package_only (e.g. "$75"). */
   package_price:     string | null
+  /** What each extra kid from one family pays: "50%" (off) or "$50"; null = full price. */
+  package_sibling_price: string | null
 }
+
+type PackageCols = { package_only?: boolean; package_price?: string | null; package_sibling_price?: string | null }
 
 // The package columns only exist once migration 071 is applied. A session that
 // isn't a package leaves them out, so creating/editing ordinary sessions keeps
 // working before then (the columns' defaults are the same values).
-function withoutPackage<T extends { package_only?: boolean; package_price?: string | null }>(row: T) {
+function withoutPackage<T extends PackageCols>(row: T) {
   if (row.package_only) return row
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { package_only, package_price, ...rest } = row
+  const { package_only, package_price, package_sibling_price, ...rest } = row
   return rest
+}
+
+// Sibling pricing (migration 073) is newer still: a write with no sibling price
+// that fails only because the column is missing is retried without it.
+function withoutSibling<T extends object>(row: T): Omit<T, "package_sibling_price"> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { package_sibling_price, ...rest } = row as T & { package_sibling_price?: unknown }
+  return rest
+}
+
+function retrySansSibling(error: { message: string } | null, row: PackageCols): boolean {
+  return !!error && !row.package_sibling_price && isMissingSiblingColumn(error.message)
+}
+
+function writeErrorMessage(message: string): string {
+  if (isMissingSiblingColumn(message)) return SIBLING_MIGRATION_MSG
+  if (isMissingPackageColumn(message)) return PACKAGE_MIGRATION_MSG
+  return message
 }
 
 export type RepeatDayConfig = {
@@ -128,14 +150,20 @@ export async function createTrainingSession(
     rows = unsorted.sort((a, b) => a.session_date.localeCompare(b.session_date))
   }
 
-  const { data: inserted, error } = await supabase
+  let { data: inserted, error } = await supabase
     .from("training_sessions")
     .insert(rows.map(withoutPackage))
     .select("id, session_date")
+  if (retrySansSibling(error, data)) {
+    ({ data: inserted, error } = await supabase
+      .from("training_sessions")
+      .insert(rows.map((r) => withoutSibling(withoutPackage(r))))
+      .select("id, session_date"))
+  }
   if (error) {
     return {
       ids: [] as string[], created: [] as Array<{ id: string; session_date: string }>, seriesId: null,
-      carried: [] as CarriedSignup[], error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message,
+      carried: [] as CarriedSignup[], error: writeErrorMessage(error.message),
     }
   }
   const created = (inserted ?? []).map((r) => ({ id: r.id as string, session_date: r.session_date as string }))
@@ -212,8 +240,11 @@ async function carryPackageSignups(
 
 export async function updateTrainingSession(id: string, data: SessionData) {
   const supabase = await createClient()
-  const { error } = await supabase.from("training_sessions").update(withoutPackage(data)).eq("id", id)
-  if (error) return { error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message }
+  let { error } = await supabase.from("training_sessions").update(withoutPackage(data)).eq("id", id)
+  if (retrySansSibling(error, data)) {
+    ({ error } = await supabase.from("training_sessions").update(withoutSibling(withoutPackage(data))).eq("id", id))
+  }
+  if (error) return { error: writeErrorMessage(error.message) }
   revalidatePath("/training")
   return { error: null }
 }
@@ -498,8 +529,11 @@ export type BulkSessionUpdateData = Omit<SessionData, "session_date" | "series_i
 export async function adminBulkUpdateSessions(sessionIds: string[], data: Partial<BulkSessionUpdateData>) {
   const supabase = await createClient()
   if (Object.keys(data).length === 0 || sessionIds.length === 0) return { error: null }
-  const { error } = await supabase.from("training_sessions").update(data).in("id", sessionIds)
-  if (error) return { error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message }
+  let { error } = await supabase.from("training_sessions").update(data).in("id", sessionIds)
+  if (retrySansSibling(error, data)) {
+    ({ error } = await supabase.from("training_sessions").update(withoutSibling(data)).in("id", sessionIds))
+  }
+  if (error) return { error: writeErrorMessage(error.message) }
   revalidatePath("/training")
   return { error: null }
 }
@@ -524,6 +558,20 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
   for (const su of existingSignups ?? []) {
     countBySession.set(su.session_id, (countBySession.get(su.session_id) ?? 0) + 1)
     if (su.player_id === playerId) alreadyIn.add(su.session_id)
+  }
+
+  // Whole-series sibling price: how many of this kid's siblings (kids sharing
+  // a parent) are already registered.
+  let siblingsIn = 0
+  const firstSession = (sessions ?? [])[0] as { package_only?: boolean; package_sibling_price?: string | null } | undefined
+  if (firstSession?.package_only && firstSession.package_sibling_price) {
+    const { data: myParents } = await supabase.from("player_parents").select("parent_id").eq("player_id", playerId)
+    const parentIds = (myParents ?? []).map((r) => r.parent_id as string)
+    if (parentIds.length > 0) {
+      const { data: kin } = await supabase.from("player_parents").select("player_id").in("parent_id", parentIds)
+      const siblingIds = new Set((kin ?? []).map((r) => r.player_id as string).filter((id) => id !== playerId))
+      siblingsIn = new Set((existingSignups ?? []).filter((su) => siblingIds.has(su.player_id)).map((su) => su.player_id)).size
+    }
   }
 
   const added: Array<{ sessionId: string; signupId: string }> = []
@@ -559,7 +607,8 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
         location:        (first as any).location ?? null,
         paymentAmount:   calcBulkAmount((first as any).payment_amount ?? null, signedSessions!.length),
         paymentMethods:  (first as any).payment_methods ?? [],
-        packagePrice:    (first as any).package_only && !alreadyIn.size ? (first as any).package_price ?? null : null,
+        packagePrice:    (first as any).package_only && !alreadyIn.size ? packageKidPrice((first as any).package_price, (first as any).package_sibling_price, siblingsIn) : null,
+        siblingPrice:    !!(first as any).package_only && !alreadyIn.size && isSiblingPrice((first as any).package_sibling_price, siblingsIn),
         packageSeries:   !!(first as any).package_only,
         imageUrl:        (first as any).image_url ?? null,
         description:     (first as any).description ?? null,
@@ -739,9 +788,14 @@ export async function signUpForTrainingSeries(
 
   const countBySession = new Map<string, number>()
   const alreadyIn = new Set<string>()
+  // This family's other kids already in the series — they decide whether this
+  // kid pays the sibling price.
+  const myIds = new Set(((myPlayers ?? []) as Array<{ player_id: string }>).map((r) => r.player_id))
+  const siblingsIn = new Set<string>()
   for (const su of existing ?? []) {
     countBySession.set(su.session_id, (countBySession.get(su.session_id) ?? 0) + 1)
     if (su.player_id === playerId) alreadyIn.add(su.session_id)
+    else if (myIds.has(su.player_id)) siblingsIn.add(su.player_id)
   }
 
   const toAdd = sessions.filter((s) => !alreadyIn.has(s.id))
@@ -783,8 +837,9 @@ export async function signUpForTrainingSeries(
       location:        first.location ?? null,
       paymentMethods:  first.payment_methods ?? [],
       // The series price only on the first registration — a date added later
-      // was already paid for.
-      packagePrice:    alreadyIn.size === 0 ? first.package_price ?? null : null,
+      // was already paid for. A second kid from the family gets the sibling price.
+      packagePrice:    alreadyIn.size === 0 ? packageKidPrice(first.package_price, first.package_sibling_price, siblingsIn.size) : null,
+      siblingPrice:    alreadyIn.size === 0 && isSiblingPrice(first.package_sibling_price, siblingsIn.size),
       packageSeries:   true,
       imageUrl:        first.image_url ?? null,
       description:     first.description ?? null,

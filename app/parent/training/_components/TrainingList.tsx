@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useMemo, Fragment } from "react"
 import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups, signUpForTrainingSeries, setTrainingAttendance } from "@/app/(protected)/training/actions"
-import { fmtPackagePrice, packageSummary, packageTotal, packagePriceCents } from "@/lib/training-package"
+import { fmtPackagePrice, packageSummary, packagePriceCents, packageKidPrice, isSiblingPrice, packageFamilyTotal, siblingSummary } from "@/lib/training-package"
 import { venmoPayLink } from "@/lib/event-pay"
 import { seriesTimesSummary } from "@/lib/training-schedule"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
@@ -21,6 +21,8 @@ export type EligiblePlayer = {
   paid:           boolean
   /** Whole-series registration: false when the parent marked this date as missed. */
   attending:      boolean
+  /** When this kid signed up for this date — orders siblings for sibling pricing. */
+  registered_at?: string | null
 }
 
 export type IneligiblePlayer = {
@@ -54,6 +56,8 @@ export type TrainingSessionForParent = {
   /** Whole-series signup: one registration for every date, one price. */
   package_only:      boolean
   package_price:     string | null
+  /** Each extra kid from the family: "50%" (off) or "$50"; null = full price. */
+  package_sibling_price: string | null
   eligibility_label: string | null
   players:           EligiblePlayer[]
   ineligiblePlayers: IneligiblePlayer[]
@@ -269,8 +273,15 @@ function SeriesGroup({
             {metaItems.length > 0 && <div>{metaItems.join(" · ")}</div>}
           </div>
           {isPackage && (
-            <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-0.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
-              {packageSummary(firstSession.package_price, count)}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-0.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                {packageSummary(firstSession.package_price, count)}
+              </span>
+              {siblingSummary(firstSession.package_price, firstSession.package_sibling_price) && (
+                <span className="text-xs font-medium text-purple-700 dark:text-purple-300">
+                  {siblingSummary(firstSession.package_price, firstSession.package_sibling_price)}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -759,10 +770,30 @@ function PackageSection({
     const missing = sessions.filter((s) =>
       s.players.some((p) => p.player_id === pl.player_id && !p.signup_id),
     )
-    return { ...pl, regs, missing, paid: regs.length > 0 && regs.every((r) => r.paid) }
+    const regTimes = sessions.flatMap((s) =>
+      s.players.filter((p) => p.player_id === pl.player_id && p.signup_id && p.registered_at).map((p) => p.registered_at!),
+    )
+    return {
+      ...pl, regs, missing,
+      paid:    regs.length > 0 && regs.every((r) => r.paid),
+      firstAt: regTimes.length ? regTimes.sort()[0] : "",
+    }
   }), [players, sessions])
 
   const unregistered = status.filter((p) => p.regs.length === 0)
+
+  // Sibling pricing: the first of your kids to register pays full price, each
+  // one after that the sibling price.
+  const sibling        = first.package_sibling_price
+  const registeredKids = status
+    .filter((p) => p.regs.length > 0)
+    .sort((a, b) => a.firstAt.localeCompare(b.firstAt) || a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name))
+  const nthOf = (playerId: string) => {
+    const i = registeredKids.findIndex((p) => p.player_id === playerId)
+    return i >= 0 ? i : registeredKids.length
+  }
+  const nextPrice   = packageKidPrice(first.package_price, sibling, registeredKids.length)
+  const nextSibling = isSiblingPrice(sibling, registeredKids.length)
 
   // null = sign-up form closed; otherwise the kids ticked in it.
   const [selected, setSelected]           = useState<Set<string> | null>(null)
@@ -808,8 +839,17 @@ function PackageSection({
   }
 
   const picked    = selected ? [...selected] : []
-  const total     = packageTotal(first.package_price, picked.length)
+  // Kids are registered in this order, so the first one picked takes the next
+  // price in line (full, or sibling if a brother or sister is already in).
+  const pickedPrices = picked.map((_, i) => packageKidPrice(first.package_price, sibling, registeredKids.length + i))
+  const total     = packageFamilyTotal(first.package_price, sibling, registeredKids.length, picked.length)
   const overSpots = picked.length > spotsLeft
+  const costLine  = picked.length === 0 ? ""
+    : picked.length === 1
+      ? pickedPrices[0] ? ` Cost: ${pickedPrices[0]}${nextSibling ? " (sibling price)" : ""}.` : ""
+      : total
+        ? ` Total: ${total}${new Set(pickedPrices).size > 1 ? ` (${pickedPrices.join(" + ")} with the sibling price)` : ""}.`
+        : price ? (siblingSummary(first.package_price, sibling) ? ` Cost: ${pickedPrices.join(", ")}.` : ` Cost: ${price} each.`) : ""
 
   return (
     <div className="border-b border-gray-200 dark:border-gray-700">
@@ -818,6 +858,11 @@ function PackageSection({
         <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
           {packageSummary(first.package_price, count)}
         </p>
+        {siblingSummary(first.package_price, sibling) && (
+          <p className="text-xs font-medium text-purple-700 dark:text-purple-300 mt-0.5">
+            {siblingSummary(first.package_price, sibling)} — for each brother or sister
+          </p>
+        )}
         <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
           One sign-up covers every date below.{" "}
           <span className={`font-medium ${spotsLeft === 0 ? "text-red-600 dark:text-red-400" : ""}`}>
@@ -836,6 +881,8 @@ function PackageSection({
         {status.map((p) => {
           const name = `${p.first_name} ${p.last_name}`
           const registered = p.regs.length > 0
+          const kidPrice     = packageKidPrice(first.package_price, sibling, nthOf(p.player_id))
+          const kidIsSibling = isSiblingPrice(sibling, nthOf(p.player_id))
           return (
             <div key={p.player_id} className="px-5 py-3 bg-white dark:bg-gray-900">
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -857,9 +904,9 @@ function PackageSection({
                       )}
                       {p.paid ? (
                         <p className="text-xs text-green-700 dark:text-green-400">Paid — thank you!</p>
-                      ) : price ? (
+                      ) : kidPrice ? (
                         <p className="text-xs text-amber-700 dark:text-amber-400">
-                          Payment due: {price}
+                          Payment due: {kidPrice}{kidIsSibling ? " (sibling price)" : ""}
                           {payMethods.length > 0 && (
                             <>
                               {" · "}
@@ -868,7 +915,7 @@ function PackageSection({
                                   {i > 0 && " · "}
                                   {m.link ? (
                                     <a
-                                      href={venmoPayLink(m.link, `${name} - ${first.title}`, packagePriceCents(first.package_price)) ?? m.link}
+                                      href={venmoPayLink(m.link, `${name} - ${first.title}`, packagePriceCents(kidPrice)) ?? m.link}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="font-semibold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
@@ -914,7 +961,7 @@ function PackageSection({
                       disabled={pending}
                       className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
-                      Sign up{price ? ` · ${price}` : ""}
+                      Sign up{nextPrice ? ` · ${nextPrice}` : ""}
                     </button>
                   )}
                 </div>
@@ -956,7 +1003,7 @@ function PackageSection({
               ? `${players.find((p) => p.player_id === picked[0])?.first_name ?? "Your player"} will be registered for`
               : "Each player will be registered for"}{" "}
             all {count} sessions ({fmtShortDate(first.session_date)} – {fmtShortDate(sessions[count - 1].session_date)}).
-            {total && picked.length > 1 ? ` Total: ${total}.` : price ? ` Cost: ${price}${picked.length > 1 ? " each" : ""}.` : ""}
+            {costLine}
           </p>
 
           <div>

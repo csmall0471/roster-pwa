@@ -49,8 +49,20 @@ export default async function TrainingPage() {
     series_id:         s.series_id ?? null,
     package_only:      s.package_only ?? false,
     package_price:     s.package_price ?? null,
+    package_sibling_price: s.package_sibling_price ?? null,
     signups:           s.training_signups ?? [],
   }))
+
+  // Sibling pricing: which parents each registered kid has, so kids sharing a
+  // parent count as one family (first kid full price, the rest the sibling price).
+  const siblingPlayerIds = [...new Set(
+    sessions.filter((s) => s.package_only && s.package_sibling_price).flatMap((s) => s.signups.map((su) => su.player_id)),
+  )]
+  const { data: familyRows } = siblingPlayerIds.length > 0
+    ? await supabase.from("player_parents").select("player_id, parent_id").in("player_id", siblingPlayerIds)
+    : { data: [] as Array<{ player_id: string; parent_id: string }> }
+  const familyLinks: Record<string, string[]> = {}
+  for (const r of familyRows ?? []) (familyLinks[r.player_id] ??= []).push(r.parent_id)
 
   const teams: TeamOption[] = (teamsRaw ?? []).map((t: any) => ({
     id:   t.id,
@@ -92,7 +104,7 @@ export default async function TrainingPage() {
         <CalendarView events={calEvents} players={[]} />
       </section>
 
-      <SessionList initialSessions={sessions} teams={teams} players={players} />
+      <SessionList initialSessions={sessions} teams={teams} players={players} familyLinks={familyLinks} />
     </div>
   )
 }

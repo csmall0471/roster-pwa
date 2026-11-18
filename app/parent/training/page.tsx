@@ -76,7 +76,7 @@ export default async function ParentTrainingPage() {
   // Evaluate eligibility and build sessions for this parent
   const sessions: TrainingSessionForParent[] = (sessionsRaw ?? [])
     .map((s: any) => {
-      const signups: Array<{ id: string; player_id: string; payment_method: string | null; paid: boolean; attending?: boolean }> =
+      const signups: Array<{ id: string; player_id: string; payment_method: string | null; paid: boolean; attending?: boolean; created_at?: string }> =
         s.training_signups ?? []
 
       const eligiblePlayers: TrainingSessionForParent["players"] = []
@@ -98,6 +98,7 @@ export default async function ParentTrainingPage() {
             payment_method: signup?.payment_method ?? null,
             paid:           signup?.paid ?? false,
             attending:      signup?.attending !== false,
+            registered_at:  signup?.created_at ?? null,
           })
         } else {
           ineligiblePlayers.push({
@@ -131,6 +132,7 @@ export default async function ParentTrainingPage() {
         series_id:         s.series_id ?? null,
         package_only:      s.package_only ?? false,
         package_price:     s.package_price ?? null,
+        package_sibling_price: s.package_sibling_price ?? null,
         eligibility_label: s.eligibility_rules ? describeRules(s.eligibility_rules as EligibilityRules) : null,
         total_signups:     signups.length,
         players:           eligiblePlayers,
