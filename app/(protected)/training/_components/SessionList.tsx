@@ -3,8 +3,9 @@
 import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions, adminBulkUpdateSessions, markTrainingSignupsPaid, adminRemoveTrainingSignups } from "../actions"
-import type { SessionData, PaymentMethod, RepeatDayConfig, BulkSessionUpdateData } from "../actions"
+import type { SessionData, PaymentMethod, RepeatDayConfig, BulkSessionUpdateData, SpecificDate } from "../actions"
 import { fmtPackagePrice, packageSummary } from "@/lib/training-package"
+import { seriesTimesSummary, isWeeklySeries } from "@/lib/training-schedule"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
 import RuleBuilder, { type TeamOption } from "./RuleBuilder"
@@ -43,7 +44,6 @@ export type TrainingSession = {
 
 const DAY_LABELS  = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
 const DAY_NAMES   = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-const DAY_PLURAL  = ["Sundays","Mondays","Tuesdays","Wednesdays","Thursdays","Fridays","Saturdays"]
 
 const PRESET_PAYMENTS: PaymentMethod[] = [
   { label: "Venmo",       link: "https://www.venmo.com/u/Connor-Small-1" },
@@ -53,6 +53,9 @@ const PRESET_PAYMENTS: PaymentMethod[] = [
 ]
 
 type DayTime = { time: string; end_time: string }
+
+/** A hand-picked date; null time = the form's usual start/end time. */
+type PickedDate = { date: string; time: string | null; end_time: string | null }
 
 type FormState = {
   title:             string
@@ -75,6 +78,9 @@ type FormState = {
   series_id:         string
   package_only:      boolean
   package_price:     string
+  /** "Pick dates" schedule: any days, not a weekly pattern. */
+  specific_dates:    boolean
+  picked:            PickedDate[]
 }
 
 const EMPTY_FORM: FormState = {
@@ -84,6 +90,7 @@ const EMPTY_FORM: FormState = {
   eligibility_rules: null, repeat_weekly: false, repeat_weeks: "4",
   repeat_days: [], day_times: {}, series_id: "",
   package_only: false, package_price: "",
+  specific_dates: false, picked: [],
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -353,6 +360,8 @@ export default function SessionList({
       series_id:         s.series_id        ?? "",
       package_only:      s.package_only,
       package_price:     s.package_price    ?? "",
+      specific_dates:    false,
+      picked:            [],
     }
   }
 
@@ -376,12 +385,51 @@ export default function SessionList({
     setError(null)
   }
 
-  // Sessions the create form will make (1 unless repeating weekly).
   const repeatTotal = form.repeat_weekly
     ? Math.max(1, parseInt(form.repeat_weeks) || 1) * (form.repeat_days.length || 1)
     : 1
-  // A package needs a series: several new dates, or a date in an existing series.
-  const formIsPackage = form.package_only && (form.repeat_weekly ? repeatTotal > 1 : !!form.series_id)
+  // Sessions the create form will make.
+  const sessionCount = form.repeat_weekly ? repeatTotal : form.specific_dates ? form.picked.length : 1
+  // Creating a new series (where the whole-series toggle + price live), as
+  // opposed to adding dates to an existing series, which inherit its settings.
+  const makesNewSeries = !editingId && (form.repeat_weekly || (form.specific_dates && !form.series_id))
+  // A package needs a series: several new dates, or dates in an existing series.
+  const formIsPackage = form.package_only && (
+    form.repeat_weekly ? repeatTotal > 1
+      : form.specific_dates ? (!!form.series_id || form.picked.length > 1)
+      : !!form.series_id
+  )
+  const pickedSorted = [...form.picked].sort((a, b) => a.date.localeCompare(b.date))
+
+  // The series a dropdown choice points at → its whole-series settings.
+  function seriesPackage(seriesId: string) {
+    const series = seriesId ? sessions.find((s) => s.series_id === seriesId) : undefined
+    return { package_only: series?.package_only ?? false, package_price: series?.package_price ?? "" }
+  }
+
+  function setSchedule(mode: "once" | "weekly" | "dates") {
+    setForm((f) => {
+      if (mode === "weekly") {
+        const next: FormState = { ...f, repeat_weekly: true, specific_dates: false }
+        if (f.session_date && f.repeat_days.length === 0) {
+          const day = new Date(f.session_date + "T00:00:00").getDay()
+          next.repeat_days = [day]
+          next.day_times   = { [day]: { time: f.session_time, end_time: f.session_end_time } }
+        }
+        return next
+      }
+      if (mode === "dates") {
+        return {
+          ...f,
+          repeat_weekly:  false,
+          specific_dates: true,
+          // Start from the date already typed in, if any.
+          picked: f.picked.length === 0 && f.session_date ? [{ date: f.session_date, time: null, end_time: null }] : f.picked,
+        }
+      }
+      return { ...f, repeat_weekly: false, specific_dates: false, ...seriesPackage(f.series_id) }
+    })
+  }
 
   function toData(): SessionData {
     return {
@@ -390,7 +438,7 @@ export default function SessionList({
       location:          form.location          || null,
       location_address:  form.location_address  || null,
       image_url:         form.image_url         || null,
-      session_date:      form.session_date,
+      session_date:      form.specific_dates ? pickedSorted[0]?.date ?? "" : form.session_date,
       session_time:      form.session_time      || null,
       session_end_time:  form.session_end_time  || null,
       max_players:       Math.max(1, parseInt(form.max_players) || 10),
@@ -415,11 +463,19 @@ export default function SessionList({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.title || !form.session_date) return
+    if (!form.title) return
+    if (form.specific_dates && !editingId ? form.picked.length === 0 : !form.session_date) return
     setError(null)
     const data      = toData()
     const repeatWeeks = form.repeat_weekly ? Math.max(1, parseInt(form.repeat_weeks) || 1) : 1
     const dayConfigs  = buildDayConfigs()
+    const specificDates: SpecificDate[] = form.specific_dates && !editingId
+      ? pickedSorted.map((p) => ({
+          date:             p.date,
+          session_time:     p.time     ?? (form.session_time     || null),
+          session_end_time: p.end_time ?? (form.session_end_time || null),
+        }))
+      : []
 
     start(async () => {
       if (editingId) {
@@ -429,9 +485,11 @@ export default function SessionList({
           prev.map((s) => s.id === editingId ? { ...s, ...data } : s)
         )
       } else {
-        const result = await createTrainingSession(data, repeatWeeks, dayConfigs)
+        const result = await createTrainingSession(data, repeatWeeks, dayConfigs, specificDates)
         if (result.error) { setError(result.error); return }
-        const dates  = generateSessionDates(data.session_date, repeatWeeks, dayConfigs)
+        const dates  = specificDates.length > 0
+          ? specificDates.map((d) => ({ date: d.date, time: d.session_time, endTime: d.session_end_time }))
+          : generateSessionDates(data.session_date, repeatWeeks, dayConfigs)
         // Kids registered for a package series were added to the new date too.
         const known = new Map<string, TrainingSession["signups"][0]>()
         for (const s of sessions) for (const su of s.signups) if (!known.has(su.player_id)) known.set(su.player_id, su)
@@ -443,15 +501,18 @@ export default function SessionList({
           players:        known.get(c.player_id)?.players ?? null,
           parents:        known.get(c.player_id)?.parents ?? null,
         }))
-        const newRows = dates.map(({ date, time, endTime }, i) => ({
-          id:               result.ids[i] ?? crypto.randomUUID(),
-          ...data,
-          series_id:        result.seriesId,
-          session_date:     date,
-          session_time:     time     ?? data.session_time,
-          session_end_time: endTime  ?? data.session_end_time,
-          signups:          carried.filter((_, j) => result.carried[j].session_id === result.ids[i]),
-        }))
+        const newRows = dates.map(({ date, time, endTime }, i) => {
+          const id = result.created.find((c) => c.session_date === date)?.id ?? result.ids[i] ?? crypto.randomUUID()
+          return {
+            id,
+            ...data,
+            series_id:        result.seriesId,
+            session_date:     date,
+            session_time:     time     ?? data.session_time,
+            session_end_time: endTime  ?? data.session_end_time,
+            signups:          carried.filter((_, j) => result.carried[j].session_id === id),
+          }
+        })
         setSessions((prev) =>
           [...prev, ...newRows].sort((a, b) => a.session_date.localeCompare(b.session_date))
         )
@@ -487,6 +548,27 @@ export default function SessionList({
     for (const day of uniqueDays) {
       const match = group.find((s) => new Date(s.session_date + "T00:00:00").getDay() === day)
       if (match) day_times[day] = { time: match.session_time ?? "", end_time: match.session_end_time ?? "" }
+    }
+    if (group.length > 1 && !isWeeklySeries(group)) {
+      // Hand-picked dates: start from the same upcoming dates (handy for a
+      // second age group); untick or clear them for a new run.
+      const usual = { time: first.session_time ?? "", end: first.session_end_time ?? "" }
+      setForm({
+        ...sessionToForm(first, true),
+        series_id:      "",
+        specific_dates: true,
+        picked: group
+          .filter((s) => !isPast(s.session_date))
+          .map((s) => ({
+            date:     s.session_date,
+            time:     (s.session_time ?? "") === usual.time ? null : s.session_time,
+            end_time: (s.session_end_time ?? "") === usual.end ? null : s.session_end_time,
+          })),
+      })
+      setEditId(null)
+      setAdding(true)
+      setError(null)
+      return
     }
     setForm({
       ...sessionToForm(first, true),
@@ -551,9 +633,9 @@ export default function SessionList({
             />
           </div>
 
-          {/* Date + time */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          {/* Date + time (picking dates: the times are the usual ones) */}
+          <div className={`grid gap-3 ${form.specific_dates && !editingId ? "grid-cols-2" : "grid-cols-3"}`}>
+            {!(form.specific_dates && !editingId) && <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Date *</label>
               <input
                 type="date" required
@@ -569,9 +651,11 @@ export default function SessionList({
                 }}
                 className={inputCls}
               />
-            </div>
+            </div>}
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Start time</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
+                {form.specific_dates && !editingId ? "Usual start time" : "Start time"}
+              </label>
               <input
                 type="time"
                 value={form.session_time}
@@ -580,7 +664,9 @@ export default function SessionList({
               />
             </div>
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">End time</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
+                {form.specific_dates && !editingId ? "Usual end time" : "End time"}
+              </label>
               <input
                 type="time"
                 value={form.session_end_time}
@@ -605,29 +691,32 @@ export default function SessionList({
             </div>
           )}
 
-          {/* Repeat weekly (only on create) */}
+          {/* Schedule: one date, a weekly pattern, or hand-picked dates (create only) */}
           {!editingId && (
             <div className="space-y-3">
-              <div className="flex items-center gap-4 flex-wrap">
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={form.repeat_weekly}
-                    onChange={(e) => {
-                      const checked = e.target.checked
-                      const updates: Partial<FormState> = { repeat_weekly: checked }
-                      if (!checked) updates.package_only = false
-                      if (checked && form.session_date && form.repeat_days.length === 0) {
-                        const day = new Date(form.session_date + "T00:00:00").getDay()
-                        updates.repeat_days = [day]
-                        updates.day_times   = { [day]: { time: form.session_time, end_time: form.session_end_time } }
-                      }
-                      setForm((f) => ({ ...f, ...updates }))
-                    }}
-                    className="accent-blue-600"
-                  />
-                  Repeat weekly
-                </label>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div role="radiogroup" aria-label="Schedule" className="inline-flex rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5">
+                  {([
+                    ["once",   "One date"],
+                    ["weekly", "Repeat weekly"],
+                    ["dates",  "Pick dates"],
+                  ] as const).map(([mode, label]) => {
+                    const active = mode === "weekly" ? form.repeat_weekly : mode === "dates" ? form.specific_dates : !form.repeat_weekly && !form.specific_dates
+                    return (
+                      <button
+                        key={mode} type="button" role="radio" aria-checked={active}
+                        onClick={() => setSchedule(mode)}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          active
+                            ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+                            : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
                 {form.repeat_weekly && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500 dark:text-gray-400">for</span>
@@ -714,8 +803,18 @@ export default function SessionList({
                 </div>
               )}
 
-              {/* Whole-series signup */}
-              {form.repeat_weekly && (
+              {/* Hand-picked dates */}
+              {form.specific_dates && (
+                <MultiDatePicker
+                  picked={form.picked}
+                  usualTime={form.session_time}
+                  usualEnd={form.session_end_time}
+                  onChange={(picked) => setForm((f) => ({ ...f, picked }))}
+                />
+              )}
+
+              {/* Whole-series signup (a new series; dates added to an existing one inherit it) */}
+              {makesNewSeries && (
                 <label className={`flex items-start gap-2.5 cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${
                   form.package_only
                     ? "border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/30"
@@ -732,7 +831,9 @@ export default function SessionList({
                       Parents sign up for the whole series
                     </span>
                     <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      One registration covers all {repeatTotal} sessions at one price. Parents can’t pick single dates.
+                      {sessionCount < 2
+                        ? "Pick 2 or more dates to make a series."
+                        : `One registration covers all ${sessionCount} sessions at one price. Parents can’t pick single dates.`}
                     </span>
                   </span>
                 </label>
@@ -770,7 +871,7 @@ export default function SessionList({
                 className={inputCls}
               />
             </div>
-            {formIsPackage && (editingId || !form.repeat_weekly) ? (
+            {formIsPackage && !makesNewSeries ? (
               <div>
                 <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price</label>
                 <p className="text-sm text-gray-700 dark:text-gray-300 py-1.5">
@@ -781,7 +882,7 @@ export default function SessionList({
             ) : formIsPackage ? (
               <div>
                 <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
-                  Price for all {repeatTotal} sessions
+                  Price for all {sessionCount} sessions
                 </label>
                 <input
                   type="text" placeholder="e.g. $75"
@@ -802,9 +903,9 @@ export default function SessionList({
               </div>
             )}
           </div>
-          {formIsPackage && !editingId && form.repeat_weekly && (
+          {formIsPackage && makesNewSeries && (
             <p className="text-xs text-blue-700 dark:text-blue-300 -mt-2">
-              Parents see: <strong>{packageSummary(form.package_price, repeatTotal)}</strong>
+              Parents see: <strong>{packageSummary(form.package_price, sessionCount)}</strong>
             </p>
           )}
 
@@ -922,32 +1023,32 @@ export default function SessionList({
             )}
           </div>
 
-          {/* Series — only shown for single sessions (recurring auto-creates a series) */}
+          {/* Series — one date or picked dates can join an existing series
+              (weekly always creates its own) */}
           {!form.repeat_weekly && seriesOptions.length > 0 && (
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Series</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
+                {form.specific_dates && !editingId ? "Add these dates to" : "Series"}
+              </label>
               <select
                 value={form.series_id}
                 onChange={(e) => {
                   // A date in a whole-series package is part of that package.
-                  const series = sessions.find((s) => s.series_id === e.target.value)
-                  setForm((f) => ({
-                    ...f,
-                    series_id:     e.target.value,
-                    package_only:  series?.package_only ?? false,
-                    package_price: series?.package_price ?? "",
-                  }))
+                  const id = e.target.value
+                  setForm((f) => ({ ...f, series_id: id, ...seriesPackage(id) }))
                 }}
                 className={inputCls}
               >
-                <option value="">Standalone session</option>
+                <option value="">
+                  {form.specific_dates && !editingId && form.picked.length > 1 ? "A new series" : "Standalone session"}
+                </option>
                 {seriesOptions.map((o) => (
                   <option key={o.id} value={o.id}>{o.label}</option>
                 ))}
               </select>
               {formIsPackage && !editingId && (
                 <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                  Whole-series signup: everyone registered for this series is added to this date too.
+                  Whole-series signup: everyone registered for this series is added to {sessionCount > 1 ? "these dates" : "this date"} too.
                 </p>
               )}
             </div>
@@ -958,12 +1059,16 @@ export default function SessionList({
           <div className="flex items-center gap-3 pt-1">
             <button
               type="submit"
-              disabled={pending || !form.title || !form.session_date}
+              disabled={pending || !form.title || (form.specific_dates && !editingId ? form.picked.length === 0 : !form.session_date)}
               className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {(() => {
                 if (pending) return "Saving…"
                 if (editingId) return "Save changes"
+                if (form.specific_dates) {
+                  const n = form.picked.length
+                  return n === 0 ? "Pick dates above" : `Create ${n} session${n !== 1 ? "s" : ""}`
+                }
                 if (!form.repeat_weekly) return "Create session"
                 const weeks = parseInt(form.repeat_weeks) || 1
                 const days  = form.repeat_days.length || 1
@@ -1047,6 +1152,158 @@ export default function SessionList({
   )
 }
 
+// ── MultiDatePicker ───────────────────────────────────────────────────────────
+// Tap days on a month calendar to build a series from any dates. Each picked
+// date uses the usual time unless the coach changes it on that date's row.
+
+const ymd = (y: number, m: number, d: number) =>
+  `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+
+function MultiDatePicker({
+  picked, usualTime, usualEnd, onChange,
+}: {
+  picked:    PickedDate[]
+  usualTime: string
+  usualEnd:  string
+  onChange:  (picked: PickedDate[]) => void
+}) {
+  const sorted = [...picked].sort((a, b) => a.date.localeCompare(b.date))
+  const [view, setView] = useState(() => {
+    const d = sorted[0] ? new Date(sorted[0].date + "T00:00:00") : new Date()
+    return { y: d.getFullYear(), m: d.getMonth() }
+  })
+  const now      = new Date()
+  const todayKey = ymd(now.getFullYear(), now.getMonth(), now.getDate())
+  const isPicked = new Set(picked.map((p) => p.date))
+
+  const firstDow    = new Date(view.y, view.m, 1).getDay()
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate()
+  const monthLabel  = new Date(view.y, view.m, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+  const inMonth     = picked.filter((p) => p.date.startsWith(ymd(view.y, view.m, 1).slice(0, 8))).length
+
+  const add = (dates: string[]) =>
+    onChange([...picked, ...dates.filter((d) => !isPicked.has(d)).map((date) => ({ date, time: null, end_time: null }))])
+
+  function toggle(date: string) {
+    if (isPicked.has(date)) onChange(picked.filter((p) => p.date !== date))
+    else add([date])
+  }
+
+  // Tap a weekday heading: every one of those days this month (or none, if all are picked).
+  function toggleWeekday(dow: number) {
+    const dates: string[] = []
+    for (let d = 1; d <= daysInMonth; d++) if (new Date(view.y, view.m, d).getDay() === dow) dates.push(ymd(view.y, view.m, d))
+    if (dates.every((d) => isPicked.has(d))) onChange(picked.filter((p) => !dates.includes(p.date)))
+    else add(dates)
+  }
+
+  function setTime(date: string, key: "time" | "end_time", value: string) {
+    const usual = key === "time" ? usualTime : usualEnd
+    onChange(picked.map((p) => (p.date === date ? { ...p, [key]: value === usual ? null : value } : p)))
+  }
+
+  const shift = (n: number) => setView((v) => {
+    const d = new Date(v.y, v.m + n, 1)
+    return { y: d.getFullYear(), m: d.getMonth() }
+  })
+
+  const timeCls = (custom: boolean) =>
+    `w-[6.75rem] rounded-lg border px-2 py-1 text-xs bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+      custom ? "border-blue-400 dark:border-blue-500" : "border-gray-300 dark:border-gray-600"
+    }`
+
+  return (
+    <div className="space-y-3 @container">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 max-w-sm">
+        <div className="flex items-center justify-between mb-2">
+          <button type="button" onClick={() => shift(-1)} aria-label="Previous month"
+            className="h-8 w-8 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">‹</button>
+          <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+            {monthLabel}
+            {inMonth > 0 && <span className="ml-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">· {inMonth}</span>}
+          </p>
+          <button type="button" onClick={() => shift(1)} aria-label="Next month"
+            className="h-8 w-8 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">›</button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {DAY_LABELS.map((label, dow) => (
+            <button
+              key={label} type="button" onClick={() => toggleWeekday(dow)}
+              title={`Every ${DAY_NAMES[dow]} in ${monthLabel}`}
+              className="h-6 text-[11px] font-semibold text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400"
+            >
+              {label}
+            </button>
+          ))}
+          {Array.from({ length: firstDow }, (_, i) => <span key={`b${i}`} />)}
+          {Array.from({ length: daysInMonth }, (_, i) => {
+            const date = ymd(view.y, view.m, i + 1)
+            const on   = isPicked.has(date)
+            const past = date < todayKey
+            return (
+              <button
+                key={date} type="button" onClick={() => toggle(date)} aria-pressed={on}
+                aria-label={new Date(date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                className={`h-9 rounded-lg text-sm tabular-nums transition-colors ${
+                  on
+                    ? "bg-blue-600 text-white font-semibold"
+                    : `${past ? "text-gray-300 dark:text-gray-600" : "text-gray-700 dark:text-gray-300"} hover:bg-blue-50 dark:hover:bg-blue-950/50`
+                } ${date === todayKey && !on ? "ring-1 ring-inset ring-blue-400" : ""}`}
+              >
+                {i + 1}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {sorted.length === 0 ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Tap each day on the calendar. Tap a weekday letter to pick every one of those days in the month.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              {sorted.length} date{sorted.length !== 1 ? "s" : ""} picked
+              {(usualTime || usualEnd) && <span className="font-normal text-gray-400 dark:text-gray-500"> · change a time just for that date</span>}
+            </p>
+            <button type="button" onClick={() => onChange([])} className="text-xs text-gray-400 hover:text-red-500 hover:underline">
+              Clear all
+            </button>
+          </div>
+          {sorted.map((p) => (
+            <div key={p.date} className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300 w-full @sm:w-24 shrink-0">
+                {new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              </span>
+              <input
+                type="time" aria-label="Start time"
+                value={p.time ?? usualTime}
+                onChange={(e) => setTime(p.date, "time", e.target.value)}
+                className={timeCls(p.time !== null)}
+              />
+              <span className="text-xs text-gray-400">–</span>
+              <input
+                type="time" aria-label="End time"
+                value={p.end_time ?? usualEnd}
+                onChange={(e) => setTime(p.date, "end_time", e.target.value)}
+                className={timeCls(p.end_time !== null)}
+              />
+              <button
+                type="button" onClick={() => toggle(p.date)} aria-label="Remove date"
+                className="h-7 w-7 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── AdminSeriesGroup ──────────────────────────────────────────────────────────
 
 function AdminSeriesGroup({
@@ -1085,27 +1342,8 @@ function AdminSeriesGroup({
   // Gather meta for subtitle: day-named times, location, cost, eligibility
   const firstSession = sessions[0]
 
-  const dayTimesDisplay = (() => {
-    if (count === 1) {
-      const t = fmtTime(firstSession.session_time)
-      const e = fmtTime(firstSession.session_end_time)
-      return t ? (e ? `${t} – ${e}` : t) : null
-    }
-    const map = new Map<number, string>()
-    for (const s of sessions) {
-      const day = new Date(s.session_date + "T00:00:00").getDay()
-      if (!map.has(day)) {
-        const t = fmtTime(s.session_time)
-        const e = fmtTime(s.session_end_time)
-        if (t) map.set(day, e ? `${t} – ${e}` : t)
-      }
-    }
-    if (map.size === 0) return null
-    return [...map.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([day, t]) => `${DAY_PLURAL[day]} ${t}`)
-      .join(" / ")
-  })()
+  // "Tuesdays 5:30 PM" for a weekly series; just the time(s) for hand-picked dates.
+  const dayTimesDisplay = seriesTimesSummary(sessions)
 
   const locationLabel    = firstSession.location
     ? firstSession.location + (firstSession.location_address ? `, ${firstSession.location_address}` : "")

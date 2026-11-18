@@ -67,18 +67,44 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().split("T")[0]
 }
 
+/** One hand-picked date of a series, with its own times. */
+export type SpecificDate = {
+  date:             string
+  session_time:     string | null
+  session_end_time: string | null
+}
+
 export async function createTrainingSession(
   data: SessionData,
   repeatWeeks = 1,
   dayConfigs: RepeatDayConfig[] = [],
+  // Hand-picked dates (any days, not a weekly pattern). When given, they
+  // replace data.session_date / repeatWeeks / dayConfigs.
+  specificDates: SpecificDate[] = [],
 ) {
   const supabase = await createClient()
-  const totalSessions = dayConfigs.length > 0 ? repeatWeeks * dayConfigs.length : repeatWeeks
-  const seriesId = totalSessions > 1 ? crypto.randomUUID() : data.series_id
+  const picked = [...new Map(specificDates.filter((d) => d.date).map((d) => [d.date, d])).values()]
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const totalSessions = picked.length > 0
+    ? picked.length
+    : dayConfigs.length > 0 ? repeatWeeks * dayConfigs.length : repeatWeeks
+  // Weekly: always a new series. Picked dates: added to the series the coach
+  // chose, else a new one when there's more than one date.
+  const seriesId = picked.length > 0
+    ? data.series_id || (totalSessions > 1 ? crypto.randomUUID() : null)
+    : totalSessions > 1 ? crypto.randomUUID() : data.series_id
 
   let rows: (typeof data & { series_id: string | null })[]
 
-  if (dayConfigs.length === 0) {
+  if (picked.length > 0) {
+    rows = picked.map((d) => ({
+      ...data,
+      series_id:        seriesId,
+      session_date:     d.date,
+      session_time:     d.session_time,
+      session_end_time: d.session_end_time,
+    }))
+  } else if (dayConfigs.length === 0) {
     rows = Array.from({ length: repeatWeeks }, (_, i) => ({
       ...data,
       series_id:    seriesId,
@@ -107,19 +133,24 @@ export async function createTrainingSession(
     .insert(rows.map(withoutPackage))
     .select("id, session_date")
   if (error) {
-    return { ids: [] as string[], seriesId: null, carried: [] as CarriedSignup[], error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message }
+    return {
+      ids: [] as string[], created: [] as Array<{ id: string; session_date: string }>, seriesId: null,
+      carried: [] as CarriedSignup[], error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message,
+    }
   }
-  const ids = (inserted ?? []).map((r) => r.id as string)
+  const created = (inserted ?? []).map((r) => ({ id: r.id as string, session_date: r.session_date as string }))
+  const ids = created.map((r) => r.id)
 
-  // A date added to a whole-series package (a make-up session, say) belongs to
+  // Dates added to a whole-series package (a make-up session, say) belong to
   // everyone already registered for that series — they signed up for all of it.
+  // A brand-new series has no one registered yet, so this adds nothing.
   let carried: CarriedSignup[] = []
-  if (totalSessions === 1 && data.package_only && seriesId && ids[0]) {
-    carried = await carryPackageSignups(supabase, seriesId, ids[0], data.max_players)
+  if (data.package_only && seriesId && ids.length > 0) {
+    carried = await carryPackageSignups(supabase, seriesId, ids, data.max_players)
   }
 
   revalidatePath("/training")
-  return { ids, seriesId, carried, error: null }
+  return { ids, created, seriesId, carried, error: null }
 }
 
 export type CarriedSignup = {
@@ -134,15 +165,15 @@ export type CarriedSignup = {
 async function carryPackageSignups(
   supabase: Awaited<ReturnType<typeof createClient>>,
   seriesId: string,
-  newSessionId: string,
+  newSessionIds: string[],
   maxPlayers: number,
 ): Promise<CarriedSignup[]> {
   const { data: siblings } = await supabase
     .from("training_sessions")
     .select("id")
     .eq("series_id", seriesId)
-    .neq("id", newSessionId)
-  const otherIds = (siblings ?? []).map((r) => r.id as string)
+  const isNew = new Set(newSessionIds)
+  const otherIds = (siblings ?? []).map((r) => r.id as string).filter((id) => !isNew.has(id))
   if (otherIds.length === 0) return []
 
   const { data: existing } = await supabase
@@ -164,7 +195,8 @@ async function carryPackageSignups(
       reminder_sms:   !!su.reminder_sms,
     })
   }
-  const rows = [...byPlayer.entries()].slice(0, maxPlayers).map(([player_id, v]) => ({ session_id: newSessionId, player_id, ...v }))
+  const kids = [...byPlayer.entries()].slice(0, maxPlayers)
+  const rows = newSessionIds.flatMap((session_id) => kids.map(([player_id, v]) => ({ session_id, player_id, ...v })))
   if (rows.length === 0) return []
 
   const { data: added, error } = await supabase

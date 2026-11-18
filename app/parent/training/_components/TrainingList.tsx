@@ -4,6 +4,7 @@ import { useState, useTransition, useMemo, Fragment } from "react"
 import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups, signUpForTrainingSeries } from "@/app/(protected)/training/actions"
 import { fmtPackagePrice, packageSummary, packageTotal, packagePriceCents } from "@/lib/training-package"
 import { venmoPayLink } from "@/lib/event-pay"
+import { seriesTimesSummary } from "@/lib/training-schedule"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
 import { describeRules } from "@/lib/training-eligibility"
 import { track } from "@vercel/analytics"
@@ -203,27 +204,8 @@ function SeriesGroup({
     ? fmtDate(firstDate)
     : `${count} sessions · ${fmtShortDate(firstDate)} – ${fmtShortDate(lastDate)}`
 
-  const dayTimesDisplay = (() => {
-    if (count === 1) {
-      const t = fmtTime(firstSession.session_time)
-      const e = fmtTime(firstSession.session_end_time)
-      return t ? (e ? `${t} – ${e}` : t) : null
-    }
-    const map = new Map<number, string>()
-    for (const s of sessions) {
-      const day = new Date(s.session_date + "T00:00:00").getDay()
-      if (!map.has(day)) {
-        const t = fmtTime(s.session_time)
-        const e = fmtTime(s.session_end_time)
-        if (t) map.set(day, e ? `${t} – ${e}` : t)
-      }
-    }
-    if (map.size === 0) return null
-    return [...map.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([day, t]) => `${DAY_PLURAL[day]} ${t}`)
-      .join(" / ")
-  })()
+  // "Tuesdays 5:30 PM" for a weekly series; just the time(s) for hand-picked dates.
+  const dayTimesDisplay = seriesTimesSummary(sessions)
 
   const metaItems  = [firstSession.location].filter(Boolean)
   const isPackage  = firstSession.package_only && !!firstSession.series_id
