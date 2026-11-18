@@ -3,6 +3,8 @@
 //   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
 
 import { buildEmailHtml, btn, infoRow, infoTable, divider, esc } from "@/lib/email-template"
+import { fmtPackagePrice, packageSummary, packagePriceCents } from "@/lib/training-package"
+import { venmoPayLink } from "@/lib/event-pay"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -81,6 +83,8 @@ export type TrainingConfirmationPayload = {
   paymentAmount?: string | null
   paymentMethods?: PaymentMethod[]
   hasPaid?: boolean   // for cancel: true if the signup was already paid
+  /** Whole-series registration: the one price for every date ("$75"). */
+  packagePrice?: string | null
   bulkDates?: Array<{ date: string; time: string | null; endTime?: string | null }>
   imageUrl?: string | null
   description?: string | null
@@ -276,6 +280,23 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     : `${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}`
   const locLine  = payload.location ? `\nLocation: ${payload.location}` : ""
 
+  // Whole-series registration: one price for every date, plus how to pay it.
+  const pkgPrice   = isSignup ? fmtPackagePrice(payload.packagePrice) : null
+  const payMethods = (payload.paymentMethods ?? []).filter((m) => m.label?.trim())
+  // "tel:6232563187" (Zelle / Apple Pay) → "623-256-3187"
+  const payPhone = (link: string | null) => {
+    if (!link?.startsWith("tel:")) return null
+    const d = link.slice(4).replace(/\D/g, "")
+    return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : link.slice(4)
+  }
+  const payLabel = (m: PaymentMethod) => (payPhone(m.link) ? `${m.label} (${payPhone(m.link)})` : m.label)
+  const costText   = pkgPrice
+    ? [
+        `Cost: ${packageSummary(pkgPrice, dates.length)}`,
+        payMethods.length ? `Pay with: ${payMethods.map((m) => m.link && !payPhone(m.link) ? `${m.label} (${venmoPayLink(m.link, `${payload.playerName} - ${payload.sessionTitle}`, packagePriceCents(pkgPrice)) ?? m.link})` : payLabel(m)).join(", ")}` : "",
+      ].filter(Boolean).join("\n")
+    : ""
+
   let text: string
   if (isSignup) {
     text = [
@@ -285,6 +306,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       "",
       dates.length > 1 ? `Sessions (${dates.length}):\n${dateLinesText}` : dateLinesText,
       locLine,
+      costText ? `\n${costText}` : "",
       "",
       `To cancel or manage:\n${manageUrl}`,
       "",
@@ -322,6 +344,17 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       detailsHtml = infoTable(rows)
     }
 
+    const costHtml = pkgPrice
+      ? [
+          infoTable(infoRow("Cost", packageSummary(pkgPrice, dates.length))),
+          payMethods.length
+            ? `<p style="margin:-12px 0 20px;font-size:13px;color:#6b7280;">Pay with: ${payMethods.map((m) =>
+                m.link ? `<a href="${esc(venmoPayLink(m.link, `${payload.playerName} - ${payload.sessionTitle}`, packagePriceCents(pkgPrice)) ?? m.link)}" style="color:#2563eb;text-decoration:none;font-weight:600;">${esc(payLabel(m))}</a>` : esc(m.label),
+              ).join(" &middot; ")}</p>`
+            : "",
+        ].join("\n")
+      : ""
+
     const cancelHtml = [
       divider(),
       `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel? Manage your registrations at any time.</p>`,
@@ -340,7 +373,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
       : ""
 
-    htmlBody = [introHtml, detailsHtml, imageHtml, descriptionHtml, notesHtml, cancelHtml].filter(Boolean).join("\n")
+    htmlBody = [introHtml, detailsHtml, costHtml, imageHtml, descriptionHtml, notesHtml, cancelHtml].filter(Boolean).join("\n")
   } else {
     let cancelDetailsHtml: string
     if (dates.length > 1) {

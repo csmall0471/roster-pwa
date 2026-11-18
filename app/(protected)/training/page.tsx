@@ -10,10 +10,10 @@ export default async function TrainingPage() {
   const [{ data: sessionsRaw }, { data: teamsRaw }, { data: playersRaw }] = await Promise.all([
     supabase
       .from("training_sessions")
+      // "*" so columns added by later migrations (photo, address, package_*)
+      // load when present without breaking the page before they're applied.
       .select(`
-        id, title, description, location, session_date, session_time,
-        session_end_time, max_players, payment_amount, payment_methods,
-        eligibility_rules, notes, series_id,
+        *,
         training_signups(
           id, player_id, payment_method, paid,
           players(first_name, last_name),
@@ -47,6 +47,8 @@ export default async function TrainingPage() {
     eligibility_rules: s.eligibility_rules as EligibilityRules,
     notes:             s.notes,
     series_id:         s.series_id ?? null,
+    package_only:      s.package_only ?? false,
+    package_price:     s.package_price ?? null,
     signups:           s.training_signups ?? [],
   }))
 

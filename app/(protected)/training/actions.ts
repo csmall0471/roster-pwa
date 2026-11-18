@@ -6,6 +6,7 @@ import type { EligibilityRules } from "@/lib/training-eligibility"
 import { sendTrainingConfirmation } from "@/lib/notifications"
 import { logActivity } from "@/lib/activity"
 import { track } from "@vercel/analytics/server"
+import { isMissingPackageColumn, PACKAGE_MIGRATION_MSG } from "@/lib/training-package"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -24,6 +25,20 @@ export type SessionData = {
   eligibility_rules: EligibilityRules
   notes:             string | null
   series_id:         string | null
+  /** Parents sign up for every date in the series at once (no single dates). */
+  package_only:      boolean
+  /** Price for the whole series when package_only (e.g. "$75"). */
+  package_price:     string | null
+}
+
+// The package columns only exist once migration 071 is applied. A session that
+// isn't a package leaves them out, so creating/editing ordinary sessions keeps
+// working before then (the columns' defaults are the same values).
+function withoutPackage<T extends { package_only?: boolean; package_price?: string | null }>(row: T) {
+  if (row.package_only) return row
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { package_only, package_price, ...rest } = row
+  return rest
 }
 
 export type RepeatDayConfig = {
@@ -89,17 +104,84 @@ export async function createTrainingSession(
 
   const { data: inserted, error } = await supabase
     .from("training_sessions")
-    .insert(rows)
+    .insert(rows.map(withoutPackage))
     .select("id, session_date")
-  if (error) return { ids: [] as string[], seriesId: null, error: error.message }
+  if (error) {
+    return { ids: [] as string[], seriesId: null, carried: [] as CarriedSignup[], error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message }
+  }
+  const ids = (inserted ?? []).map((r) => r.id as string)
+
+  // A date added to a whole-series package (a make-up session, say) belongs to
+  // everyone already registered for that series — they signed up for all of it.
+  let carried: CarriedSignup[] = []
+  if (totalSessions === 1 && data.package_only && seriesId && ids[0]) {
+    carried = await carryPackageSignups(supabase, seriesId, ids[0], data.max_players)
+  }
+
   revalidatePath("/training")
-  return { ids: (inserted ?? []).map((r) => r.id as string), seriesId, error: null }
+  return { ids, seriesId, carried, error: null }
+}
+
+export type CarriedSignup = {
+  id:             string
+  session_id:     string
+  player_id:      string
+  parent_id:      string | null
+  payment_method: string | null
+  paid:           boolean
+}
+
+async function carryPackageSignups(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  seriesId: string,
+  newSessionId: string,
+  maxPlayers: number,
+): Promise<CarriedSignup[]> {
+  const { data: siblings } = await supabase
+    .from("training_sessions")
+    .select("id")
+    .eq("series_id", seriesId)
+    .neq("id", newSessionId)
+  const otherIds = (siblings ?? []).map((r) => r.id as string)
+  if (otherIds.length === 0) return []
+
+  const { data: existing } = await supabase
+    .from("training_signups")
+    .select("player_id, parent_id, payment_method, paid, reminder_email, reminder_sms, created_at")
+    .in("session_id", otherIds)
+    .order("created_at", { ascending: true })
+
+  // One row per kid: their earliest signup's details; paid only if every one is.
+  const byPlayer = new Map<string, { parent_id: string | null; payment_method: string | null; paid: boolean; reminder_email: boolean; reminder_sms: boolean }>()
+  for (const su of existing ?? []) {
+    const prev = byPlayer.get(su.player_id)
+    if (prev) { prev.paid = prev.paid && !!su.paid; continue }
+    byPlayer.set(su.player_id, {
+      parent_id:      su.parent_id ?? null,
+      payment_method: su.payment_method ?? null,
+      paid:           !!su.paid,
+      reminder_email: !!su.reminder_email,
+      reminder_sms:   !!su.reminder_sms,
+    })
+  }
+  const rows = [...byPlayer.entries()].slice(0, maxPlayers).map(([player_id, v]) => ({ session_id: newSessionId, player_id, ...v }))
+  if (rows.length === 0) return []
+
+  const { data: added, error } = await supabase
+    .from("training_signups")
+    .insert(rows)
+    .select("id, session_id, player_id, parent_id, payment_method, paid")
+  if (error) {
+    console.error("[training] carry package signups:", error.message)
+    return []
+  }
+  return (added ?? []) as CarriedSignup[]
 }
 
 export async function updateTrainingSession(id: string, data: SessionData) {
   const supabase = await createClient()
-  const { error } = await supabase.from("training_sessions").update(data).eq("id", id)
-  if (error) return { error: error.message }
+  const { error } = await supabase.from("training_sessions").update(withoutPackage(data)).eq("id", id)
+  if (error) return { error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message }
   revalidatePath("/training")
   return { error: null }
 }
@@ -140,10 +222,11 @@ export async function signUpForTraining(
 
   const { data: session } = await supabase
     .from("training_sessions")
-    .select("id, max_players, title, description, notes, image_url, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
+    .select("*")
     .eq("id", sessionId)
     .single()
   if (!session) return { signupId: null, error: "Session not found" }
+  if (session.package_only) return { signupId: null, error: "This series is sign-up-for-all-dates only — refresh the page and use Sign up." }
 
   const { count } = await supabase
     .from("training_signups")
@@ -229,10 +312,11 @@ export async function bulkSignUpForTraining(
   for (const sessionId of sessionIds) {
     const { data: session } = await supabase
       .from("training_sessions")
-      .select("max_players, title, description, notes, image_url, session_date, session_time, session_end_time, location, payment_amount, payment_methods")
+      .select("*")
       .eq("id", sessionId)
       .single()
     if (!session) continue
+    if (session.package_only) continue
 
     const { count } = await supabase
       .from("training_signups")
@@ -383,7 +467,7 @@ export async function adminBulkUpdateSessions(sessionIds: string[], data: Partia
   const supabase = await createClient()
   if (Object.keys(data).length === 0 || sessionIds.length === 0) return { error: null }
   const { error } = await supabase.from("training_sessions").update(data).in("id", sessionIds)
-  if (error) return { error: error.message }
+  if (error) return { error: isMissingPackageColumn(error.message) ? PACKAGE_MIGRATION_MSG : error.message }
   revalidatePath("/training")
   return { error: null }
 }
@@ -399,7 +483,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
   const parentId = parentRow?.parent_id ?? null
 
   const [{ data: sessions }, { data: existingSignups }] = await Promise.all([
-    supabase.from("training_sessions").select("id, max_players, title, description, notes, image_url, session_date, session_time, session_end_time, location, payment_amount, payment_methods").in("id", sessionIds),
+    supabase.from("training_sessions").select("*").in("id", sessionIds).order("session_date", { ascending: true }),
     supabase.from("training_signups").select("session_id, player_id").in("session_id", sessionIds),
   ])
 
@@ -443,6 +527,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
         location:        (first as any).location ?? null,
         paymentAmount:   calcBulkAmount((first as any).payment_amount ?? null, signedSessions!.length),
         paymentMethods:  (first as any).payment_methods ?? [],
+        packagePrice:    (first as any).package_only && !alreadyIn.size ? (first as any).package_price ?? null : null,
         imageUrl:        (first as any).image_url ?? null,
         description:     (first as any).description ?? null,
         notes:           (first as any).notes ?? null,
@@ -570,5 +655,133 @@ export async function cancelMultipleTrainingSignups(signupIds: string[]) {
   }
 
   revalidatePath("/parent/training")
+  return { error: null }
+}
+
+// ── Whole-series ("package") signup ─────────────────────────────────────────
+
+/**
+ * Registers one kid for every upcoming date in a package series, all or
+ * nothing: if any date the kid isn't already in is full, nothing is added.
+ * Dates the kid is already in are skipped, so this also adds a date the coach
+ * put on the series later.
+ */
+export async function signUpForTrainingSeries(
+  seriesId:      string,
+  playerId:      string,
+  reminderEmail  = false,
+  reminderSms    = false,
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { results: [] as Array<{ sessionId: string; signupId: string }>, error: "Not authenticated" }
+
+  const { data: parentLink } = await supabase
+    .from("parent_auth")
+    .select("parent_id, parents(first_name, last_name, email)")
+    .eq("auth_user_id", user.id)
+    .maybeSingle()
+  if (!parentLink) return { results: [], error: "Not a parent account" }
+
+  const { data: myPlayers } = await supabase.rpc("get_my_player_ids")
+  if (!(myPlayers ?? []).some((r: { player_id: string }) => r.player_id === playerId)) {
+    return { results: [], error: "You can only register your own kids." }
+  }
+
+  const today = new Date().toISOString().split("T")[0]
+  const { data: sessions } = await supabase
+    .from("training_sessions")
+    .select("*")
+    .eq("series_id", seriesId)
+    .gte("session_date", today)
+    .order("session_date", { ascending: true })
+  if (!sessions || sessions.length === 0) return { results: [], error: "This series has no upcoming sessions." }
+  if (!sessions[0].package_only) return { results: [], error: "This series is signed up for by date — refresh the page." }
+
+  const sessionIds = sessions.map((s) => s.id as string)
+  const { data: existing } = await supabase
+    .from("training_signups")
+    .select("session_id, player_id")
+    .in("session_id", sessionIds)
+
+  const countBySession = new Map<string, number>()
+  const alreadyIn = new Set<string>()
+  for (const su of existing ?? []) {
+    countBySession.set(su.session_id, (countBySession.get(su.session_id) ?? 0) + 1)
+    if (su.player_id === playerId) alreadyIn.add(su.session_id)
+  }
+
+  const toAdd = sessions.filter((s) => !alreadyIn.has(s.id))
+  if (toAdd.length === 0) return { results: [], error: "Already registered for every session." }
+  if (toAdd.some((s) => (countBySession.get(s.id) ?? 0) >= s.max_players)) {
+    return { results: [], error: "Sorry — this series is full." }
+  }
+
+  // One insert = one statement, so it's all dates or none.
+  const { data: rows, error } = await supabase
+    .from("training_signups")
+    .insert(toAdd.map((s) => ({
+      session_id:     s.id,
+      player_id:      playerId,
+      parent_id:      parentLink.parent_id,
+      reminder_email: reminderEmail,
+      reminder_sms:   reminderSms,
+    })))
+    .select("id, session_id")
+  if (error) return { results: [], error: error.message }
+
+  const results = (rows ?? []).map((r) => ({ sessionId: r.session_id as string, signupId: r.id as string }))
+  const first   = toAdd[0]
+  const parent  = parentLink.parents as any
+
+  const { data: playerRow } = await supabase.from("players").select("first_name, last_name").eq("id", playerId).single()
+  const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
+
+  if (parent?.email) {
+    sendTrainingConfirmation({
+      type:            "signup",
+      parentEmail:     parent.email,
+      parentFirstName: parent.first_name ?? "there",
+      playerName,
+      sessionTitle:    first.title,
+      sessionDate:     first.session_date,
+      sessionTime:     first.session_time ?? null,
+      sessionEndTime:  first.session_end_time ?? null,
+      location:        first.location ?? null,
+      paymentMethods:  first.payment_methods ?? [],
+      // The series price only on the first registration — a date added later
+      // was already paid for.
+      packagePrice:    alreadyIn.size === 0 ? first.package_price ?? null : null,
+      imageUrl:        first.image_url ?? null,
+      description:     first.description ?? null,
+      notes:           first.notes ?? null,
+      bulkDates:       toAdd.map((s) => ({ date: s.session_date, time: s.session_time ?? null, endTime: s.session_end_time ?? null })),
+    }).catch((err) => console.error("[notify] signUpForTrainingSeries parent:", err))
+  }
+
+  logActivity(parentLink.parent_id, "training_signup", { series_id: seriesId, session_title: first.title, session_ids: results.map((r) => r.sessionId), count: results.length, player_id: playerId, package: true }).catch(() => {})
+  track("training_signup", { session_title: first.title, count: results.length, package: true }).catch(() => {})
+
+  revalidatePath("/parent/training")
+  return { results, error: null }
+}
+
+/** Coach: mark a kid's whole-series registration paid/unpaid (every date at once). */
+export async function markTrainingSignupsPaid(signupIds: string[], paid: boolean) {
+  if (signupIds.length === 0) return { error: null }
+  const supabase = await createClient()
+  const { error } = await supabase.from("training_signups").update({ paid }).in("id", signupIds)
+  if (error) return { error: error.message }
+  revalidatePath("/training")
+  return { error: null }
+}
+
+/** Coach: take a kid off every date of a series. */
+export async function adminRemoveTrainingSignups(signupIds: string[]) {
+  if (signupIds.length === 0) return { error: null }
+  const supabase = await createClient()
+  const { error } = await supabase.from("training_signups").delete().in("id", signupIds)
+  if (error) return { error: error.message }
+  revalidatePath("/training")
   return { error: null }
 }

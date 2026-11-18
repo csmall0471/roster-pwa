@@ -38,11 +38,10 @@ export default async function ParentTrainingPage() {
       : Promise.resolve({ data: [] }),
     supabase
       .from("training_sessions")
+      // "*" so the package_* columns load once migration 071 is applied
+      // without breaking this page before then.
       .select(`
-        id, title, description, location, location_address, image_url,
-        session_date, session_time,
-        session_end_time, max_players, payment_amount, payment_methods,
-        notes, eligibility_rules, series_id,
+        *,
         training_signups(id, player_id, payment_method, paid)
       `)
       .gte("session_date", today)
@@ -129,6 +128,8 @@ export default async function ParentTrainingPage() {
         payment_methods:   s.payment_methods ?? [],
         notes:             s.notes,
         series_id:         s.series_id ?? null,
+        package_only:      s.package_only ?? false,
+        package_price:     s.package_price ?? null,
         eligibility_label: s.eligibility_rules ? describeRules(s.eligibility_rules as EligibilityRules) : null,
         total_signups:     signups.length,
         players:           eligiblePlayers,

@@ -1,7 +1,9 @@
 "use client"
 
 import { useState, useTransition, useMemo, Fragment } from "react"
-import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups } from "@/app/(protected)/training/actions"
+import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups, signUpForTrainingSeries } from "@/app/(protected)/training/actions"
+import { fmtPackagePrice, packageSummary, packageTotal, packagePriceCents } from "@/lib/training-package"
+import { venmoPayLink } from "@/lib/event-pay"
 import type { PaymentMethod } from "@/app/(protected)/training/actions"
 import { describeRules } from "@/lib/training-eligibility"
 import { track } from "@vercel/analytics"
@@ -46,6 +48,9 @@ export type TrainingSessionForParent = {
   notes:             string | null
   total_signups:     number
   series_id:         string | null
+  /** Whole-series signup: one registration for every date, one price. */
+  package_only:      boolean
+  package_price:     string | null
   eligibility_label: string | null
   players:           EligiblePlayer[]
   ineligiblePlayers: IneligiblePlayer[]
@@ -221,6 +226,7 @@ function SeriesGroup({
   })()
 
   const metaItems  = [firstSession.location].filter(Boolean)
+  const isPackage  = firstSession.package_only && !!firstSession.series_id
 
   // All eligible players across the entire series (deduplicated)
   const allPlayers = useMemo(() => {
@@ -265,6 +271,11 @@ function SeriesGroup({
             {dayTimesDisplay && <div>{dayTimesDisplay}</div>}
             {metaItems.length > 0 && <div>{metaItems.join(" · ")}</div>}
           </div>
+          {isPackage && (
+            <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-0.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
+              {packageSummary(firstSession.package_price, count)}
+            </div>
+          )}
         </div>
         <span className="text-gray-400 dark:text-gray-500 text-sm ml-4 shrink-0">{open ? "▾" : "▸"}</span>
       </button>
@@ -293,8 +304,18 @@ function SeriesGroup({
             </div>
           )}
 
+          {/* Whole-series package: one registration per kid for every date */}
+          {isPackage && allPlayers.length > 0 && (
+            <PackageSection
+              sessions={sessions}
+              players={allPlayers}
+              onBulkSignup={onBulkSignup}
+              onCancel={onCancel}
+            />
+          )}
+
           {/* Per-player signup/status rows */}
-          {allPlayers.length > 0 && (
+          {!isPackage && allPlayers.length > 0 && (
             <div className="border-b border-gray-200 dark:border-gray-700">
               {showBulkForm ? (
                 <BulkPlayerForm
@@ -346,8 +367,13 @@ function SeriesGroup({
 
           {/* Date list — info only */}
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {isPackage && (
+              <p className="px-5 pt-3 pb-1 bg-white dark:bg-gray-900 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                Included dates
+              </p>
+            )}
             {sessions.map((s) => (
-              <SimpleDateCard key={s.id} session={s} />
+              <SimpleDateCard key={s.id} session={s} compact={isPackage} />
             ))}
           </div>
         </div>
@@ -684,9 +710,301 @@ function SeriesPlayerRow({
   )
 }
 
+// ── PackageSection ────────────────────────────────────────────────────────────
+// Whole-series signup: each kid registers once for every date at one price.
+
+function payLinkLabel(m: PaymentMethod): string {
+  if (!m.link?.startsWith("tel:")) return m.label
+  const d = m.link.slice(4).replace(/\D/g, "")
+  return `${m.label} ${d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : m.link.slice(4)}`
+}
+
+function PackageSection({
+  sessions, players, onBulkSignup, onCancel,
+}: {
+  sessions:     TrainingSessionForParent[]
+  players:      Array<{ player_id: string; first_name: string; last_name: string }>
+  onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
+  onCancel:     (sessionId: string, playerId: string) => void
+}) {
+  const first     = sessions[0]
+  const seriesId  = first.series_id!
+  const count     = sessions.length
+  const price     = fmtPackagePrice(first.package_price)
+  const spotsLeft = Math.max(0, Math.min(...sessions.map((s) => s.max_players - s.total_signups)))
+  const payMethods = (first.payment_methods ?? []).filter((m) => m.label?.trim())
+
+  // Everyone registered, once (names are the same on every date).
+  const whoIsIn = useMemo(() => {
+    const names = new Set<string>()
+    for (const s of sessions) for (const p of s.signedUpPlayers) names.add(`${p.first_name} ${p.last_name}`)
+    return [...names]
+  }, [sessions])
+
+  const status = useMemo(() => players.map((pl) => {
+    const regs = sessions.flatMap((s) =>
+      s.players
+        .filter((p) => p.player_id === pl.player_id && p.signup_id)
+        .map((p) => ({ sessionId: s.id, signupId: p.signup_id!, paid: p.paid })),
+    )
+    const missing = sessions.filter((s) =>
+      s.players.some((p) => p.player_id === pl.player_id && !p.signup_id),
+    )
+    return { ...pl, regs, missing, paid: regs.length > 0 && regs.every((r) => r.paid) }
+  }), [players, sessions])
+
+  const unregistered = status.filter((p) => p.regs.length === 0)
+
+  // null = sign-up form closed; otherwise the kids ticked in it.
+  const [selected, setSelected]           = useState<Set<string> | null>(null)
+  const [reminderEmail, setReminderEmail] = useState(false)
+  const [reminderSms, setReminderSms]     = useState(false)
+  const [errors, setErrors]               = useState<string[]>([])
+  const [pending, start]                  = useTransition()
+
+  function openForm(playerId: string) {
+    setErrors([])
+    setSelected(new Set([playerId]))
+  }
+
+  function register(ids: string[], emailOn: boolean, smsOn: boolean, closeOnSuccess: boolean) {
+    setErrors([])
+    start(async () => {
+      const errs: string[] = []
+      for (const playerId of ids) {
+        const result = await signUpForTrainingSeries(seriesId, playerId, emailOn, smsOn)
+        if (result.error) {
+          const pl = players.find((p) => p.player_id === playerId)
+          errs.push(`${pl?.first_name ?? "Player"}: ${result.error}`)
+        } else {
+          onBulkSignup(playerId, result.results)
+        }
+      }
+      setErrors(errs)
+      if (errs.length === 0 && closeOnSuccess) setSelected(null)
+    })
+  }
+
+  function cancel(p: (typeof status)[number]) {
+    const name = `${p.first_name} ${p.last_name}`
+    const n = p.regs.length
+    const paidNote = p.paid ? "\n\nYou've already paid — reach out to the coach about a refund." : ""
+    if (!confirm(`Cancel ${name}'s registration for ${n === 1 ? "this series" : `all ${n} sessions`}?${paidNote}`)) return
+    setErrors([])
+    start(async () => {
+      const result = await cancelMultipleTrainingSignups(p.regs.map((r) => r.signupId))
+      if (result.error) { setErrors([result.error]); return }
+      for (const r of p.regs) onCancel(r.sessionId, p.player_id)
+    })
+  }
+
+  const picked    = selected ? [...selected] : []
+  const total     = packageTotal(first.package_price, picked.length)
+  const overSpots = picked.length > spotsLeft
+
+  return (
+    <div className="border-b border-gray-200 dark:border-gray-700">
+      {/* What you're signing up for */}
+      <div className="px-5 py-3 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800">
+        <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+          {packageSummary(first.package_price, count)}
+        </p>
+        <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+          One sign-up covers every date below.{" "}
+          <span className={`font-medium ${spotsLeft === 0 ? "text-red-600 dark:text-red-400" : ""}`}>
+            {spotsLeft === 0 ? "Full." : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left.`}
+          </span>
+        </p>
+        {whoIsIn.length > 0 && (
+          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+            <span className="font-medium">Signed up:</span> {whoIsIn.join(", ")}
+          </p>
+        )}
+      </div>
+
+      {/* One row per kid */}
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+        {status.map((p) => {
+          const name = `${p.first_name} ${p.last_name}`
+          const registered = p.regs.length > 0
+          return (
+            <div key={p.player_id} className="px-5 py-3 bg-white dark:bg-gray-900">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">{name}</span>
+                  {registered && (
+                    <div className="mt-0.5 space-y-1">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400">
+                        ✓ Registered for {p.missing.length === 0 ? `all ${p.regs.length} sessions` : `${p.regs.length} of ${count} sessions`}
+                      </p>
+                      {p.paid ? (
+                        <p className="text-xs text-green-700 dark:text-green-400">Paid — thank you!</p>
+                      ) : price ? (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          Payment due: {price}
+                          {payMethods.length > 0 && (
+                            <>
+                              {" · "}
+                              {payMethods.map((m, i) => (
+                                <Fragment key={i}>
+                                  {i > 0 && " · "}
+                                  {m.link ? (
+                                    <a
+                                      href={venmoPayLink(m.link, `${name} - ${first.title}`, packagePriceCents(first.package_price)) ?? m.link}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="font-semibold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+                                    >
+                                      {payLinkLabel(m)}
+                                    </a>
+                                  ) : (
+                                    <span>{m.label}</span>
+                                  )}
+                                </Fragment>
+                              ))}
+                            </>
+                          )}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  {registered && p.missing.length > 0 && (
+                    <button
+                      onClick={() => register([p.player_id], false, false, false)}
+                      disabled={pending}
+                      className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                    >
+                      Add the other {p.missing.length}
+                    </button>
+                  )}
+                  {registered ? (
+                    <button
+                      onClick={() => cancel(p)}
+                      disabled={pending}
+                      className="text-xs text-red-500 hover:underline disabled:opacity-50"
+                    >
+                      Cancel registration
+                    </button>
+                  ) : selected ? null : spotsLeft === 0 ? (
+                    <span className="text-xs font-medium text-red-500">Full</span>
+                  ) : (
+                    <button
+                      onClick={() => openForm(p.player_id)}
+                      disabled={pending}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      Sign up{price ? ` · ${price}` : ""}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Sign-up form: confirms the whole series, can take several kids at once */}
+      {selected && (
+        <div className="px-5 py-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 space-y-3">
+          {unregistered.length > 1 && (
+            <div>
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Who&rsquo;s signing up?</p>
+              <div className="space-y-1.5">
+                {unregistered.map((p) => (
+                  <label key={p.player_id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.player_id)}
+                      onChange={(e) => setSelected((prev) => {
+                        const next = new Set(prev ?? [])
+                        if (e.target.checked) next.add(p.player_id)
+                        else next.delete(p.player_id)
+                        return next
+                      })}
+                      className="accent-blue-600 shrink-0"
+                    />
+                    <span className="text-gray-800 dark:text-gray-200">{p.first_name} {p.last_name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-600 dark:text-gray-400">
+            {picked.length === 1
+              ? `${players.find((p) => p.player_id === picked[0])?.first_name ?? "Your player"} will be registered for`
+              : "Each player will be registered for"}{" "}
+            all {count} sessions ({fmtShortDate(first.session_date)} – {fmtShortDate(sessions[count - 1].session_date)}).
+            {total && picked.length > 1 ? ` Total: ${total}.` : price ? ` Cost: ${price}${picked.length > 1 ? " each" : ""}.` : ""}
+          </p>
+
+          <div>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+              Reminders are optional — you can register without either.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+                <input type="checkbox" checked={reminderEmail} onChange={(e) => setReminderEmail(e.target.checked)} className="accent-blue-600" />
+                Email reminder
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+                <input type="checkbox" checked={reminderSms} onChange={(e) => setReminderSms(e.target.checked)} className="accent-blue-600" />
+                Text reminder
+              </label>
+            </div>
+          </div>
+          {reminderSms && (
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+              By checking &ldquo;Text reminder&rdquo; you agree to receive recurring
+              automated SMS reminders from CS Sports AZ for each training session
+              you register for. Msg freq varies. Msg&amp;Data rates may apply.
+              Reply STOP to opt out, HELP for help. See{" "}
+              <a href="/privacy" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">Privacy Policy</a>
+              {" "}and{" "}
+              <a href="/sms-terms" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">SMS Terms</a>.
+            </p>
+          )}
+
+          {overSpots && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Only {spotsLeft} spot{spotsLeft !== 1 ? "s" : ""} left — untick {picked.length - spotsLeft === 1 ? "a player" : `${picked.length - spotsLeft} players`}.
+            </p>
+          )}
+          {errors.map((err, i) => <p key={i} className="text-xs text-red-500">{err}</p>)}
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={() => register(picked, reminderEmail, reminderSms, true)}
+              disabled={pending || picked.length === 0 || overSpots}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {pending
+                ? "Signing up…"
+                : picked.length > 1
+                  ? `Register ${picked.length} players for all ${count}`
+                  : `Register for all ${count} sessions`}
+            </button>
+            <button
+              onClick={() => { setSelected(null); setErrors([]) }}
+              className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!selected && errors.map((err, i) => <p key={i} className="px-5 pb-2 text-xs text-red-500">{err}</p>)}
+    </div>
+  )
+}
+
 // ── SimpleDateCard ────────────────────────────────────────────────────────────
 
-function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
+function SimpleDateCard({ session, compact = false }: { session: TrainingSessionForParent; compact?: boolean }) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
   const openSlots = session.max_players - session.total_signups
@@ -714,11 +1032,13 @@ function SimpleDateCard({ session }: { session: TrainingSessionForParent }) {
             {session.location} ↗
           </a>
         )}
-        <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
-          {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
-        </span>
+        {!compact && (
+          <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+            {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
+          </span>
+        )}
       </div>
-      {session.signedUpPlayers.length > 0 && (
+      {!compact && session.signedUpPlayers.length > 0 && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
           <span className="font-medium">Signed up:</span>{" "}
           {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}

@@ -2,8 +2,9 @@
 
 import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions, adminBulkUpdateSessions } from "../actions"
+import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions, adminBulkUpdateSessions, markTrainingSignupsPaid, adminRemoveTrainingSignups } from "../actions"
 import type { SessionData, PaymentMethod, RepeatDayConfig, BulkSessionUpdateData } from "../actions"
+import { fmtPackagePrice, packageSummary } from "@/lib/training-package"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { describeRules } from "@/lib/training-eligibility"
 import RuleBuilder, { type TeamOption } from "./RuleBuilder"
@@ -28,6 +29,8 @@ export type TrainingSession = {
   eligibility_rules: EligibilityRules
   notes:             string | null
   series_id:         string | null
+  package_only:      boolean
+  package_price:     string | null
   signups: Array<{
     id:             string
     player_id:      string
@@ -70,6 +73,8 @@ type FormState = {
   repeat_days:       number[]
   day_times:         Record<number, DayTime>
   series_id:         string
+  package_only:      boolean
+  package_price:     string
 }
 
 const EMPTY_FORM: FormState = {
@@ -78,6 +83,7 @@ const EMPTY_FORM: FormState = {
   payment_amount: "", payment_methods: [], notes: "",
   eligibility_rules: null, repeat_weekly: false, repeat_weeks: "4",
   repeat_days: [], day_times: {}, series_id: "",
+  package_only: false, package_price: "",
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,13 +182,15 @@ type BulkFormState = {
   payment_methods:   PaymentMethod[]
   notes:             string
   eligibility_rules: EligibilityRules
+  package_only:      boolean
+  package_price:     string
 }
 
 // Which bulk-edit fields the user opted to change, and how each maps to columns.
 type BulkFieldKey =
   | "title" | "description" | "time" | "location"
   | "max_players" | "payment_amount" | "payment_methods" | "eligibility_rules"
-  | "notes" | "image"
+  | "notes" | "image" | "package"
 
 const BULK_FIELD_LABELS: Record<BulkFieldKey, string> = {
   title: "Title",
@@ -195,6 +203,7 @@ const BULK_FIELD_LABELS: Record<BulkFieldKey, string> = {
   eligibility_rules: "Eligibility",
   notes: "Notes",
   image: "Photo",
+  package: "Whole-series signup",
 }
 
 // Build a partial update from only the toggled-on fields.
@@ -216,6 +225,12 @@ function buildBulkPartial(f: BulkFormState, on: (k: BulkFieldKey) => boolean): P
   if (on("eligibility_rules")) d.eligibility_rules = f.eligibility_rules
   if (on("notes")) d.notes = f.notes || null
   if (on("image")) d.image_url = f.image_url || null
+  if (on("package")) {
+    d.package_only  = f.package_only
+    d.package_price = f.package_only ? f.package_price.trim() || null : null
+    // A package has one price for the series, not a price per session.
+    if (f.package_only) d.payment_amount = null
+  }
   return d
 }
 
@@ -336,6 +351,8 @@ export default function SessionList({
       repeat_days:       [],
       day_times:         {},
       series_id:         s.series_id        ?? "",
+      package_only:      s.package_only,
+      package_price:     s.package_price    ?? "",
     }
   }
 
@@ -359,6 +376,13 @@ export default function SessionList({
     setError(null)
   }
 
+  // Sessions the create form will make (1 unless repeating weekly).
+  const repeatTotal = form.repeat_weekly
+    ? Math.max(1, parseInt(form.repeat_weeks) || 1) * (form.repeat_days.length || 1)
+    : 1
+  // A package needs a series: several new dates, or a date in an existing series.
+  const formIsPackage = form.package_only && (form.repeat_weekly ? repeatTotal > 1 : !!form.series_id)
+
   function toData(): SessionData {
     return {
       title:             form.title,
@@ -370,11 +394,13 @@ export default function SessionList({
       session_time:      form.session_time      || null,
       session_end_time:  form.session_end_time  || null,
       max_players:       Math.max(1, parseInt(form.max_players) || 10),
-      payment_amount:    form.payment_amount    || null,
+      payment_amount:    formIsPackage ? null : form.payment_amount || null,
       payment_methods:   form.payment_methods,
       eligibility_rules: form.eligibility_rules,
       notes:             form.notes             || null,
       series_id:         form.series_id         || null,
+      package_only:      formIsPackage,
+      package_price:     formIsPackage ? form.package_price.trim() || null : null,
     }
   }
 
@@ -406,6 +432,17 @@ export default function SessionList({
         const result = await createTrainingSession(data, repeatWeeks, dayConfigs)
         if (result.error) { setError(result.error); return }
         const dates  = generateSessionDates(data.session_date, repeatWeeks, dayConfigs)
+        // Kids registered for a package series were added to the new date too.
+        const known = new Map<string, TrainingSession["signups"][0]>()
+        for (const s of sessions) for (const su of s.signups) if (!known.has(su.player_id)) known.set(su.player_id, su)
+        const carried: TrainingSession["signups"] = result.carried.map((c) => ({
+          id:             c.id,
+          player_id:      c.player_id,
+          payment_method: c.payment_method,
+          paid:           c.paid,
+          players:        known.get(c.player_id)?.players ?? null,
+          parents:        known.get(c.player_id)?.parents ?? null,
+        }))
         const newRows = dates.map(({ date, time, endTime }, i) => ({
           id:               result.ids[i] ?? crypto.randomUUID(),
           ...data,
@@ -413,7 +450,7 @@ export default function SessionList({
           session_date:     date,
           session_time:     time     ?? data.session_time,
           session_end_time: endTime  ?? data.session_end_time,
-          signups:          [] as TrainingSession["signups"],
+          signups:          carried.filter((_, j) => result.carried[j].session_id === result.ids[i]),
         }))
         setSessions((prev) =>
           [...prev, ...newRows].sort((a, b) => a.session_date.localeCompare(b.session_date))
@@ -579,6 +616,7 @@ export default function SessionList({
                     onChange={(e) => {
                       const checked = e.target.checked
                       const updates: Partial<FormState> = { repeat_weekly: checked }
+                      if (!checked) updates.package_only = false
                       if (checked && form.session_date && form.repeat_days.length === 0) {
                         const day = new Date(form.session_date + "T00:00:00").getDay()
                         updates.repeat_days = [day]
@@ -675,6 +713,30 @@ export default function SessionList({
                   )}
                 </div>
               )}
+
+              {/* Whole-series signup */}
+              {form.repeat_weekly && (
+                <label className={`flex items-start gap-2.5 cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${
+                  form.package_only
+                    ? "border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/30"
+                    : "border-gray-200 dark:border-gray-700"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={form.package_only}
+                    onChange={(e) => setForm((f) => ({ ...f, package_only: e.target.checked }))}
+                    className="accent-blue-600 mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">
+                      Parents sign up for the whole series
+                    </span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      One registration covers all {repeatTotal} sessions at one price. Parents can’t pick single dates.
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
           )}
 
@@ -708,16 +770,43 @@ export default function SessionList({
                 className={inputCls}
               />
             </div>
-            <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price</label>
-              <input
-                type="text" placeholder="e.g. $20"
-                value={form.payment_amount}
-                onChange={(e) => setForm((f) => ({ ...f, payment_amount: e.target.value }))}
-                className={inputCls}
-              />
-            </div>
+            {formIsPackage && (editingId || !form.repeat_weekly) ? (
+              <div>
+                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price</label>
+                <p className="text-sm text-gray-700 dark:text-gray-300 py-1.5">
+                  {fmtPackagePrice(form.package_price) ?? "No price"} for the series
+                </p>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">Change it with &ldquo;Edit all&rdquo; on the series.</p>
+              </div>
+            ) : formIsPackage ? (
+              <div>
+                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
+                  Price for all {repeatTotal} sessions
+                </label>
+                <input
+                  type="text" placeholder="e.g. $75"
+                  value={form.package_price}
+                  onChange={(e) => setForm((f) => ({ ...f, package_price: e.target.value }))}
+                  className={inputCls}
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price</label>
+                <input
+                  type="text" placeholder="e.g. $20"
+                  value={form.payment_amount}
+                  onChange={(e) => setForm((f) => ({ ...f, payment_amount: e.target.value }))}
+                  className={inputCls}
+                />
+              </div>
+            )}
           </div>
+          {formIsPackage && !editingId && form.repeat_weekly && (
+            <p className="text-xs text-blue-700 dark:text-blue-300 -mt-2">
+              Parents see: <strong>{packageSummary(form.package_price, repeatTotal)}</strong>
+            </p>
+          )}
 
           {/* Payment methods */}
           <div>
@@ -839,7 +928,16 @@ export default function SessionList({
               <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Series</label>
               <select
                 value={form.series_id}
-                onChange={(e) => setForm((f) => ({ ...f, series_id: e.target.value }))}
+                onChange={(e) => {
+                  // A date in a whole-series package is part of that package.
+                  const series = sessions.find((s) => s.series_id === e.target.value)
+                  setForm((f) => ({
+                    ...f,
+                    series_id:     e.target.value,
+                    package_only:  series?.package_only ?? false,
+                    package_price: series?.package_price ?? "",
+                  }))
+                }}
                 className={inputCls}
               >
                 <option value="">Standalone session</option>
@@ -847,6 +945,11 @@ export default function SessionList({
                   <option key={o.id} value={o.id}>{o.label}</option>
                 ))}
               </select>
+              {formIsPackage && !editingId && (
+                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                  Whole-series signup: everyone registered for this series is added to this date too.
+                </p>
+              )}
             </div>
           )}
 
@@ -1007,7 +1110,10 @@ function AdminSeriesGroup({
   const locationLabel    = firstSession.location
     ? firstSession.location + (firstSession.location_address ? `, ${firstSession.location_address}` : "")
     : null
-  const costLabel        = firstSession.payment_amount ? `${firstSession.payment_amount}/session` : null
+  const isPackage        = firstSession.package_only && !!firstSession.series_id
+  const costLabel        = isPackage
+    ? packageSummary(firstSession.package_price, count)
+    : firstSession.payment_amount ? `${firstSession.payment_amount}/session` : null
   const locationCostMeta = [locationLabel, costLabel].filter(Boolean).join(" · ")
 
   return (
@@ -1021,6 +1127,11 @@ function AdminSeriesGroup({
         >
           <div className="flex items-baseline gap-1.5 flex-wrap">
             <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
+            {isPackage && (
+              <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                Whole series
+              </span>
+            )}
             {firstSession.eligibility_rules && (
               <span className="text-xs text-blue-600 dark:text-blue-400">{describeRules(firstSession.eligibility_rules)}</span>
             )}
@@ -1076,10 +1187,18 @@ function AdminSeriesGroup({
               }}
             />
           )}
+          {isPackage && (
+            <SeriesRosterPanel
+              sessions={sessions}
+              onSignupRemoved={onSignupRemoved}
+              onSignupPaidToggled={onSignupPaidToggled}
+            />
+          )}
           {sessions.map((s) => (
             <SessionCard
               key={s.id}
               session={s}
+              isPackage={isPackage}
               players={players}
               expanded={expandedId === s.id}
               onToggleExpand={() => onToggleExpand(s.id)}
@@ -1095,6 +1214,7 @@ function AdminSeriesGroup({
             <BulkAddPanel
               sessions={sessions}
               players={players}
+              isPackage={isPackage}
               onSignupAdded={onSignupAdded}
             />
           )}
@@ -1104,13 +1224,141 @@ function AdminSeriesGroup({
   )
 }
 
+// ── SeriesRosterPanel ─────────────────────────────────────────────────────────
+// Whole-series package: who's registered, paid for the series, and remove from
+// every date at once. (Each date's own list below is for attendance.)
+
+function SeriesRosterPanel({
+  sessions, onSignupRemoved, onSignupPaidToggled,
+}: {
+  sessions:            TrainingSession[]
+  onSignupRemoved:     (sessionId: string, signupId: string) => void
+  onSignupPaidToggled: (sessionId: string, signupId: string, paid: boolean) => void
+}) {
+  const [pending, start] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const roster = useMemo(() => {
+    const map = new Map<string, {
+      playerId: string
+      first:    string
+      last:     string
+      parent:   string | null
+      signups:  Array<{ sessionId: string; id: string; paid: boolean }>
+    }>()
+    for (const s of sessions) {
+      for (const su of s.signups) {
+        let r = map.get(su.player_id)
+        if (!r) {
+          r = { playerId: su.player_id, first: su.players?.first_name ?? "Unknown", last: su.players?.last_name ?? "player", parent: null, signups: [] }
+          map.set(su.player_id, r)
+        }
+        if (!r.parent && su.parents) r.parent = `${su.parents.first_name} ${su.parents.last_name}`
+        r.signups.push({ sessionId: s.id, id: su.id, paid: su.paid })
+      }
+    }
+    return [...map.values()].sort((a, b) => a.last.localeCompare(b.last) || a.first.localeCompare(b.first))
+  }, [sessions])
+
+  const upcoming  = sessions.filter((s) => !isPast(s.session_date))
+  const spotsLeft = upcoming.length ? Math.max(0, Math.min(...upcoming.map((s) => s.max_players - s.signups.length))) : null
+  const price     = fmtPackagePrice(sessions[0].package_price)
+  const unpaid    = roster.filter((r) => !r.signups.every((x) => x.paid)).length
+
+  function togglePaid(r: (typeof roster)[number]) {
+    const paid = !r.signups.every((x) => x.paid)
+    setError(null)
+    start(async () => {
+      const result = await markTrainingSignupsPaid(r.signups.map((x) => x.id), paid)
+      if (result.error) { setError(result.error); return }
+      for (const x of r.signups) onSignupPaidToggled(x.sessionId, x.id, paid)
+    })
+  }
+
+  function remove(r: (typeof roster)[number]) {
+    const n = r.signups.length
+    if (!confirm(`Take ${r.first} ${r.last} off ${n === 1 ? "this series" : `all ${n} sessions`}?`)) return
+    setError(null)
+    start(async () => {
+      const result = await adminRemoveTrainingSignups(r.signups.map((x) => x.id))
+      if (result.error) { setError(result.error); return }
+      for (const x of r.signups) onSignupRemoved(x.sessionId, x.id)
+    })
+  }
+
+  return (
+    <div className="px-4 py-3 bg-blue-50/40 dark:bg-blue-950/20">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+          Registered for the series · {roster.length}
+          {spotsLeft !== null && (
+            <span className={`font-medium ${spotsLeft === 0 ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+              {" "}· {spotsLeft === 0 ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
+            </span>
+          )}
+        </p>
+        {unpaid > 0 && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            {unpaid} unpaid{price ? ` · ${price} each` : ""}
+          </p>
+        )}
+      </div>
+
+      {roster.length === 0 ? (
+        <p className="text-xs text-gray-400 dark:text-gray-500">No one has registered yet.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {roster.map((r) => {
+            const paid = r.signups.every((x) => x.paid)
+            return (
+              <div key={r.playerId} className="flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-700 dark:text-gray-300 min-w-0">
+                  {r.first} {r.last}
+                  {r.parent && <span className="text-gray-400 dark:text-gray-500"> ({r.parent})</span>}
+                  {r.signups.length < sessions.length && (
+                    <span className="ml-2 text-amber-600 dark:text-amber-400">
+                      in {r.signups.length} of {sessions.length}
+                    </span>
+                  )}
+                </p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => togglePaid(r)}
+                    disabled={pending}
+                    className={`text-xs font-medium px-2 py-0.5 rounded-full transition-colors disabled:opacity-40 ${
+                      paid
+                        ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400"
+                        : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-amber-100 hover:text-amber-700 dark:hover:bg-amber-900/40 dark:hover:text-amber-400"
+                    }`}
+                  >
+                    {paid ? "Paid" : "Unpaid"}
+                  </button>
+                  <button
+                    onClick={() => remove(r)}
+                    disabled={pending}
+                    className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {error && <p className="text-xs text-red-500 mt-1.5">{error}</p>}
+    </div>
+  )
+}
+
 // ── SessionCard ───────────────────────────────────────────────────────────────
 
 function SessionCard({
-  session, players, expanded, onToggleExpand, onEdit, onDuplicate, onDelete,
+  session, isPackage, players, expanded, onToggleExpand, onEdit, onDuplicate, onDelete,
   onSignupAdded, onSignupRemoved, onSignupPaidToggled,
 }: {
   session:         TrainingSession
+  isPackage:       boolean
   players:         PlayerOption[]
   expanded:        boolean
   onToggleExpand:  () => void
@@ -1181,6 +1429,7 @@ function SessionCard({
       {expanded && (
         <SignupsPanel
           session={session}
+          isPackage={isPackage}
           players={players}
           onSignupAdded={onSignupAdded}
           onSignupRemoved={onSignupRemoved}
@@ -1194,9 +1443,11 @@ function SessionCard({
 // ── SignupsPanel ──────────────────────────────────────────────────────────────
 
 function SignupsPanel({
-  session, players, onSignupAdded, onSignupRemoved, onSignupPaidToggled,
+  session, isPackage, players, onSignupAdded, onSignupRemoved, onSignupPaidToggled,
 }: {
   session:             TrainingSession
+  /** Paid is tracked for the whole series (in the roster above), not per date. */
+  isPackage:           boolean
   players:             PlayerOption[]
   onSignupAdded:       (signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (signupId: string) => void
@@ -1273,7 +1524,7 @@ function SignupsPanel({
                   )}
                 </p>
                 <div className="flex items-center gap-2 shrink-0">
-                  <button
+                  {!isPackage && <button
                     onClick={() => handleTogglePaid(su.id, su.paid)}
                     disabled={pending}
                     className={`text-xs font-medium px-2 py-0.5 rounded-full transition-colors disabled:opacity-40 ${
@@ -1283,7 +1534,7 @@ function SignupsPanel({
                     }`}
                   >
                     {su.paid ? "Paid" : "Unpaid"}
-                  </button>
+                  </button>}
                   <button
                     onClick={() => handleRemove(su.id)}
                     disabled={pending}
@@ -1333,10 +1584,11 @@ function SignupsPanel({
 // ── BulkAddPanel ──────────────────────────────────────────────────────────────
 
 function BulkAddPanel({
-  sessions, players, onSignupAdded,
+  sessions, players, isPackage, onSignupAdded,
 }: {
   sessions:      TrainingSession[]
   players:       PlayerOption[]
+  isPackage:     boolean
   onSignupAdded: (sessionId: string, signup: TrainingSession["signups"][0]) => void
 }) {
   const [playerId, setPlayerId] = useState("")
@@ -1383,7 +1635,9 @@ function BulkAddPanel({
 
   return (
     <div className="px-4 py-3 bg-blue-50/40 dark:bg-blue-950/20 border-t border-blue-100 dark:border-blue-900">
-      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Add to all sessions</p>
+      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+        {isPackage ? "Register a player for the whole series" : "Add to all sessions"}
+      </p>
       <div className="flex items-center gap-2">
         <select
           value={playerId}
@@ -1400,7 +1654,7 @@ function BulkAddPanel({
           disabled={!playerId || pending}
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shrink-0"
         >
-          {pending ? "Adding…" : "Add to all"}
+          {pending ? "Adding…" : isPackage ? "Register" : "Add to all"}
         </button>
       </div>
       {status && (
@@ -1436,6 +1690,8 @@ function BulkEditPanel({
     payment_methods:   first.payment_methods  ?? [],
     notes:             first.notes            ?? "",
     eligibility_rules: first.eligibility_rules,
+    package_only:      first.package_only,
+    package_price:     first.package_price    ?? "",
   })
   const [enabled, setEnabled] = useState<Record<BulkFieldKey, boolean>>({} as Record<BulkFieldKey, boolean>)
   const [error, setError]   = useState<string | null>(null)
@@ -1446,7 +1702,7 @@ function BulkEditPanel({
   const toggle = (k: BulkFieldKey) => setEnabled((e) => ({ ...e, [k]: !e[k] }))
   const FIELD_ORDER: BulkFieldKey[] = [
     "title", "time", "location", "image", "max_players",
-    "payment_amount", "payment_methods", "description", "notes", "eligibility_rules",
+    "payment_amount", "package", "payment_methods", "description", "notes", "eligibility_rules",
   ]
   const changed = FIELD_ORDER.filter(on)
 
@@ -1617,6 +1873,39 @@ function BulkEditPanel({
             onChange={(e) => setForm((f) => ({ ...f, payment_amount: e.target.value }))}
             className={inputCls}
           />
+        </div>
+      )}
+
+      {on("package") && (
+        <div className="space-y-2">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.package_only}
+              onChange={(e) => setForm((f) => ({ ...f, package_only: e.target.checked }))}
+              className="accent-blue-600 mt-0.5"
+            />
+            <span className="text-sm text-gray-800 dark:text-gray-200">
+              Parents sign up for the whole series
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                One registration covers all {sessions.length} sessions at one price. Parents can’t pick single dates.
+              </span>
+            </span>
+          </label>
+          {form.package_only && (
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Price for all {sessions.length} sessions</label>
+              <input
+                type="text" placeholder="e.g. $75"
+                value={form.package_price}
+                onChange={(e) => setForm((f) => ({ ...f, package_price: e.target.value }))}
+                className={inputCls}
+              />
+              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                Replaces the per-session price. Kids already signed up for some dates keep those dates.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
