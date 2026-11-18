@@ -37,3 +37,11 @@ export function isMissingPackageColumn(message: string | undefined | null): bool
 
 export const PACKAGE_MIGRATION_MSG =
   "Whole-series signup needs the database update (migration 071, training_packages) applied first."
+
+/** Supabase error for training_signups.attending (migration 072) not existing yet. */
+export function isMissingAttendingColumn(message: string | undefined | null): boolean {
+  return !!message && /attending/.test(message)
+}
+
+export const ATTENDANCE_MIGRATION_MSG =
+  "Marking dates you'll miss needs the database update (migration 072, training_attendance) applied first."

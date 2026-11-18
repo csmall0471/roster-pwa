@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 
 export type ActivityEvent =
   | "login"
-  | "training_signup" | "training_cancel"
+  | "training_signup" | "training_cancel" | "training_attendance"
   | "snack_signup" | "snack_cancel"
   | "player_card_download" | "player_card_download_all" | "photo_card_opened"
   | "past_seasons_expanded" | "past_teams_expanded"

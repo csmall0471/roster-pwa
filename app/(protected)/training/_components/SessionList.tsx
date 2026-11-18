@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions, adminBulkUpdateSessions, markTrainingSignupsPaid, adminRemoveTrainingSignups } from "../actions"
+import { createTrainingSession, updateTrainingSession, deleteTrainingSession, deleteTrainingSeries, adminAddTrainingSignup, adminRemoveTrainingSignup, markTrainingSignupPaid, adminBulkAddPlayerToSessions, adminBulkUpdateSessions, markTrainingSignupsPaid, adminRemoveTrainingSignups, setTrainingAttendance } from "../actions"
 import type { SessionData, PaymentMethod, RepeatDayConfig, BulkSessionUpdateData, SpecificDate } from "../actions"
 import { fmtPackagePrice, packageSummary } from "@/lib/training-package"
 import { seriesTimesSummary, isWeeklySeries } from "@/lib/training-schedule"
@@ -37,6 +37,8 @@ export type TrainingSession = {
     player_id:      string
     payment_method: string | null
     paid:           boolean
+    /** Whole series: false when marked as missing this date (unset = going). */
+    attending?:     boolean
     players: { first_name: string; last_name: string } | null
     parents: { first_name: string; last_name: string } | null
   }>
@@ -1103,6 +1105,7 @@ export default function SessionList({
               onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
               onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
               onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
+              onAttendanceChanged={(sid, suId, attending) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, attending } : su) } : p))}
               onBulkUpdated={(ids, data) => setSessions((prev) => prev.map((s) => ids.includes(s.id) ? { ...s, ...data } : s))}
             />
           ))}
@@ -1132,6 +1135,7 @@ export default function SessionList({
                 onSignupAdded={(sid, su) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: [...p.signups, su] } : p))}
                 onSignupRemoved={(sid, suId) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.filter((su) => su.id !== suId) } : p))}
                 onSignupPaidToggled={(sid, suId, paid) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, paid } : su) } : p))}
+                onAttendanceChanged={(sid, suId, attending) => setSessions((prev) => prev.map((p) => p.id === sid ? { ...p, signups: p.signups.map((su) => su.id === suId ? { ...su, attending } : su) } : p))}
                 onBulkUpdated={(ids, data) => setSessions((prev) => prev.map((s) => ids.includes(s.id) ? { ...s, ...data } : s))}
               />
             ))}
@@ -1309,7 +1313,7 @@ function MultiDatePicker({
 function AdminSeriesGroup({
   sessions, players, teams, expandedId, onToggleExpand, onEdit, onDuplicate, onDelete,
   onDuplicateSeries, onDeleteSeries,
-  onSignupAdded, onSignupRemoved, onSignupPaidToggled, onBulkUpdated,
+  onSignupAdded, onSignupRemoved, onSignupPaidToggled, onAttendanceChanged, onBulkUpdated,
 }: {
   sessions:        TrainingSession[]
   players:         PlayerOption[]
@@ -1324,6 +1328,7 @@ function AdminSeriesGroup({
   onSignupAdded:       (sessionId: string, signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (sessionId: string, signupId: string) => void
   onSignupPaidToggled: (sessionId: string, signupId: string, paid: boolean) => void
+  onAttendanceChanged: (sessionId: string, signupId: string, attending: boolean) => void
   onBulkUpdated:       (sessionIds: string[], data: Partial<BulkSessionUpdateData>) => void
 }) {
   // Standalone sessions start open so they're immediately visible
@@ -1446,6 +1451,7 @@ function AdminSeriesGroup({
               onSignupAdded={(su) => onSignupAdded(s.id, su)}
               onSignupRemoved={(suId) => onSignupRemoved(s.id, suId)}
               onSignupPaidToggled={(suId, paid) => onSignupPaidToggled(s.id, suId, paid)}
+              onAttendanceChanged={(suId, attending) => onAttendanceChanged(s.id, suId, attending)}
             />
           ))}
           {sessions.length > 1 && (
@@ -1482,7 +1488,7 @@ function SeriesRosterPanel({
       first:    string
       last:     string
       parent:   string | null
-      signups:  Array<{ sessionId: string; id: string; paid: boolean }>
+      signups:  Array<{ sessionId: string; id: string; paid: boolean; attending: boolean }>
     }>()
     for (const s of sessions) {
       for (const su of s.signups) {
@@ -1492,7 +1498,7 @@ function SeriesRosterPanel({
           map.set(su.player_id, r)
         }
         if (!r.parent && su.parents) r.parent = `${su.parents.first_name} ${su.parents.last_name}`
-        r.signups.push({ sessionId: s.id, id: su.id, paid: su.paid })
+        r.signups.push({ sessionId: s.id, id: su.id, paid: su.paid, attending: su.attending !== false })
       }
     }
     return [...map.values()].sort((a, b) => a.last.localeCompare(b.last) || a.first.localeCompare(b.first))
@@ -1558,6 +1564,11 @@ function SeriesRosterPanel({
                       in {r.signups.length} of {sessions.length}
                     </span>
                   )}
+                  {r.signups.some((x) => !x.attending) && (
+                    <span className="ml-2 text-gray-500 dark:text-gray-400">
+                      can’t make {r.signups.filter((x) => !x.attending).length}
+                    </span>
+                  )}
                 </p>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
@@ -1593,7 +1604,7 @@ function SeriesRosterPanel({
 
 function SessionCard({
   session, isPackage, players, expanded, onToggleExpand, onEdit, onDuplicate, onDelete,
-  onSignupAdded, onSignupRemoved, onSignupPaidToggled,
+  onSignupAdded, onSignupRemoved, onSignupPaidToggled, onAttendanceChanged,
 }: {
   session:         TrainingSession
   isPackage:       boolean
@@ -1606,11 +1617,13 @@ function SessionCard({
   onSignupAdded:       (signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (signupId: string) => void
   onSignupPaidToggled: (signupId: string, paid: boolean) => void
+  onAttendanceChanged: (signupId: string, attending: boolean) => void
 }) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
   const openSlots = session.max_players - session.signups.length
   const isFull    = openSlots <= 0
+  const outCount  = isPackage ? session.signups.filter((su) => su.attending === false).length : 0
 
   return (
     <div className={`px-4 py-3 ${isPast(session.session_date) ? "opacity-60" : ""}`}>
@@ -1643,6 +1656,11 @@ function SessionCard({
             <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
               {session.signups.length}/{session.max_players} signed up
             </span>
+            {outCount > 0 && (
+              <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                {outCount} can’t make it · {session.signups.length - outCount} coming
+              </span>
+            )}
             {session.payment_amount && (
               <span className="text-xs text-gray-500 dark:text-gray-400">{session.payment_amount}</span>
             )}
@@ -1672,6 +1690,7 @@ function SessionCard({
           onSignupAdded={onSignupAdded}
           onSignupRemoved={onSignupRemoved}
           onSignupPaidToggled={onSignupPaidToggled}
+          onAttendanceChanged={onAttendanceChanged}
         />
       )}
     </div>
@@ -1681,7 +1700,7 @@ function SessionCard({
 // ── SignupsPanel ──────────────────────────────────────────────────────────────
 
 function SignupsPanel({
-  session, isPackage, players, onSignupAdded, onSignupRemoved, onSignupPaidToggled,
+  session, isPackage, players, onSignupAdded, onSignupRemoved, onSignupPaidToggled, onAttendanceChanged,
 }: {
   session:             TrainingSession
   /** Paid is tracked for the whole series (in the roster above), not per date. */
@@ -1690,6 +1709,7 @@ function SignupsPanel({
   onSignupAdded:       (signup: TrainingSession["signups"][0]) => void
   onSignupRemoved:     (signupId: string) => void
   onSignupPaidToggled: (signupId: string, paid: boolean) => void
+  onAttendanceChanged: (signupId: string, attending: boolean) => void
 }) {
   const [selectedPlayerId, setSelectedPlayerId] = useState("")
   const [addError, setAddError]                 = useState<string | null>(null)
@@ -1726,6 +1746,15 @@ function SignupsPanel({
     })
   }
 
+  function handleToggleAttending(signupId: string, attending: boolean) {
+    setAddError(null)
+    start(async () => {
+      const result = await setTrainingAttendance([signupId], attending)
+      if (result.error) setAddError(result.error)
+      else onAttendanceChanged(signupId, attending)
+    })
+  }
+
   function handleTogglePaid(signupId: string, currentPaid: boolean) {
     start(async () => {
       const result = await markTrainingSignupPaid(signupId, !currentPaid)
@@ -1754,7 +1783,7 @@ function SignupsPanel({
               : ""
             return (
               <div key={su.id} className="flex items-center justify-between gap-3">
-                <p className="text-xs text-gray-700 dark:text-gray-300 min-w-0">
+                <p className={`text-xs min-w-0 ${isPackage && su.attending === false ? "text-gray-400 dark:text-gray-500" : "text-gray-700 dark:text-gray-300"}`}>
                   {player}
                   <span className="text-gray-400 dark:text-gray-500">{parent}</span>
                   {su.payment_method && (
@@ -1762,6 +1791,20 @@ function SignupsPanel({
                   )}
                 </p>
                 <div className="flex items-center gap-2 shrink-0">
+                  {isPackage && (
+                    <button
+                      onClick={() => handleToggleAttending(su.id, su.attending === false)}
+                      disabled={pending}
+                      title={su.attending === false ? "Marked as missing this date — tap to mark coming" : "Tap to mark as missing this date"}
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full transition-colors disabled:opacity-40 ${
+                        su.attending === false
+                          ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+                          : "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400"
+                      }`}
+                    >
+                      {su.attending === false ? "Can’t make it" : "Coming"}
+                    </button>
+                  )}
                   {!isPackage && <button
                     onClick={() => handleTogglePaid(su.id, su.paid)}
                     disabled={pending}

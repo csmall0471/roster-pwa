@@ -1,12 +1,12 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { createClient } from "@/lib/supabase/server"
+import { createClient, createServiceClient } from "@/lib/supabase/server"
 import type { EligibilityRules } from "@/lib/training-eligibility"
 import { sendTrainingConfirmation } from "@/lib/notifications"
 import { logActivity } from "@/lib/activity"
 import { track } from "@vercel/analytics/server"
-import { isMissingPackageColumn, PACKAGE_MIGRATION_MSG } from "@/lib/training-package"
+import { isMissingPackageColumn, PACKAGE_MIGRATION_MSG, isMissingAttendingColumn, ATTENDANCE_MIGRATION_MSG } from "@/lib/training-package"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -560,6 +560,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
         paymentAmount:   calcBulkAmount((first as any).payment_amount ?? null, signedSessions!.length),
         paymentMethods:  (first as any).payment_methods ?? [],
         packagePrice:    (first as any).package_only && !alreadyIn.size ? (first as any).package_price ?? null : null,
+        packageSeries:   !!(first as any).package_only,
         imageUrl:        (first as any).image_url ?? null,
         description:     (first as any).description ?? null,
         notes:           (first as any).notes ?? null,
@@ -784,6 +785,7 @@ export async function signUpForTrainingSeries(
       // The series price only on the first registration — a date added later
       // was already paid for.
       packagePrice:    alreadyIn.size === 0 ? first.package_price ?? null : null,
+      packageSeries:   true,
       imageUrl:        first.image_url ?? null,
       description:     first.description ?? null,
       notes:           first.notes ?? null,
@@ -814,6 +816,66 @@ export async function adminRemoveTrainingSignups(signupIds: string[]) {
   const supabase = await createClient()
   const { error } = await supabase.from("training_signups").delete().in("id", signupIds)
   if (error) return { error: error.message }
+  revalidatePath("/training")
+  return { error: null }
+}
+
+/**
+ * Per-date RSVP inside a whole-series registration: the kid stays registered
+ * (and keeps the spot and the price) but is marked as missing that date.
+ * Coaches update directly (RLS allows it). Parents can't update signups under
+ * RLS — and mustn't be able to touch `paid` — so after checking the kids are
+ * theirs and the dates haven't passed, only `attending` is written with the
+ * service client.
+ */
+export async function setTrainingAttendance(signupIds: string[], attending: boolean) {
+  if (signupIds.length === 0) return { error: null }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "Not authenticated" }
+
+  const { data: parentLink } = await supabase
+    .from("parent_auth")
+    .select("parent_id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle()
+
+  if (!parentLink) {
+    const { error } = await supabase.from("training_signups").update({ attending }).in("id", signupIds)
+    if (error) return { error: isMissingAttendingColumn(error.message) ? ATTENDANCE_MIGRATION_MSG : error.message }
+    revalidatePath("/training")
+    return { error: null }
+  }
+
+  const { data: myPlayers } = await supabase.rpc("get_my_player_ids")
+  const mine = new Set(((myPlayers ?? []) as Array<{ player_id: string }>).map((r) => r.player_id))
+
+  const { data: rows } = await supabase
+    .from("training_signups")
+    .select("id, player_id, training_sessions(title, session_date)")
+    .in("id", signupIds)
+  if (!rows || rows.length !== new Set(signupIds).size || rows.some((r) => !mine.has(r.player_id))) {
+    return { error: "You can only change your own kids' sessions." }
+  }
+  const today = new Date().toISOString().split("T")[0]
+  const sessions = rows.map((r) => r.training_sessions as unknown as { title: string; session_date: string } | null)
+  if (sessions.some((s) => !s || s.session_date < today)) {
+    return { error: "That session has already happened." }
+  }
+
+  const service = createServiceClient()
+  const { error } = await service.from("training_signups").update({ attending }).in("id", signupIds)
+  if (error) return { error: isMissingAttendingColumn(error.message) ? ATTENDANCE_MIGRATION_MSG : error.message }
+
+  logActivity(parentLink.parent_id, "training_attendance", {
+    session_title: sessions[0]?.title,
+    session_date:  sessions.map((s) => s!.session_date).sort().join(", "),
+    attending,
+    player_ids:    [...new Set(rows.map((r) => r.player_id))],
+  }).catch(() => {})
+  track("training_attendance", { attending }).catch(() => {})
+
+  revalidatePath("/parent/training")
   revalidatePath("/training")
   return { error: null }
 }

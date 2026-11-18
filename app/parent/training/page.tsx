@@ -38,11 +38,11 @@ export default async function ParentTrainingPage() {
       : Promise.resolve({ data: [] }),
     supabase
       .from("training_sessions")
-      // "*" so the package_* columns load once migration 071 is applied
-      // without breaking this page before then.
+      // "*" so the package_* (071) and attending (072) columns load once the
+      // migrations are applied without breaking this page before then.
       .select(`
         *,
-        training_signups(id, player_id, payment_method, paid)
+        training_signups(*)
       `)
       .gte("session_date", today)
       .order("session_date", { ascending: true }),
@@ -76,7 +76,7 @@ export default async function ParentTrainingPage() {
   // Evaluate eligibility and build sessions for this parent
   const sessions: TrainingSessionForParent[] = (sessionsRaw ?? [])
     .map((s: any) => {
-      const signups: Array<{ id: string; player_id: string; payment_method: string | null; paid: boolean }> =
+      const signups: Array<{ id: string; player_id: string; payment_method: string | null; paid: boolean; attending?: boolean }> =
         s.training_signups ?? []
 
       const eligiblePlayers: TrainingSessionForParent["players"] = []
@@ -97,6 +97,7 @@ export default async function ParentTrainingPage() {
             signup_id:      signup?.id ?? null,
             payment_method: signup?.payment_method ?? null,
             paid:           signup?.paid ?? false,
+            attending:      signup?.attending !== false,
           })
         } else {
           ineligiblePlayers.push({

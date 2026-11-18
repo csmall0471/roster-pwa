@@ -9,6 +9,7 @@ const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   // Training
   training_signup:          { label: "Training signup",     color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
   training_cancel:          { label: "Training cancel",     color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  training_attendance:      { label: "Training RSVP",       color: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300" },
   training_series_expanded: { label: "Series expanded",     color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
   training_payment_clicked: { label: "Payment link",        color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300" },
   // Snacks
@@ -72,6 +73,13 @@ function fmtMeta(event: string, meta: Record<string, unknown> | null): string {
     if (meta.session_date)  parts.push(String(meta.session_date))
     if (meta.bulk && meta.count) parts.push(`× ${meta.count} sessions`)
     if (meta.by_admin) parts.push("(by admin)")
+    return parts.join(" · ")
+  }
+  if (event === "training_attendance") {
+    const parts = []
+    if (meta.session_title) parts.push(String(meta.session_title))
+    if (meta.session_date)  parts.push(String(meta.session_date))
+    parts.push(meta.attending ? "going" : "can't make it")
     return parts.join(" · ")
   }
   if (event === "snack_signup" || event === "snack_cancel") {

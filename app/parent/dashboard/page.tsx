@@ -83,7 +83,8 @@ export default async function DashboardPage() {
       .eq("status", "active"),
     supabase
       .from("training_signups")
-      .select("player_id, training_sessions!inner(id, title, session_date, session_time, location)")
+      // "*" so `attending` (migration 072) loads once applied without breaking this before.
+      .select("*, training_sessions!inner(id, title, session_date, session_time, location)")
       .in("player_id", playerIds)
       .gte("training_sessions.session_date", today),
   ]);
@@ -144,10 +145,12 @@ export default async function DashboardPage() {
     gamesByTeam.get(g.team_id)!.push(g);
   }
 
-  // Build combined calendar (games + training sessions)
+  // Build combined calendar (games + training sessions). Leave out dates a
+  // whole-series kid is marked as missing.
+  const trainingSignups = (calendarSignups ?? []).filter((r) => (r as { attending?: boolean }).attending !== false)
   const trainingPlayerNames = new Map<string, string[]>()
   const trainingPlayerIds = new Map<string, string[]>()
-  for (const row of calendarSignups ?? []) {
+  for (const row of trainingSignups) {
     const sess = row.training_sessions as any
     if (!sess) continue
     const player = (players ?? []).find((p) => p.id === row.player_id)
@@ -170,7 +173,7 @@ export default async function DashboardPage() {
       playerIds: teamMap.get(g.team_id)?.playerIds ?? [],
     })
   }
-  for (const row of calendarSignups ?? []) {
+  for (const row of trainingSignups) {
     const sess = row.training_sessions as any
     if (!sess || seenSessions.has(sess.id)) continue
     seenSessions.add(sess.id)

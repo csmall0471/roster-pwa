@@ -85,6 +85,8 @@ export type TrainingConfirmationPayload = {
   hasPaid?: boolean   // for cancel: true if the signup was already paid
   /** Whole-series registration: the one price for every date ("$75"). */
   packagePrice?: string | null
+  /** Whole-series registration: tell them they can mark dates they'll miss. */
+  packageSeries?: boolean
   bulkDates?: Array<{ date: string; time: string | null; endTime?: string | null }>
   imageUrl?: string | null
   description?: string | null
@@ -308,7 +310,9 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       locLine,
       costText ? `\n${costText}` : "",
       "",
-      `To cancel or manage:\n${manageUrl}`,
+      payload.packageSeries
+        ? `Can't make one of the dates? Mark it here so the coach knows (the price stays the same):\n${manageUrl}`
+        : `To cancel or manage:\n${manageUrl}`,
       "",
       "See you there!\n— Coach Connor",
     ].filter(s => s !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim()
@@ -357,7 +361,9 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
 
     const cancelHtml = [
       divider(),
-      `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel? Manage your registrations at any time.</p>`,
+      payload.packageSeries
+        ? `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Can&rsquo;t make one of the dates? Mark it on the Training page so the coach knows &mdash; the price stays the same.</p>`
+        : `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel? Manage your registrations at any time.</p>`,
       btn("Manage Registrations", manageUrl, "#6b7280"),
     ].join("\n")
 

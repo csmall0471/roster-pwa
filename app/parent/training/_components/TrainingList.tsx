@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition, useMemo, Fragment } from "react"
-import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups, signUpForTrainingSeries } from "@/app/(protected)/training/actions"
+import { signUpForTraining, cancelTrainingSignup, bulkSignUpForTraining, cancelMultipleTrainingSignups, signUpForTrainingSeries, setTrainingAttendance } from "@/app/(protected)/training/actions"
 import { fmtPackagePrice, packageSummary, packageTotal, packagePriceCents } from "@/lib/training-package"
 import { venmoPayLink } from "@/lib/event-pay"
 import { seriesTimesSummary } from "@/lib/training-schedule"
@@ -19,6 +19,8 @@ export type EligiblePlayer = {
   signup_id:      string | null
   payment_method: string | null
   paid:           boolean
+  /** Whole-series registration: false when the parent marked this date as missed. */
+  attending:      boolean
 }
 
 export type IneligiblePlayer = {
@@ -122,7 +124,7 @@ export default function TrainingList({
               ...s,
               total_signups: s.total_signups + 1,
               players: s.players.map((p) =>
-                p.player_id === playerId ? { ...p, signup_id: signupId, paid: false } : p
+                p.player_id === playerId ? { ...p, signup_id: signupId, paid: false, attending: true } : p
               ),
             }
           : s
@@ -155,10 +157,20 @@ export default function TrainingList({
           ...s,
           total_signups: s.total_signups + 1,
           players: s.players.map((p) =>
-            p.player_id === playerId ? { ...p, signup_id: result.signupId, paid: false } : p
+            p.player_id === playerId ? { ...p, signup_id: result.signupId, paid: false, attending: true } : p
           ),
         }
       })
+    )
+  }
+
+  function onAttendance(sessionId: string, playerId: string, attending: boolean) {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId
+          ? { ...s, players: s.players.map((p) => (p.player_id === playerId ? { ...p, attending } : p)) }
+          : s
+      )
     )
   }
 
@@ -175,6 +187,7 @@ export default function TrainingList({
             onSignup={onSignup}
             onCancel={onCancel}
             onBulkSignup={onBulkSignup}
+            onAttendance={onAttendance}
           />
         ))}
     </div>
@@ -184,12 +197,13 @@ export default function TrainingList({
 // ── SeriesGroup ───────────────────────────────────────────────────────────────
 
 function SeriesGroup({
-  sessions, onSignup, onCancel, onBulkSignup,
+  sessions, onSignup, onCancel, onBulkSignup, onAttendance,
 }: {
   sessions:     TrainingSessionForParent[]
   onSignup:     (sessionId: string, playerId: string, signupId: string) => void
   onCancel:     (sessionId: string, playerId: string) => void
   onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
+  onAttendance: (sessionId: string, playerId: string, attending: boolean) => void
 }) {
   const [open, setOpen]             = useState(false)
   const [fullImg, setFullImg]       = useState<string | null>(null)
@@ -209,6 +223,7 @@ function SeriesGroup({
 
   const metaItems  = [firstSession.location].filter(Boolean)
   const isPackage  = firstSession.package_only && !!firstSession.series_id
+  const anyRegistered = sessions.some((s) => s.players.some((p) => p.signup_id))
 
   // All eligible players across the entire series (deduplicated)
   const allPlayers = useMemo(() => {
@@ -347,15 +362,27 @@ function SeriesGroup({
             </div>
           )}
 
-          {/* Date list — info only */}
+          {/* Date list — info only; for a whole-series kid, a Going toggle per date */}
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {isPackage && (
-              <p className="px-5 pt-3 pb-1 bg-white dark:bg-gray-900 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                Included dates
-              </p>
+              <div className="px-5 pt-3 pb-2 bg-white dark:bg-gray-900">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                  Included dates
+                </p>
+                {anyRegistered && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Marked as going to every date. Tap <span className="font-medium">Going</span> on a date you can’t make so the coach knows — the price stays the same.
+                  </p>
+                )}
+              </div>
             )}
             {sessions.map((s) => (
-              <SimpleDateCard key={s.id} session={s} compact={isPackage} />
+              <SimpleDateCard
+                key={s.id}
+                session={s}
+                compact={isPackage}
+                onAttendance={isPackage ? (playerId, attending) => onAttendance(s.id, playerId, attending) : undefined}
+              />
             ))}
           </div>
         </div>
@@ -727,7 +754,7 @@ function PackageSection({
     const regs = sessions.flatMap((s) =>
       s.players
         .filter((p) => p.player_id === pl.player_id && p.signup_id)
-        .map((p) => ({ sessionId: s.id, signupId: p.signup_id!, paid: p.paid })),
+        .map((p) => ({ sessionId: s.id, signupId: p.signup_id!, paid: p.paid, attending: p.attending })),
     )
     const missing = sessions.filter((s) =>
       s.players.some((p) => p.player_id === pl.player_id && !p.signup_id),
@@ -819,6 +846,15 @@ function PackageSection({
                       <p className="text-xs font-medium text-green-700 dark:text-green-400">
                         ✓ Registered for {p.missing.length === 0 ? `all ${p.regs.length} sessions` : `${p.regs.length} of ${count} sessions`}
                       </p>
+                      {p.regs.some((r) => !r.attending) && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Can’t make{" "}
+                          {sessions
+                            .filter((s) => p.regs.some((r) => r.sessionId === s.id && !r.attending))
+                            .map((s) => fmtShortDate(s.session_date))
+                            .join(", ")}
+                        </p>
+                      )}
                       {p.paid ? (
                         <p className="text-xs text-green-700 dark:text-green-400">Paid — thank you!</p>
                       ) : price ? (
@@ -986,45 +1022,105 @@ function PackageSection({
 
 // ── SimpleDateCard ────────────────────────────────────────────────────────────
 
-function SimpleDateCard({ session, compact = false }: { session: TrainingSessionForParent; compact?: boolean }) {
+function SimpleDateCard({
+  session, compact = false, onAttendance,
+}: {
+  session:       TrainingSessionForParent
+  compact?:      boolean
+  /** Whole series: show a Going toggle per registered kid on this date. */
+  onAttendance?: (playerId: string, attending: boolean) => void
+}) {
   const time      = fmtTime(session.session_time)
   const endTime   = fmtTime(session.session_end_time)
   const openSlots = session.max_players - session.total_signups
   const isFull    = openSlots <= 0
   const mapTarget = session.location_address || session.location
 
+  const kids     = onAttendance ? session.players.filter((p) => p.signup_id) : []
+  const allOut   = kids.length > 0 && kids.every((k) => !k.attending)
+  const [pending, start]  = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  function toggle(kid: EligiblePlayer) {
+    const next = !kid.attending
+    setError(null)
+    onAttendance!(kid.player_id, next) // optimistic
+    start(async () => {
+      const result = await setTrainingAttendance([kid.signup_id!], next)
+      if (result.error) {
+        onAttendance!(kid.player_id, !next)
+        setError(result.error)
+      }
+    })
+  }
+
   return (
-    <div className="px-5 py-3 bg-white dark:bg-gray-900">
-      <div className="text-sm font-medium text-gray-900 dark:text-white">
-        {fmtDate(session.session_date)}
-      </div>
-      {time && (
-        <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-          {time}{endTime ? ` – ${endTime}` : ""}
+    <div className="px-5 py-3 bg-white dark:bg-gray-900 flex items-start justify-between gap-3">
+      <div className={`min-w-0 flex-1 ${allOut ? "opacity-50" : ""}`}>
+        <div className="text-sm font-medium text-gray-900 dark:text-white">
+          {fmtDate(session.session_date)}
         </div>
-      )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-        {session.location && (
-          <a
-            href={mapsLink(mapTarget!)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            {session.location} ↗
-          </a>
+        {time && (
+          <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            {time}{endTime ? ` – ${endTime}` : ""}
+          </div>
         )}
-        {!compact && (
-          <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
-            {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
-          </span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+          {session.location && (
+            <a
+              href={mapsLink(mapTarget!)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              {session.location} ↗
+            </a>
+          )}
+          {!compact && (
+            <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+              {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
+            </span>
+          )}
+        </div>
+        {!compact && session.signedUpPlayers.length > 0 && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <span className="font-medium">Signed up:</span>{" "}
+            {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
+          </p>
         )}
+        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
       </div>
-      {!compact && session.signedUpPlayers.length > 0 && (
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          <span className="font-medium">Signed up:</span>{" "}
-          {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
-        </p>
+      {kids.length > 0 && (
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          {kids.map((k) => (
+            <button
+              key={k.player_id}
+              type="button"
+              onClick={() => toggle(k)}
+              disabled={pending}
+              aria-pressed={k.attending}
+              title={k.attending ? `Tap if ${k.first_name} can’t make this date` : `Tap if ${k.first_name} can make it after all`}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-60 ${
+                k.attending
+                  ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+                  : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[10px] leading-none ${
+                  k.attending
+                    ? "border-green-600 bg-green-600 text-white dark:border-green-500 dark:bg-green-500"
+                    : "border-gray-400 text-gray-500 dark:border-gray-500 dark:text-gray-400"
+                }`}
+              >
+                {k.attending ? "✓" : "✕"}
+              </span>
+              {kids.length > 1 && <span className="font-medium">{k.first_name}</span>}
+              {k.attending ? "Going" : "Can’t make it"}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )

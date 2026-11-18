@@ -104,6 +104,8 @@ export async function GET(request: Request) {
 
       for (const signup of (game.snack_signups as any[]) ?? []) {
         if (!signup.reminder_email) continue
+        // Whole-series kid marked as missing this date (migration 072).
+        if (signup.attending === false) continue
         const parent = signup.parents as any
         if (!parent?.email) continue
 
@@ -132,7 +134,7 @@ export async function GET(request: Request) {
     .select(`
       title, session_date, session_time, location,
       training_signups(
-        reminder_email,
+        *,
         parents(first_name, email),
         players(first_name, last_name)
       )

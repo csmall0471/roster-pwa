@@ -15,7 +15,7 @@ export default async function TrainingPage() {
       .select(`
         *,
         training_signups(
-          id, player_id, payment_method, paid,
+          *,
           players(first_name, last_name),
           parents(first_name, last_name)
         )
