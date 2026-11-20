@@ -5,6 +5,7 @@ import { formatEventWhen, relativeEventPhrase, eventDayKey, shiftDayKey, todayKe
 import { buildEventReminderEmail } from "@/lib/events/reminder"
 import { buildTrainingReminderEmail } from "@/lib/notifications"
 import { fmtPackagePrice, packageKidPrice, isSiblingPrice } from "@/lib/training-package"
+import { familyRecipients, parentsFromEmbed } from "@/lib/training-family"
 import { reminderFamily } from "@/lib/events/family"
 import type { SignupAttendee } from "@/lib/types"
 
@@ -138,7 +139,7 @@ export async function GET(request: Request) {
       training_signups(
         *,
         parents(first_name, email),
-        players(first_name, last_name)
+        players(first_name, last_name, player_parents(parents(first_name, email)))
       )
     `)
     .eq("session_date", targetDate)
@@ -164,7 +165,12 @@ export async function GET(request: Request) {
         if (signup.attending === false) continue
         const parent = signup.parents as any
         const player = signup.players as any
-        if (!parent?.email) continue
+        // Every parent of the kid, in one email ("Hi Sara and Brandon,").
+        const { to, greeting } = familyRecipients(
+          parent?.email ? { first_name: parent.first_name ?? null, email: parent.email } : null,
+          parentsFromEmbed(player?.player_parents),
+        )
+        if (to.length === 0) continue
 
         const playerName = player ? `${player.first_name} ${player.last_name}` : "your player"
         const nth        = isPackage ? nthInFamily(signup) : 0
@@ -178,7 +184,7 @@ export async function GET(request: Request) {
           : null
 
         const { subject, text, html } = buildTrainingReminderEmail({
-          parentFirstName: parent.first_name ?? "there",
+          parentFirstName: greeting,
           playerName,
           title:           session.title,
           sessionDate:     session.session_date,
@@ -194,13 +200,13 @@ export async function GET(request: Request) {
         })
 
         if (dry) {
-          preview.push({ to: parent.email, subject, body: text })
+          preview.push({ to: to.join(", "), subject, body: text })
         } else {
-          const { error } = await resend.emails.send({ from, to: parent.email, subject, text, html })
-          if (error) errors.push(`training email ${parent.email}: ${error.message}`)
+          const { error } = await resend.emails.send({ from, to, subject, text, html })
+          if (error) errors.push(`training email ${to.join(", ")}: ${error.message}`)
           else {
             emailsSent++
-            sentSummary.push({ to: parent.email, subject })
+            sentSummary.push({ to: to.join(", "), subject })
           }
         }
       }

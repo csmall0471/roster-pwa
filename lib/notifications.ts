@@ -5,6 +5,7 @@
 import { buildEmailHtml, btn, infoRow, infoTable, divider, esc } from "@/lib/email-template"
 import { fmtPackagePrice, packageSummary, packagePriceCents } from "@/lib/training-package"
 import { venmoPayLink } from "@/lib/event-pay"
+import { kidParents, familyRecipients } from "@/lib/training-family"
 
 export type PaymentMethod = { label: string; link: string | null }
 
@@ -53,8 +54,11 @@ export type SnackConfirmationPayload = {
 
 export type TrainingConfirmationPayload = {
   type: "signup" | "cancel"
+  /** The parent who signed up / is on file; "" when unknown (a coach add). */
   parentEmail: string
   parentFirstName: string
+  /** The kid — the email goes to every parent linked to them (see lib/training-family). */
+  playerId?: string | null
   playerName: string
   sessionTitle: string
   sessionDate: string
@@ -245,7 +249,7 @@ function trainingPayBlock(opts: {
 }
 
 async function resendSend(params: {
-  to: string
+  to: string | string[]
   subject: string
   text: string
   html?: string
@@ -307,6 +311,15 @@ export async function sendSnackConfirmation(payload: SnackConfirmationPayload): 
 // ── Parent training confirmation ──────────────────────────────────────────────
 
 export async function sendTrainingConfirmation(payload: TrainingConfirmationPayload): Promise<void> {
+  // Every parent of the kid, in one email ("Hi Sara and Brandon,").
+  const { to, greeting } = payload.playerId
+    ? familyRecipients(
+        { first_name: payload.parentFirstName, email: payload.parentEmail },
+        await kidParents(payload.playerId).catch(() => []),
+      )
+    : { to: payload.parentEmail ? [payload.parentEmail] : [], greeting: payload.parentFirstName }
+  if (to.length === 0) return
+
   const appUrl    = process.env.APP_URL ?? "https://cssports-az.com"
   const manageUrl = `${appUrl}/parent/training`
   const isSignup  = payload.type === "signup"
@@ -352,7 +365,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   let text: string
   if (isSignup) {
     text = [
-      `Hi ${payload.parentFirstName},`,
+      `Hi ${greeting},`,
       "",
       `${payload.playerName} is registered for ${payload.sessionTitle}!`,
       "",
@@ -370,13 +383,13 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     const dateSection = dates.length > 1
       ? `${dates.length} sessions:\n${dates.map(d => `  • ${fmtDateShort(d.date)}${fmtTimeRange(d.time, d.endTime)}`).join("\n")}`
       : `${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}`
-    text = `Hi ${payload.parentFirstName},\n\n${payload.playerName}'s registration for ${payload.sessionTitle} has been cancelled.\n\n${dateSection}${locLine}\n\nSign up again at:\n${manageUrl}\n\n— Coach Connor`
+    text = `Hi ${greeting},\n\n${payload.playerName}'s registration for ${payload.sessionTitle} has been cancelled.\n\n${dateSection}${locLine}\n\nSign up again at:\n${manageUrl}\n\n— Coach Connor`
   }
 
   // ── HTML ─────────────────────────────────────────────────────────────────
   let htmlBody: string
   if (isSignup) {
-    const introHtml = `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentFirstName)},</p>
+    const introHtml = `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(greeting)},</p>
 <p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(payload.playerName)}</strong> is registered for <strong>${esc(payload.sessionTitle)}</strong>!</p>`
 
     let detailsHtml: string
@@ -441,7 +454,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     }
 
     htmlBody = [
-      `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentFirstName)},</p>`,
+      `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(greeting)},</p>`,
       `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(payload.playerName)}</strong>'s registration for <strong>${esc(payload.sessionTitle)}</strong> has been cancelled.</p>`,
       cancelDetailsHtml,
       divider(),
@@ -478,7 +491,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     })
   }
 
-  await resendSend({ to: payload.parentEmail, subject, text, html, bcc: process.env.NOTIFY_EMAIL, attachments: attachments.length ? attachments : undefined })
+  await resendSend({ to, subject, text, html, bcc: process.env.NOTIFY_EMAIL, attachments: attachments.length ? attachments : undefined })
 }
 
 // ── Parent day-before reminder ────────────────────────────────────────────────
@@ -514,6 +527,7 @@ export async function sendSnackReminder(payload: ReminderPayload): Promise<void>
 // also needs the text for its ?dry=true preview.
 
 export type TrainingReminderEmail = {
+  /** Who to greet — one name or several ("Sara and Brandon"). */
   parentFirstName: string
   playerName:      string
   title:           string

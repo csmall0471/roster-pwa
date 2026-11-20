@@ -320,6 +320,7 @@ export async function signUpForTraining(
   if (parent?.email) {
     sendTrainingConfirmation({
       type:            "signup",
+      playerId:        playerId,
       parentEmail:     parent.email,
       parentFirstName: parent.first_name ?? "there",
       playerName,
@@ -424,6 +425,7 @@ export async function bulkSignUpForTraining(
     if (parent?.email) {
       sendTrainingConfirmation({
         type:            "signup",
+        playerId:        playerId,
         parentEmail:     parent.email,
         parentFirstName: parent.first_name ?? "there",
         playerName,
@@ -486,11 +488,14 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
 
   const parent = (parentRow as any)?.parents
   const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
-  if (parent?.email) {
+  // Goes to every parent of the kid (sendTrainingConfirmation looks them up),
+  // so send even if the parent picked here has no email.
+  if (parentRow) {
     sendTrainingConfirmation({
       type:            "signup",
-      parentEmail:     parent.email,
-      parentFirstName: parent.first_name ?? "there",
+      playerId:        playerId,
+      parentEmail:     parent?.email ?? "",
+      parentFirstName: parent?.first_name ?? "there",
       playerName,
       sessionTitle:    session.title,
       sessionDate:     session.session_date,
@@ -597,11 +602,12 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
     const parent = (parentRow as any)?.parents
     const playerName = playerRow ? `${playerRow.first_name} ${playerRow.last_name}` : "your player"
     const first = signedSessions![0]
-    if (parent?.email && first) {
+    if (parentRow && first) {
       sendTrainingConfirmation({
         type:            "signup",
-        parentEmail:     parent.email,
-        parentFirstName: parent.first_name ?? "there",
+        playerId:        playerId,
+        parentEmail:     parent?.email ?? "",
+        parentFirstName: parent?.first_name ?? "there",
         playerName,
         sessionTitle:    first.title,
         sessionDate:     first.session_date,
@@ -648,7 +654,7 @@ export async function cancelTrainingSignup(signupId: string) {
   const { data: signup } = await supabase
     .from("training_signups")
     .select(`
-      paid, parent_id,
+      paid, parent_id, player_id,
       parents(first_name, last_name, email),
       players(first_name, last_name),
       training_sessions(title, session_date, session_time, session_end_time, location)
@@ -673,6 +679,7 @@ export async function cancelTrainingSignup(signupId: string) {
     if (parent?.email && session?.session_date) {
       sendTrainingConfirmation({
         type:            "cancel",
+        playerId:        (signup.player_id as string | null) ?? null,
         parentEmail:     parent.email,
         parentFirstName: parent.first_name ?? "there",
         playerName,
@@ -697,7 +704,7 @@ export async function cancelMultipleTrainingSignups(signupIds: string[]) {
   const { data: signups } = await supabase
     .from("training_signups")
     .select(`
-      id, paid,
+      id, paid, player_id,
       parents(first_name, last_name, email),
       players(first_name, last_name),
       training_sessions(title, session_date, session_time, session_end_time, location)
@@ -726,6 +733,7 @@ export async function cancelMultipleTrainingSignups(signupIds: string[]) {
 
       sendTrainingConfirmation({
         type:            "cancel",
+        playerId:        (first.player_id as string | null) ?? null,
         parentEmail:     parent.email,
         parentFirstName: parent.first_name ?? "there",
         playerName,
@@ -831,6 +839,7 @@ export async function signUpForTrainingSeries(
   if (parent?.email) {
     sendTrainingConfirmation({
       type:            "signup",
+      playerId:        playerId,
       parentEmail:     parent.email,
       parentFirstName: parent.first_name ?? "there",
       playerName,
