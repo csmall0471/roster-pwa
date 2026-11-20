@@ -284,9 +284,17 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     : `${fmtDate(dates[0].date)}${fmtTimeRange(dates[0].time, dates[0].endTime)}`
   const locLine  = payload.location ? `\nLocation: ${payload.location}` : ""
 
-  // Whole-series registration: one price for every date, plus how to pay it.
+  // What's owed and how to pay it. Whole series: one price for every date
+  // (only on the kid's first registration — a date added later is already
+  // paid for). Per-session: the session price, or the total for several dates.
   const pkgPrice   = isSignup ? fmtPackagePrice(payload.packagePrice) : null
-  const payMethods = (payload.paymentMethods ?? []).filter((m) => m.label?.trim())
+  const dueAmount  = pkgPrice ?? (isSignup && !payload.packageSeries ? fmtPackagePrice(payload.paymentAmount) : null)
+  const costLabel  = pkgPrice
+    ? `${packageSummary(pkgPrice, dates.length)}${payload.siblingPrice ? " (sibling price)" : ""}`
+    : dueAmount ? (dates.length > 1 ? `${dueAmount} for ${dates.length} sessions` : dueAmount) : null
+  const payMethods = isSignup && (dueAmount || !payload.packageSeries)
+    ? (payload.paymentMethods ?? []).filter((m) => m.label?.trim())
+    : []
   // "tel:6232563187" (Zelle / Apple Pay) → "623-256-3187"
   const payPhone = (link: string | null) => {
     if (!link?.startsWith("tel:")) return null
@@ -294,12 +302,17 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
     return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : link.slice(4)
   }
   const payLabel = (m: PaymentMethod) => (payPhone(m.link) ? `${m.label} (${payPhone(m.link)})` : m.label)
-  const costText   = pkgPrice
-    ? [
-        `Cost: ${packageSummary(pkgPrice, dates.length)}${payload.siblingPrice ? " (sibling price)" : ""}`,
-        payMethods.length ? `Pay with: ${payMethods.map((m) => m.link && !payPhone(m.link) ? `${m.label} (${venmoPayLink(m.link, `${payload.playerName} - ${payload.sessionTitle}`, packagePriceCents(pkgPrice)) ?? m.link})` : payLabel(m)).join(", ")}` : "",
-      ].filter(Boolean).join("\n")
-    : ""
+  // Web links (Venmo etc.) are one-tap buttons — Venmo prefilled with the
+  // amount and a "Kid - Title" note; phone numbers and cash are listed as text.
+  const payNote    = `${payload.playerName} - ${payload.sessionTitle}`
+  const payHref    = (m: PaymentMethod) => venmoPayLink(m.link, payNote, packagePriceCents(dueAmount)) ?? m.link ?? ""
+  const linkPay    = payMethods.filter((m) => m.link && !payPhone(m.link))
+  const otherPay   = payMethods.filter((m) => !m.link || payPhone(m.link))
+  const costText   = [
+    costLabel ? `Cost: ${costLabel}` : "",
+    ...linkPay.map((m) => `Pay with ${m.label}: ${payHref(m)}`),
+    otherPay.length ? `${linkPay.length ? "Or pay with" : "Pay with"}: ${otherPay.map(payLabel).join(", ")}` : "",
+  ].filter(Boolean).join("\n")
 
   let text: string
   if (isSignup) {
@@ -310,11 +323,11 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       "",
       dates.length > 1 ? `Sessions (${dates.length}):\n${dateLinesText}` : dateLinesText,
       locLine,
-      costText ? `\n${costText}` : "",
       "",
       payload.packageSeries
         ? `Can't make one of the dates? Mark it here so the coach knows (the price stays the same):\n${manageUrl}`
         : `To cancel or manage:\n${manageUrl}`,
+      costText ? `\n${costText}` : "",
       "",
       "See you there!\n— Coach Connor",
     ].filter(s => s !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim()
@@ -350,19 +363,22 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       detailsHtml = infoTable(rows)
     }
 
-    const costHtml = pkgPrice
-      ? [
-          infoTable(infoRow("Cost", `${packageSummary(pkgPrice, dates.length)}${payload.siblingPrice ? " (sibling price)" : ""}`)),
-          payMethods.length
-            ? `<p style="margin:-12px 0 20px;font-size:13px;color:#6b7280;">Pay with: ${payMethods.map((m) =>
-                m.link ? `<a href="${esc(venmoPayLink(m.link, `${payload.playerName} - ${payload.sessionTitle}`, packagePriceCents(pkgPrice)) ?? m.link)}" style="color:#2563eb;text-decoration:none;font-weight:600;">${esc(payLabel(m))}</a>` : esc(m.label),
-              ).join(" &middot; ")}</p>`
+    const costHtml = costLabel || payMethods.length
+      ? `<div style="margin:0 0 20px;">` + [
+          costLabel ? infoTable(infoRow("Cost", costLabel)).replace("margin:20px 0 24px", "margin:0 0 12px") : "",
+          linkPay.length
+            ? `<p style="margin:0 0 4px;">${linkPay.map((m) =>
+                btn(`Pay with ${m.label}${dueAmount && packagePriceCents(dueAmount) ? ` · ${dueAmount}` : ""}`, esc(payHref(m)), "#16a34a"),
+              ).join("")}</p>`
             : "",
-        ].join("\n")
+          otherPay.length
+            ? `<p style="margin:8px 0 0;font-size:13px;color:#374151;">${linkPay.length ? "Or pay with" : "Pay with"}: ${otherPay.map((m) => esc(payLabel(m))).join(" &middot; ")}</p>`
+            : "",
+        ].filter(Boolean).join("\n") + `</div>`
       : ""
 
-    const cancelHtml = [
-      divider(),
+    // Right under the dates, so changing plans is the first thing they see.
+    const manageHtml = [
       payload.packageSeries
         ? `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Can&rsquo;t make one of the dates? Mark it on the Training page so the coach knows &mdash; the price stays the same.</p>`
         : `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel? Manage your registrations at any time.</p>`,
@@ -381,7 +397,8 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
       : ""
 
-    htmlBody = [introHtml, detailsHtml, costHtml, imageHtml, descriptionHtml, notesHtml, cancelHtml].filter(Boolean).join("\n")
+    const afterHtml = [costHtml, imageHtml, descriptionHtml, notesHtml].filter(Boolean)
+    htmlBody = [introHtml, detailsHtml, manageHtml, ...(afterHtml.length ? [divider(), ...afterHtml] : [])].join("\n")
   } else {
     let cancelDetailsHtml: string
     if (dates.length > 1) {
