@@ -1882,6 +1882,7 @@ function SignupsPanel({
   onAttendanceChanged: (signupId: string, attending: boolean) => void
 }) {
   const [selectedPlayerId, setSelectedPlayerId] = useState("")
+  const [addPaid, setAddPaid]                   = useState(false)
   const [addError, setAddError]                 = useState<string | null>(null)
   const [pending, start]                        = useTransition()
 
@@ -1894,18 +1895,19 @@ function SignupsPanel({
     if (!selectedPlayerId) return
     setAddError(null)
     start(async () => {
-      const result = await adminAddTrainingSignup(session.id, selectedPlayerId)
+      const result = await adminAddTrainingSignup(session.id, selectedPlayerId, addPaid)
       if (result.error) { setAddError(result.error); return }
       const player = players.find((p) => p.id === selectedPlayerId)
       onSignupAdded({
         id:             result.signupId!,
         player_id:      selectedPlayerId,
         payment_method: null,
-        paid:           false,
+        paid:           addPaid,
         players:        player ? { first_name: player.first_name, last_name: player.last_name } : null,
         parents:        null,
       })
       setSelectedPlayerId("")
+      setAddPaid(false)
     })
   }
 
@@ -2015,6 +2017,18 @@ function SignupsPanel({
               </option>
             ))}
           </select>
+          <label
+            className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer shrink-0"
+            title="Already paid: marks them paid and emails a receipt instead of payment links"
+          >
+            <input
+              type="checkbox"
+              checked={addPaid}
+              onChange={(e) => setAddPaid(e.target.checked)}
+              className="accent-green-600"
+            />
+            Paid
+          </label>
           <button
             onClick={handleAdd}
             disabled={!selectedPlayerId || pending}
@@ -2043,6 +2057,7 @@ function BulkAddPanel({
   onSignupAdded: (sessionId: string, signup: TrainingSession["signups"][0]) => void
 }) {
   const [playerId, setPlayerId] = useState("")
+  const [paid, setPaid]         = useState(false)
   const [status, setStatus]     = useState<string | null>(null)
   const [pending, start]        = useTransition()
 
@@ -2060,7 +2075,7 @@ function BulkAddPanel({
     if (!playerId) return
     setStatus(null)
     start(async () => {
-      const result = await adminBulkAddPlayerToSessions(sessions.map((s) => s.id), playerId)
+      const result = await adminBulkAddPlayerToSessions(sessions.map((s) => s.id), playerId, paid)
       if (result.error) { setStatus(result.error); return }
       const player = players.find((p) => p.id === playerId)
       for (const r of result.added) {
@@ -2068,7 +2083,7 @@ function BulkAddPanel({
           id:             r.signupId,
           player_id:      playerId,
           payment_method: null,
-          paid:           false,
+          paid,
           players:        player ? { first_name: player.first_name, last_name: player.last_name } : null,
           parents:        null,
         })
@@ -2078,9 +2093,10 @@ function BulkAddPanel({
       setStatus(
         n === 0
           ? "Already registered in all sessions or sessions full"
-          : `Added to ${n} session${n !== 1 ? "s" : ""}${skipped > 0 ? ` · ${skipped} skipped (already registered or full)` : ""}`
+          : `Added to ${n} session${n !== 1 ? "s" : ""}${paid ? " · marked paid" : ""}${skipped > 0 ? ` · ${skipped} skipped (already registered or full)` : ""}`
       )
       setPlayerId("")
+      setPaid(false)
     })
   }
 
@@ -2100,6 +2116,18 @@ function BulkAddPanel({
             <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
           ))}
         </select>
+        <label
+          className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer shrink-0"
+          title="Already paid: marks them paid and emails a receipt instead of payment links"
+        >
+          <input
+            type="checkbox"
+            checked={paid}
+            onChange={(e) => setPaid(e.target.checked)}
+            className="accent-green-600"
+          />
+          Paid
+        </label>
         <button
           onClick={handleBulkAdd}
           disabled={!playerId || pending}

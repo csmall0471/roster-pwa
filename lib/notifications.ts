@@ -89,6 +89,8 @@ export type TrainingConfirmationPayload = {
   packageSeries?: boolean
   /** packagePrice is this family's sibling price (a second kid). */
   siblingPrice?: boolean
+  /** Signup: already paid (coach ticked Paid) — send a receipt, not payment links. */
+  paid?: boolean
   bulkDates?: Array<{ date: string; time: string | null; endTime?: string | null }>
   imageUrl?: string | null
   description?: string | null
@@ -268,7 +270,10 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const appUrl    = process.env.APP_URL ?? "https://cssports-az.com"
   const manageUrl = `${appUrl}/parent/training`
   const isSignup  = payload.type === "signup"
-  const subject   = isSignup
+  const isPaid    = isSignup && !!payload.paid
+  const subject   = isPaid
+    ? `Registered & paid: ${payload.sessionTitle} — ${payload.playerName}`
+    : isSignup
     ? `Registered for ${payload.sessionTitle} — ${payload.playerName}`
     : `Training registration cancelled — ${payload.sessionTitle}`
 
@@ -292,7 +297,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const costLabel  = pkgPrice
     ? `${packageSummary(pkgPrice, dates.length)}${payload.siblingPrice ? " (sibling price)" : ""}`
     : dueAmount ? (dates.length > 1 ? `${dueAmount} for ${dates.length} sessions` : dueAmount) : null
-  const payMethods = isSignup && (dueAmount || !payload.packageSeries)
+  const payMethods = isSignup && !isPaid && (dueAmount || !payload.packageSeries)
     ? (payload.paymentMethods ?? []).filter((m) => m.label?.trim())
     : []
   // "tel:6232563187" (Zelle / Apple Pay) → "623-256-3187"
@@ -308,7 +313,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const payHref    = (m: PaymentMethod) => venmoPayLink(m.link, payNote, packagePriceCents(dueAmount)) ?? m.link ?? ""
   const linkPay    = payMethods.filter((m) => m.link && !payPhone(m.link))
   const otherPay   = payMethods.filter((m) => !m.link || payPhone(m.link))
-  const costText   = [
+  const costText   = isPaid ? `PAID${costLabel ? ` — ${costLabel}` : ""}. Payment received, thank you!` : [
     costLabel ? `Cost: ${costLabel}` : "",
     ...linkPay.map((m) => `Pay with ${m.label}: ${payHref(m)}`),
     otherPay.length ? `${linkPay.length ? "Or pay with" : "Pay with"}: ${otherPay.map(payLabel).join(", ")}` : "",
@@ -363,7 +368,12 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       detailsHtml = infoTable(rows)
     }
 
-    const costHtml = costLabel || payMethods.length
+    // Already paid: a receipt in place of the cost + payment buttons.
+    const receiptHtml = `<div style="margin:0 0 20px;padding:14px 16px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;">
+<p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.06em;color:#15803d;">&#10003; PAID</p>
+<p style="margin:4px 0 0;font-size:14px;color:#14532d;">${costLabel ? `${esc(costLabel)} &mdash; ` : ""}payment received. Thank you!</p>
+</div>`
+    const costHtml = isPaid ? receiptHtml : costLabel || payMethods.length
       ? `<div style="margin:0 0 20px;">` + [
           costLabel ? infoTable(infoRow("Cost", costLabel)).replace("margin:20px 0 24px", "margin:0 0 12px") : "",
           linkPay.length
@@ -430,7 +440,9 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const html = buildEmailHtml({
     htmlBody,
     teamName: payload.sessionTitle,
-    organization: isSignup
+    organization: isPaid
+      ? `Registration Confirmed · Paid · ${payload.playerName}`
+      : isSignup
       ? `Registration Confirmed · ${payload.playerName}`
       : `Registration Cancelled · ${payload.playerName}`,
     headerColor: "#ea580c",

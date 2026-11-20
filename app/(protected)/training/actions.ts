@@ -455,7 +455,8 @@ export async function bulkSignUpForTraining(
   return { results, error: null }
 }
 
-export async function adminAddTrainingSignup(sessionId: string, playerId: string) {
+/** Coach adds a kid to one date. `paid` = already paid: saved as paid, and the email is a receipt instead of payment links. */
+export async function adminAddTrainingSignup(sessionId: string, playerId: string, paid = false) {
   const supabase = await createClient()
 
   const { data: session } = await supabase
@@ -478,7 +479,7 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
 
   const { data: row, error } = await supabase
     .from("training_signups")
-    .insert({ session_id: sessionId, player_id: playerId, parent_id: parentRow?.parent_id ?? null, reminder_email: true })
+    .insert({ session_id: sessionId, player_id: playerId, parent_id: parentRow?.parent_id ?? null, reminder_email: true, paid })
     .select("id")
     .single()
   if (error) return { signupId: null, error: error.message }
@@ -498,6 +499,7 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
       location:        session.location ?? null,
       paymentAmount:   (session as any).payment_amount ?? null,
       paymentMethods:  (session as any).payment_methods ?? [],
+      paid,
       imageUrl:        (session as any).image_url ?? null,
       description:     (session as any).description ?? null,
       notes:           (session as any).notes ?? null,
@@ -505,7 +507,7 @@ export async function adminAddTrainingSignup(sessionId: string, playerId: string
   }
 
   if (parentRow?.parent_id) {
-    logActivity(parentRow.parent_id, "training_signup", { session_id: sessionId, session_title: session.title, session_date: session.session_date, player_id: playerId, by_admin: true }).catch(() => {})
+    logActivity(parentRow.parent_id, "training_signup", { session_id: sessionId, session_title: session.title, session_date: session.session_date, player_id: playerId, by_admin: true, paid }).catch(() => {})
     track("training_signup", { session_title: session.title, session_date: session.session_date, by_admin: true }).catch(() => {})
   }
 
@@ -538,7 +540,8 @@ export async function adminBulkUpdateSessions(sessionIds: string[], data: Partia
   return { error: null }
 }
 
-export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerId: string) {
+/** Coach adds a kid to several dates / a whole series. `paid` as in adminAddTrainingSignup. */
+export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerId: string, paid = false) {
   const supabase = await createClient()
 
   const [{ data: parentRow }, { data: playerRow }] = await Promise.all([
@@ -581,7 +584,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
     if ((countBySession.get(session.id) ?? 0) >= session.max_players) continue
     const { data: row, error } = await supabase
       .from("training_signups")
-      .insert({ session_id: session.id, player_id: playerId, parent_id: parentId, reminder_email: true })
+      .insert({ session_id: session.id, player_id: playerId, parent_id: parentId, reminder_email: true, paid })
       .select("id")
       .single()
     if (!error && row) {
@@ -610,6 +613,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
         packagePrice:    (first as any).package_only && !alreadyIn.size ? packageKidPrice((first as any).package_price, (first as any).package_sibling_price, siblingsIn) : null,
         siblingPrice:    !!(first as any).package_only && !alreadyIn.size && isSiblingPrice((first as any).package_sibling_price, siblingsIn),
         packageSeries:   !!(first as any).package_only,
+        paid,
         imageUrl:        (first as any).image_url ?? null,
         description:     (first as any).description ?? null,
         notes:           (first as any).notes ?? null,
@@ -621,7 +625,7 @@ export async function adminBulkAddPlayerToSessions(sessionIds: string[], playerI
       }).catch((err) => console.error("[notify] adminBulkAddPlayerToSessions parent:", err))
     }
     if (parentId) {
-      logActivity(parentId, "training_signup", { session_ids: added.map((r) => r.sessionId), count: added.length, player_id: playerId, bulk: true, by_admin: true }).catch(() => {})
+      logActivity(parentId, "training_signup", { session_ids: added.map((r) => r.sessionId), count: added.length, player_id: playerId, bulk: true, by_admin: true, paid }).catch(() => {})
       track("training_signup", { count: added.length, bulk: true, by_admin: true }).catch(() => {})
     }
   }
