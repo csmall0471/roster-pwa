@@ -8,25 +8,6 @@ import { venmoPayLink } from "@/lib/event-pay"
 
 export type PaymentMethod = { label: string; link: string | null }
 
-export type TrainingReminderPayload = {
-  parentEmail:    string | null
-  parentPhone:    string | null
-  parentName:     string
-  playerName:     string
-  title:          string
-  sessionDate:    string
-  sessionTime:    string | null
-  sessionEndTime?: string | null
-  location:       string | null
-  reminderEmail:  boolean
-  reminderSms:    boolean
-  paymentAmount?: string | null
-  paymentMethods?: PaymentMethod[]
-  hasPaid?:       boolean
-  imageUrl?:      string | null
-  notes?:         string | null
-}
-
 export type SignupChangePayload = {
   type: "signup" | "cancel"
   parentName: string
@@ -204,6 +185,65 @@ function locationMapRow(location: string): string {
   </tr>`
 }
 
+// ── Training payment block ────────────────────────────────────────────────────
+// Cost line + one-tap pay buttons (Venmo prefilled with the amount and a
+// "Kid - Title" note) + phone/cash methods listed as text — or, when already
+// paid, a green PAID receipt. Shared by the training confirmation and the
+// day-before reminder.
+
+function payPhone(link: string | null): string | null {
+  if (!link?.startsWith("tel:")) return null
+  const d = link.slice(4).replace(/\D/g, "")
+  // "tel:6232563187" (Zelle / Apple Pay) → "623-256-3187"
+  return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : link.slice(4)
+}
+
+function trainingPayBlock(opts: {
+  /** "$75 for all 10 sessions", "$20"; null = no amount to show. */
+  costLabel: string | null
+  /** What the pay buttons charge ("$75"); null = open amount. */
+  amount:    string | null
+  methods:   PaymentMethod[]
+  note:      string
+  paid:      boolean
+  rowLabel?: string
+}): { text: string; html: string } {
+  const { costLabel, amount, note, paid, rowLabel = "Cost" } = opts
+  if (paid) {
+    return {
+      text: `PAID${costLabel ? ` — ${costLabel}` : ""}. Payment received, thank you!`,
+      html: `<div style="margin:0 0 20px;padding:14px 16px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;">
+<p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.06em;color:#15803d;">&#10003; PAID</p>
+<p style="margin:4px 0 0;font-size:14px;color:#14532d;">${costLabel ? `${esc(costLabel)} &mdash; ` : ""}payment received. Thank you!</p>
+</div>`,
+    }
+  }
+  const methods  = opts.methods.filter((m) => m.label?.trim())
+  if (!costLabel && methods.length === 0) return { text: "", html: "" }
+  const payLabel = (m: PaymentMethod) => (payPhone(m.link) ? `${m.label} (${payPhone(m.link)})` : m.label)
+  const cents    = packagePriceCents(amount)
+  const payHref  = (m: PaymentMethod) => venmoPayLink(m.link, note, cents) ?? m.link ?? ""
+  const linkPay  = methods.filter((m) => m.link && !payPhone(m.link))
+  const otherPay = methods.filter((m) => !m.link || payPhone(m.link))
+  const text = [
+    costLabel ? `${rowLabel}: ${costLabel}` : "",
+    ...linkPay.map((m) => `Pay with ${m.label}: ${payHref(m)}`),
+    otherPay.length ? `${linkPay.length ? "Or pay with" : "Pay with"}: ${otherPay.map(payLabel).join(", ")}` : "",
+  ].filter(Boolean).join("\n")
+  const html = `<div style="margin:0 0 20px;">` + [
+    costLabel ? infoTable(infoRow(rowLabel, costLabel)).replace("margin:20px 0 24px", "margin:0 0 12px") : "",
+    linkPay.length
+      ? `<p style="margin:0 0 4px;">${linkPay.map((m) =>
+          btn(`Pay with ${m.label}${amount && cents ? ` · ${amount}` : ""}`, esc(payHref(m)), "#16a34a"),
+        ).join("")}</p>`
+      : "",
+    otherPay.length
+      ? `<p style="margin:8px 0 0;font-size:13px;color:#374151;">${linkPay.length ? "Or pay with" : "Pay with"}: ${otherPay.map((m) => esc(payLabel(m))).join(" &middot; ")}</p>`
+      : "",
+  ].filter(Boolean).join("\n") + `</div>`
+  return { text, html }
+}
+
 async function resendSend(params: {
   to: string
   subject: string
@@ -297,27 +337,17 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
   const costLabel  = pkgPrice
     ? `${packageSummary(pkgPrice, dates.length)}${payload.siblingPrice ? " (sibling price)" : ""}`
     : dueAmount ? (dates.length > 1 ? `${dueAmount} for ${dates.length} sessions` : dueAmount) : null
-  const payMethods = isSignup && !isPaid && (dueAmount || !payload.packageSeries)
-    ? (payload.paymentMethods ?? []).filter((m) => m.label?.trim())
-    : []
-  // "tel:6232563187" (Zelle / Apple Pay) → "623-256-3187"
-  const payPhone = (link: string | null) => {
-    if (!link?.startsWith("tel:")) return null
-    const d = link.slice(4).replace(/\D/g, "")
-    return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : link.slice(4)
-  }
-  const payLabel = (m: PaymentMethod) => (payPhone(m.link) ? `${m.label} (${payPhone(m.link)})` : m.label)
-  // Web links (Venmo etc.) are one-tap buttons — Venmo prefilled with the
-  // amount and a "Kid - Title" note; phone numbers and cash are listed as text.
-  const payNote    = `${payload.playerName} - ${payload.sessionTitle}`
-  const payHref    = (m: PaymentMethod) => venmoPayLink(m.link, payNote, packagePriceCents(dueAmount)) ?? m.link ?? ""
-  const linkPay    = payMethods.filter((m) => m.link && !payPhone(m.link))
-  const otherPay   = payMethods.filter((m) => !m.link || payPhone(m.link))
-  const costText   = isPaid ? `PAID${costLabel ? ` — ${costLabel}` : ""}. Payment received, thank you!` : [
-    costLabel ? `Cost: ${costLabel}` : "",
-    ...linkPay.map((m) => `Pay with ${m.label}: ${payHref(m)}`),
-    otherPay.length ? `${linkPay.length ? "Or pay with" : "Pay with"}: ${otherPay.map(payLabel).join(", ")}` : "",
-  ].filter(Boolean).join("\n")
+  const pay = isSignup
+    ? trainingPayBlock({
+        costLabel,
+        amount:  dueAmount,
+        // A date added to a series they already paid for: nothing to collect.
+        methods: dueAmount || !payload.packageSeries ? payload.paymentMethods ?? [] : [],
+        note:    `${payload.playerName} - ${payload.sessionTitle}`,
+        paid:    isPaid,
+      })
+    : { text: "", html: "" }
+  const costText = pay.text
 
   let text: string
   if (isSignup) {
@@ -368,24 +398,7 @@ export async function sendTrainingConfirmation(payload: TrainingConfirmationPayl
       detailsHtml = infoTable(rows)
     }
 
-    // Already paid: a receipt in place of the cost + payment buttons.
-    const receiptHtml = `<div style="margin:0 0 20px;padding:14px 16px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;">
-<p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.06em;color:#15803d;">&#10003; PAID</p>
-<p style="margin:4px 0 0;font-size:14px;color:#14532d;">${costLabel ? `${esc(costLabel)} &mdash; ` : ""}payment received. Thank you!</p>
-</div>`
-    const costHtml = isPaid ? receiptHtml : costLabel || payMethods.length
-      ? `<div style="margin:0 0 20px;">` + [
-          costLabel ? infoTable(infoRow("Cost", costLabel)).replace("margin:20px 0 24px", "margin:0 0 12px") : "",
-          linkPay.length
-            ? `<p style="margin:0 0 4px;">${linkPay.map((m) =>
-                btn(`Pay with ${m.label}${dueAmount && packagePriceCents(dueAmount) ? ` · ${dueAmount}` : ""}`, esc(payHref(m)), "#16a34a"),
-              ).join("")}</p>`
-            : "",
-          otherPay.length
-            ? `<p style="margin:8px 0 0;font-size:13px;color:#374151;">${linkPay.length ? "Or pay with" : "Pay with"}: ${otherPay.map((m) => esc(payLabel(m))).join(" &middot; ")}</p>`
-            : "",
-        ].filter(Boolean).join("\n") + `</div>`
-      : ""
+    const costHtml = pay.html
 
     // Right under the dates, so changing plans is the first thing they see.
     const manageHtml = [
@@ -497,58 +510,88 @@ export async function sendSnackReminder(payload: ReminderPayload): Promise<void>
 }
 
 // ── Training day-before reminder ──────────────────────────────────────────────
+// Built here, sent by the reminder cron (app/api/cron/send-reminders), which
+// also needs the text for its ?dry=true preview.
 
-export async function sendTrainingReminder(payload: TrainingReminderPayload): Promise<void> {
-  const appUrl   = process.env.APP_URL ?? "https://cssports-az.com"
-  const dateStr  = `${fmtDate(payload.sessionDate)}${fmtTime(payload.sessionTime)}`
-  const locLine  = payload.location ? `\nLocation: ${payload.location}` : ""
+export type TrainingReminderEmail = {
+  parentFirstName: string
+  playerName:      string
+  title:           string
+  sessionDate:     string
+  sessionTime:     string | null
+  sessionEndTime:  string | null
+  location:        string | null
+  notes:           string | null
+  /** What this kid owes ("$20", "$37.50"); null when there's no price. */
+  amountDue:       string | null
+  /** How the amount reads: "$20 for this session", "$75 for the whole series". */
+  costLabel:       string | null
+  paymentMethods:  PaymentMethod[]
+  paid:            boolean
+  /** Whole-series registration: "can't make it" instead of "cancel". */
+  packageSeries:   boolean
+}
+
+export function buildTrainingReminderEmail(r: TrainingReminderEmail): { subject: string; text: string; html: string } {
+  const appUrl    = process.env.APP_URL ?? "https://cssports-az.com"
   const manageUrl = `${appUrl}/parent/training`
+  // The cron counts training reminders by this subject prefix.
+  const subject   = `Reminder: Training session tomorrow — ${r.title}`
+  const timeRange = r.sessionTime ? fmtTimeRange(r.sessionTime, r.sessionEndTime).replace(" at ", "").trim() : null
 
-  if (payload.reminderEmail && payload.parentEmail) {
-    const subject = `Reminder: Training session tomorrow — ${payload.title}`
+  // Only chase payment when it's still owed; a paid kid's reminder stays short.
+  const pay = !r.paid && (r.amountDue || r.paymentMethods.length)
+    ? trainingPayBlock({
+        costLabel: r.costLabel,
+        amount:    r.amountDue,
+        methods:   r.paymentMethods,
+        note:      `${r.playerName} - ${r.title}`,
+        paid:      false,
+        rowLabel:  "Payment due",
+      })
+    : { text: "", html: "" }
 
-    const text = `Hi ${payload.parentName},\n\nJust a reminder that ${payload.playerName} is registered for ${payload.title} tomorrow (${dateStr}).${locLine}\n\nTo cancel:\n${manageUrl}\n\nSee you there!\n— Coach Connor`
+  const manageLine = r.packageSeries
+    ? "Can't make it? Mark it on the Training page so the coach knows"
+    : "Need to cancel? Manage your registration"
 
-    // HTML
-    const timeDisplay = fmtTimeRange(payload.sessionTime, payload.sessionEndTime ?? null).replace(" at ", "").trim()
-    const rows = [
-      infoRow("Date", fmtDate(payload.sessionDate)),
-      payload.sessionTime ? infoRow("Time", timeDisplay) : "",
-      payload.location ? infoRow("Location", payload.location) : "",
-    ].filter(Boolean).join("\n")
+  const text = [
+    `Hi ${r.parentFirstName},`,
+    "",
+    `Just a reminder that ${r.playerName} has ${r.title} tomorrow!`,
+    "",
+    [`Date: ${fmtDate(r.sessionDate)}`, timeRange && `Time: ${timeRange}`, r.location && `Location: ${r.location}`].filter(Boolean).join("\n"),
+    r.notes ? `\n${r.notes}` : null,
+    pay.text ? `\n${pay.text}` : null,
+    "",
+    `${manageLine}:\n${manageUrl}`,
+    "",
+    "See you there!\n— Coach Connor",
+  ].filter((l) => l !== null).join("\n").replace(/\n{3,}/g, "\n\n")
 
-    const htmlBody = [
-      `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(payload.parentName)},</p>`,
-      `<p style="margin:0 0 20px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(payload.playerName)}</strong> has training tomorrow — <strong>${esc(payload.title)}</strong>!</p>`,
-      infoTable(rows),
-      payload.imageUrl
-        ? `<img src="${payload.imageUrl}" alt="" style="width:100%;height:192px;object-fit:cover;border-radius:8px;margin:16px 0;">`
-        : "",
-      payload.notes
-        ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(payload.notes)}</p>`
-        : "",
-      divider(),
-      `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">Need to cancel?</p>`,
-      btn("Cancel Registration", manageUrl, "#6b7280"),
-    ].filter(Boolean).join("\n")
+  const rows = [
+    infoRow("Date", fmtDate(r.sessionDate)),
+    timeRange ? infoRow("Time", timeRange) : "",
+    r.location ? locationMapRow(r.location) : "",
+  ].filter(Boolean).join("\n")
 
-    const html = buildEmailHtml({
-      htmlBody,
-      teamName: payload.title,
-      organization: `Training Reminder · ${payload.playerName}`,
-      headerColor: "#ea580c",
-    })
+  const htmlBody = [
+    `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;">Hi ${esc(r.parentFirstName)},</p>`,
+    `<p style="margin:0 0 4px;font-size:15px;line-height:1.75;color:#374151;"><strong>${esc(r.playerName)}</strong> has <strong>${esc(r.title)}</strong> tomorrow!</p>`,
+    infoTable(rows),
+    r.notes ? `<p style="margin:0 0 20px;font-size:13px;color:#6b7280;font-style:italic;">${esc(r.notes)}</p>` : "",
+    pay.html,
+    divider(),
+    `<p style="margin:0 0 12px;font-size:13px;color:#6b7280;">${esc(manageLine)}.</p>`,
+    btn("Manage Registrations", manageUrl, "#6b7280"),
+  ].filter(Boolean).join("\n")
 
-    await resendSend({ to: payload.parentEmail, subject, text, html, bcc: process.env.NOTIFY_EMAIL })
-  }
+  const html = buildEmailHtml({
+    htmlBody,
+    teamName:     r.title,
+    organization: `Training Tomorrow · ${r.playerName}`,
+    headerColor:  "#ea580c",
+  })
 
-  if (payload.reminderSms && payload.parentPhone) {
-    const smsLoc = payload.location ? ` Location: ${payload.location}.` : ""
-    const body = `CS Sports AZ: Reminder — ${payload.playerName} is registered for ${payload.title} tomorrow (${dateStr}).${smsLoc} Manage: cssports-az.com/parent/training. Reply STOP to opt out.`
-    // TODO: uncomment when Twilio keys are available
-    // const twilio = (await import("twilio")).default;
-    // const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    // await client.messages.create({ from: process.env.TWILIO_FROM_NUMBER, to: payload.parentPhone, body });
-    console.log("[notify:sms]", payload.parentPhone, body)
-  }
+  return { subject, text, html }
 }

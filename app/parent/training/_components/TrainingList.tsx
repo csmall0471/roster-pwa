@@ -467,7 +467,7 @@ function SeriesPlayerRow({
   const [showForm, setShowForm]           = useState(false)
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
   // Reminder opts default off — neither email nor SMS is required to register.
-  const [reminderEmail, setReminderEmail] = useState(false)
+  const [reminderEmail, setReminderEmail] = useState(true)  // on by default; parents can untick
   const [reminderSms, setReminderSms]     = useState(false)
   const [error, setError]                 = useState<string | null>(null)
   const [pending, start]                  = useTransition()
@@ -663,7 +663,7 @@ function SeriesPlayerRow({
 
           <div>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
-              Reminders are optional — you can confirm without either.
+              We’ll email a reminder the day before — untick to skip it.
             </p>
             <div className="flex flex-wrap gap-4">
               <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
@@ -797,7 +797,7 @@ function PackageSection({
 
   // null = sign-up form closed; otherwise the kids ticked in it.
   const [selected, setSelected]           = useState<Set<string> | null>(null)
-  const [reminderEmail, setReminderEmail] = useState(false)
+  const [reminderEmail, setReminderEmail] = useState(true)  // on by default; parents can untick
   const [reminderSms, setReminderSms]     = useState(false)
   const [errors, setErrors]               = useState<string[]>([])
   const [pending, start]                  = useTransition()
@@ -1008,7 +1008,7 @@ function PackageSection({
 
           <div>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
-              Reminders are optional — you can register without either.
+              We’ll email a reminder the day before — untick to skip it.
             </p>
             <div className="flex flex-wrap gap-4">
               <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
@@ -1203,7 +1203,7 @@ function BulkPlayerForm({
     () => new Set(availableSessions.map((s) => s.id))
   )
   // Reminder opts default off — neither email nor SMS is required to register.
-  const [reminderEmail, setReminderEmail]     = useState(false)
+  const [reminderEmail, setReminderEmail]     = useState(true)  // on by default; parents can untick
   const [reminderSms, setReminderSms]         = useState(false)
   const [errors, setErrors]                   = useState<string[]>([])
   const [pending, start]                      = useTransition()
@@ -1300,7 +1300,7 @@ function BulkPlayerForm({
 
       <div>
         <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
-          Reminders are optional — you can register without either.
+          We’ll email a reminder the day before — untick to skip it.
         </p>
         <div className="flex flex-wrap gap-4">
           <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">

@@ -3,6 +3,8 @@ import { Resend } from "resend"
 import { venmoPayLink, eventPayNote } from "@/lib/event-pay"
 import { formatEventWhen, relativeEventPhrase, eventDayKey, shiftDayKey, todayKey } from "@/lib/events/when"
 import { buildEventReminderEmail } from "@/lib/events/reminder"
+import { buildTrainingReminderEmail } from "@/lib/notifications"
+import { fmtPackagePrice, packageKidPrice, isSiblingPrice } from "@/lib/training-package"
 import { reminderFamily } from "@/lib/events/family"
 import type { SignupAttendee } from "@/lib/types"
 
@@ -104,8 +106,6 @@ export async function GET(request: Request) {
 
       for (const signup of (game.snack_signups as any[]) ?? []) {
         if (!signup.reminder_email) continue
-        // Whole-series kid marked as missing this date (migration 072).
-        if (signup.attending === false) continue
         const parent = signup.parents as any
         if (!parent?.email) continue
 
@@ -129,10 +129,12 @@ export async function GET(request: Request) {
   // ── Training reminders ────────────────────────────────────────────────────
   // Query from training_sessions so we can filter session_date directly.
 
+  // "*" so price, payment methods and package columns come along (and the
+  // newer columns don't break this before their migrations are applied).
   const { data: trainingSessions, error: trainingErr } = await supabase
     .from("training_sessions")
     .select(`
-      title, session_date, session_time, location,
+      *,
       training_signups(
         *,
         parents(first_name, email),
@@ -147,24 +149,54 @@ export async function GET(request: Request) {
     errors.push(`training query: ${trainingErr.message}`)
   } else {
     for (const session of trainingSessions ?? []) {
-      const dateStr   = `${fmtDate(session.session_date)}${fmtTime(session.session_time)}`
-      const loc       = session.location ? `\nLocation: ${session.location}` : ""
-      const manageUrl = `${appUrl}/parent/training`
+      const signups   = ((session.training_signups as any[]) ?? [])
+      const isPackage = !!session.package_only && !!session.series_id
 
-      for (const signup of (session.training_signups as any[]) ?? []) {
+      // Whole series with a sibling price: kids registered by the same parent
+      // are one family; the first to register pays full, the rest the sibling price.
+      const nthInFamily = (signup: any) => signups
+        .filter((o) => o.parent_id && o.parent_id === signup.parent_id && (o.created_at ?? "") < (signup.created_at ?? ""))
+        .length
+
+      for (const signup of signups) {
         if (!signup.reminder_email) continue
+        // Whole-series kid marked as missing this date (migration 072).
+        if (signup.attending === false) continue
         const parent = signup.parents as any
         const player = signup.players as any
         if (!parent?.email) continue
 
         const playerName = player ? `${player.first_name} ${player.last_name}` : "your player"
-        const subject    = `Reminder: Training session tomorrow — ${session.title}`
-        const text       = `Hi ${parent.first_name},\n\nJust a reminder that ${playerName} is registered for ${session.title} tomorrow (${dateStr}).${loc}\n\nTo cancel or manage your registration:\n${manageUrl}\n\nSee you there!\n— Coach Connor`
+        const nth        = isPackage ? nthInFamily(signup) : 0
+        const amountDue  = isPackage
+          ? packageKidPrice(session.package_price, session.package_sibling_price, nth)
+          : fmtPackagePrice(session.payment_amount)
+        const costLabel  = amountDue
+          ? isPackage
+            ? `${amountDue} for the whole series${isSiblingPrice(session.package_sibling_price, nth) ? " (sibling price)" : ""}`
+            : `${amountDue} for this session`
+          : null
+
+        const { subject, text, html } = buildTrainingReminderEmail({
+          parentFirstName: parent.first_name ?? "there",
+          playerName,
+          title:           session.title,
+          sessionDate:     session.session_date,
+          sessionTime:     session.session_time ?? null,
+          sessionEndTime:  session.session_end_time ?? null,
+          location:        session.location ?? null,
+          notes:           session.notes ?? null,
+          amountDue,
+          costLabel,
+          paymentMethods:  session.payment_methods ?? [],
+          paid:            !!signup.paid,
+          packageSeries:   isPackage,
+        })
 
         if (dry) {
           preview.push({ to: parent.email, subject, body: text })
         } else {
-          const { error } = await resend.emails.send({ from, to: parent.email, subject, text })
+          const { error } = await resend.emails.send({ from, to: parent.email, subject, text, html })
           if (error) errors.push(`training email ${parent.email}: ${error.message}`)
           else {
             emailsSent++
