@@ -72,6 +72,13 @@ function fmtDate(iso: string) {
   })
 }
 
+/** "Sun, Nov 22" */
+function fmtRowDate(iso: string) {
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric",
+  })
+}
+
 function fmtShortDate(iso: string) {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
     month: "short", day: "numeric",
@@ -209,7 +216,9 @@ function SeriesGroup({
   onBulkSignup: (playerId: string, results: Array<{ sessionId: string; signupId: string }>) => void
   onAttendance: (sessionId: string, playerId: string, attending: boolean) => void
 }) {
-  const [open, setOpen]             = useState(false)
+  // Open by default so parents see the signup without tapping in; the
+  // details inside stay condensed (tap a date or "More" for the rest).
+  const [open, setOpen]             = useState(true)
   const [fullImg, setFullImg]       = useState<string | null>(null)
   const [showBulkForm, setShowBulkForm] = useState(false)
   const title        = sessions[0].title
@@ -290,26 +299,14 @@ function SeriesGroup({
 
       {open && (
         <div>
-          {/* Series-level image, description, notes — shown once */}
+          {/* Series-level photo, description, notes — condensed, "More" for the rest */}
           {(firstSession.image_url || firstSession.description || firstSession.notes) && (
-            <div className="px-5 py-4 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
-              {firstSession.image_url && (
-                <button
-                  type="button"
-                  onClick={() => setFullImg(firstSession.image_url!)}
-                  className="block w-full mb-3"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={firstSession.image_url} alt="" className="w-full h-48 object-cover rounded-lg cursor-zoom-in" />
-                </button>
-              )}
-              {firstSession.description && (
-                <p className="text-sm text-gray-600 dark:text-gray-400">{firstSession.description}</p>
-              )}
-              {firstSession.notes && (
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5 italic">{firstSession.notes}</p>
-              )}
-            </div>
+            <SeriesAbout
+              imageUrl={firstSession.image_url}
+              description={firstSession.description}
+              notes={firstSession.notes}
+              onOpenImage={setFullImg}
+            />
           )}
 
           {/* Whole-series package: one registration per kid for every date */}
@@ -373,29 +370,13 @@ function SeriesGroup({
             </div>
           )}
 
-          {/* Date list — info only; for a whole-series kid, a Going toggle per date */}
-          <div className="divide-y divide-gray-100 dark:divide-gray-800">
-            {isPackage && (
-              <div className="px-5 pt-3 pb-2 bg-white dark:bg-gray-900">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                  Included dates
-                </p>
-                {anyRegistered && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Marked as going to every date. Tap <span className="font-medium">Going</span> on a date you can’t make so the coach knows — the price stays the same.
-                  </p>
-                )}
-              </div>
-            )}
-            {sessions.map((s) => (
-              <SimpleDateCard
-                key={s.id}
-                session={s}
-                compact={isPackage}
-                onAttendance={isPackage ? (playerId, attending) => onAttendance(s.id, playerId, attending) : undefined}
-              />
-            ))}
-          </div>
+          {/* Dates — one line each, tap for details; for a whole-series kid, a Going toggle per date */}
+          <DateList
+            sessions={sessions}
+            isPackage={isPackage}
+            anyRegistered={anyRegistered}
+            onAttendance={onAttendance}
+          />
         </div>
       )}
       {fullImg && (
@@ -795,6 +776,7 @@ function PackageSection({
   const nextPrice   = packageKidPrice(first.package_price, sibling, registeredKids.length)
   const nextSibling = isSiblingPrice(sibling, registeredKids.length)
 
+  const [showWho, setShowWho]             = useState(false)
   // null = sign-up form closed; otherwise the kids ticked in it.
   const [selected, setSelected]           = useState<Set<string> | null>(null)
   const [reminderEmail, setReminderEmail] = useState(true)  // on by default; parents can untick
@@ -853,26 +835,29 @@ function PackageSection({
 
   return (
     <div className="border-b border-gray-200 dark:border-gray-700">
-      {/* What you're signing up for */}
-      <div className="px-5 py-3 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800">
-        <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
-          {packageSummary(first.package_price, count)}
-        </p>
-        {siblingSummary(first.package_price, sibling) && (
-          <p className="text-xs font-medium text-purple-700 dark:text-purple-300 mt-0.5">
-            {siblingSummary(first.package_price, sibling)} — for each brother or sister
-          </p>
-        )}
-        <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
-          One sign-up covers every date below.{" "}
-          <span className={`font-medium ${spotsLeft === 0 ? "text-red-600 dark:text-red-400" : ""}`}>
-            {spotsLeft === 0 ? "Full." : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left.`}
+      {/* What you're signing up for — the price is in the header above */}
+      <div className="px-5 py-2.5 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800">
+        <p className="text-xs text-blue-800 dark:text-blue-200">
+          One sign-up covers all {count} dates ·{" "}
+          <span className={`font-semibold ${spotsLeft === 0 ? "text-red-600 dark:text-red-400" : ""}`}>
+            {spotsLeft === 0 ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
           </span>
+          {whoIsIn.length > 0 && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                onClick={() => setShowWho((v) => !v)}
+                aria-expanded={showWho}
+                className="font-medium text-blue-700 dark:text-blue-300 underline decoration-dotted underline-offset-2"
+              >
+                {whoIsIn.length} signed up {showWho ? "▾" : "▸"}
+              </button>
+            </>
+          )}
         </p>
-        {whoIsIn.length > 0 && (
-          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-            <span className="font-medium">Signed up:</span> {whoIsIn.join(", ")}
-          </p>
+        {showWho && (
+          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{whoIsIn.join(", ")}</p>
         )}
       </div>
 
@@ -1067,7 +1052,105 @@ function PackageSection({
   )
 }
 
+// ── SeriesAbout ───────────────────────────────────────────────────────────────
+// Photo thumbnail + description clamped to two lines; "More" shows it all.
+
+function SeriesAbout({
+  imageUrl, description, notes, onOpenImage,
+}: {
+  imageUrl:    string | null
+  description: string | null
+  notes:       string | null
+  onOpenImage: (url: string) => void
+}) {
+  const [more, setMore] = useState(false)
+  const long = (description?.length ?? 0) > 110 || (notes?.length ?? 0) > 70
+  return (
+    <div className="px-5 py-3 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 flex items-start gap-3">
+      {imageUrl && (
+        <button type="button" onClick={() => onOpenImage(imageUrl)} className="shrink-0" aria-label="View photo">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={imageUrl} alt="" className="h-14 w-14 rounded-lg object-cover cursor-zoom-in" />
+        </button>
+      )}
+      <div className="min-w-0 flex-1">
+        {description && (
+          <p className={`text-sm text-gray-600 dark:text-gray-400 ${more ? "" : "line-clamp-2"}`}>{description}</p>
+        )}
+        {notes && (
+          <p className={`text-xs text-gray-400 dark:text-gray-500 mt-1 italic ${more ? "" : "line-clamp-1"}`}>{notes}</p>
+        )}
+        {long && (
+          <button
+            type="button"
+            onClick={() => setMore((v) => !v)}
+            aria-expanded={more}
+            className="mt-0.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            {more ? "Less" : "More"}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── DateList ──────────────────────────────────────────────────────────────────
+// The next few dates, one line each; "Show all" for the rest.
+
+const DATES_SHOWN = 4
+
+function DateList({
+  sessions, isPackage, anyRegistered, onAttendance,
+}: {
+  sessions:      TrainingSessionForParent[]
+  isPackage:     boolean
+  anyRegistered: boolean
+  onAttendance:  (sessionId: string, playerId: string, attending: boolean) => void
+}) {
+  const [showAll, setShowAll] = useState(false)
+  // Not worth a "Show all" for just one more date.
+  const collapsible = sessions.length > DATES_SHOWN + 1
+  const shown = showAll || !collapsible ? sessions : sessions.slice(0, DATES_SHOWN)
+
+  return (
+    <div className="bg-white dark:bg-gray-900">
+      <div className="px-5 pt-3 pb-1">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+          {isPackage ? "Included dates" : "Dates"} · {sessions.length}
+        </p>
+        {isPackage && anyRegistered && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Tap <span className="font-medium">Going</span> on a date you’ll miss — the price stays the same.
+          </p>
+        )}
+      </div>
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+        {shown.map((s) => (
+          <SimpleDateCard
+            key={s.id}
+            session={s}
+            compact={isPackage}
+            onAttendance={isPackage ? (playerId, attending) => onAttendance(s.id, playerId, attending) : undefined}
+          />
+        ))}
+      </div>
+      {collapsible && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          aria-expanded={showAll}
+          className="w-full border-t border-gray-100 dark:border-gray-800 px-5 py-2.5 text-left text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-gray-50 dark:hover:bg-gray-800/60"
+        >
+          {showAll ? "Show fewer dates ▴" : `Show all ${sessions.length} dates ▾`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── SimpleDateCard ────────────────────────────────────────────────────────────
+// One line: date · time (· spots left). Tap it for the location and who's in.
 
 function SimpleDateCard({
   session, compact = false, onAttendance,
@@ -1085,8 +1168,10 @@ function SimpleDateCard({
 
   const kids     = onAttendance ? session.players.filter((p) => p.signup_id) : []
   const allOut   = kids.length > 0 && kids.every((k) => !k.attending)
+  const [open, setOpen]   = useState(false)
   const [pending, start]  = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const hasDetails = !!session.location || (!compact && session.signedUpPlayers.length > 0)
 
   function toggle(kid: EligiblePlayer) {
     const next = !kid.attending
@@ -1101,74 +1186,95 @@ function SimpleDateCard({
     })
   }
 
+  const line = (
+    <>
+      <span className="w-2.5 shrink-0 text-[10px] text-gray-400 dark:text-gray-500" aria-hidden>
+        {hasDetails ? (open ? "▾" : "▸") : ""}
+      </span>
+      <span className="text-sm font-medium text-gray-900 dark:text-white whitespace-nowrap">{fmtRowDate(session.session_date)}</span>
+      {time && (
+        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {time}{endTime ? ` – ${endTime}` : ""}
+        </span>
+      )}
+      {!compact && (
+        <span className={`text-xs font-medium whitespace-nowrap ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+          {isFull ? "Full" : `${openSlots} left`}
+        </span>
+      )}
+    </>
+  )
+
   return (
-    <div className="px-5 py-3 bg-white dark:bg-gray-900 flex items-start justify-between gap-3">
-      <div className={`min-w-0 flex-1 ${allOut ? "opacity-50" : ""}`}>
-        <div className="text-sm font-medium text-gray-900 dark:text-white">
-          {fmtDate(session.session_date)}
-        </div>
-        {time && (
-          <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-            {time}{endTime ? ` – ${endTime}` : ""}
+    <div className="px-5 py-2 bg-white dark:bg-gray-900">
+      <div className="flex items-center justify-between gap-3">
+        {hasDetails ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className={`min-w-0 flex-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-left ${allOut ? "opacity-50" : ""}`}
+          >
+            {line}
+          </button>
+        ) : (
+          <div className={`min-w-0 flex-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 ${allOut ? "opacity-50" : ""}`}>{line}</div>
+        )}
+        {kids.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-1.5 shrink-0">
+            {kids.map((k) => (
+              <button
+                key={k.player_id}
+                type="button"
+                onClick={() => toggle(k)}
+                disabled={pending}
+                aria-pressed={k.attending}
+                title={k.attending ? `Tap if ${k.first_name} can’t make this date` : `Tap if ${k.first_name} can make it after all`}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-60 ${
+                  k.attending
+                    ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+                    : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[10px] leading-none ${
+                    k.attending
+                      ? "border-green-600 bg-green-600 text-white dark:border-green-500 dark:bg-green-500"
+                      : "border-gray-400 text-gray-500 dark:border-gray-500 dark:text-gray-400"
+                  }`}
+                >
+                  {k.attending ? "✓" : "✕"}
+                </span>
+                {kids.length > 1 && <span className="font-medium">{k.first_name}</span>}
+                {k.attending ? "Going" : "Can’t make it"}
+              </button>
+            ))}
           </div>
         )}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+      </div>
+
+      {open && (
+        <div className="ml-[18px] pb-1 space-y-0.5">
           {session.location && (
             <a
               href={mapsLink(mapTarget!)}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              className="block text-xs text-blue-600 dark:text-blue-400 hover:underline"
             >
-              {session.location} ↗
+              {session.location}{session.location_address ? ` · ${session.location_address}` : ""} ↗
             </a>
           )}
-          {!compact && (
-            <span className={`text-xs font-medium ${isFull ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
-              {isFull ? "Full" : `${openSlots} spot${openSlots !== 1 ? "s" : ""} left`}
-            </span>
+          {!compact && session.signedUpPlayers.length > 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="font-medium">Signed up:</span>{" "}
+              {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
+            </p>
           )}
         </div>
-        {!compact && session.signedUpPlayers.length > 0 && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            <span className="font-medium">Signed up:</span>{" "}
-            {session.signedUpPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}
-          </p>
-        )}
-        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
-      </div>
-      {kids.length > 0 && (
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
-          {kids.map((k) => (
-            <button
-              key={k.player_id}
-              type="button"
-              onClick={() => toggle(k)}
-              disabled={pending}
-              aria-pressed={k.attending}
-              title={k.attending ? `Tap if ${k.first_name} can’t make this date` : `Tap if ${k.first_name} can make it after all`}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-60 ${
-                k.attending
-                  ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
-                  : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
-              }`}
-            >
-              <span
-                aria-hidden
-                className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[10px] leading-none ${
-                  k.attending
-                    ? "border-green-600 bg-green-600 text-white dark:border-green-500 dark:bg-green-500"
-                    : "border-gray-400 text-gray-500 dark:border-gray-500 dark:text-gray-400"
-                }`}
-              >
-                {k.attending ? "✓" : "✕"}
-              </span>
-              {kids.length > 1 && <span className="font-medium">{k.first_name}</span>}
-              {k.attending ? "Going" : "Can’t make it"}
-            </button>
-          ))}
-        </div>
       )}
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
   )
 }
